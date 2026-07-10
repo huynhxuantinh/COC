@@ -21,6 +21,17 @@ farm:
     elixir: 400000
     dark: 0
 
+  troop_count_offset: [-45, -55, 10, -20]
+  troops:
+    - name: "sneaky_goblin"
+      template: "sneaky_goblin_card.png"
+      count: 15
+      pattern: "perimeter"
+
+battle:
+  deploy_delay_min: 0.15
+  deploy_delay_max: 0.4
+
 safety:
   min_delay_sec: 2
   max_delay_sec: 8

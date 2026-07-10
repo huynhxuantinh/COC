@@ -68,35 +68,47 @@ class Vision:
         
         return None
 
-    def read_resources(self, screen_img, region):
+    def read_number_region(self, screen_img, region, scale=1.0):
         """
-        Đọc số lượng tài nguyên từ một vùng cụ thể trên màn hình.
+        Đọc số từ một vùng cụ thể. Có hỗ trợ scale ảnh để OCR đọc tốt hơn các số nhỏ.
         region: (x, y, width, height)
         """
         x, y, w, h = region
-        # Đảm bảo tọa độ hợp lệ
         if x < 0 or y < 0 or y+h > screen_img.shape[0] or x+w > screen_img.shape[1]:
             return 0
             
         roi = screen_img[y:y+h, x:x+w]
         
-        # Tiền xử lý ảnh để OCR đọc tốt hơn
+        # Scale ảnh nếu cần
+        if scale != 1.0:
+            roi = cv2.resize(roi, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        
-        # Adaptive OTSU Thresholding để xử lý sáng tối động
-        # Chữ COC thường sáng trên nền tối, hoặc có viền đen.
         ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         
-        # Dùng pytesseract để nhận dạng số
         config_ocr = '--psm 7 -c tessedit_char_whitelist=0123456789'
         pil_img = Image.fromarray(thresh)
         text = pytesseract.image_to_string(pil_img, config=config_ocr)
         
-        # Lọc kết quả và chuyển thành số nguyên
         clean_text = "".join(filter(str.isdigit, text))
         if clean_text:
             return int(clean_text)
         return 0
+
+    def read_resources(self, screen_img, region):
+        """Đọc số lượng vàng/dầu (không scale để tối ưu tốc độ nếu số đủ lớn)."""
+        return self.read_number_region(screen_img, region, scale=1.0)
+        
+    def read_troop_count(self, screen_img, card_center, offset):
+        """
+        Đọc số quân còn lại trên thẻ bài.
+        offset = [x_start, y_start, x_end, y_end] (tương đối so với tâm thẻ quân)
+        """
+        cx, cy = card_center
+        dx1, dy1, dx2, dy2 = offset
+        region = (cx + dx1, cy + dy1, dx2 - dx1, dy2 - dy1)
+        # Số lượng quân rất nhỏ, cần scale x2
+        return self.read_number_region(screen_img, region, scale=2.0)
 
 if __name__ == "__main__":
     v = Vision()

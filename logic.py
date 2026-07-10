@@ -12,12 +12,23 @@ class BotLogic:
         self.search_stuck_count = 0
         
         # Đọc ngưỡng farm từ config
-        loot_config = self.config.get("farm", {}).get("loot_threshold", {})
+        farm_config = self.config.get("farm", {})
+        loot_config = farm_config.get("loot_threshold", {})
         self.target_gold = loot_config.get("gold", 700000)
         self.target_elixir = loot_config.get("elixir", 700000)
         
-        # Region dự kiến cho số vàng và dầu (cần điều chỉnh lại theo độ phân giải màn hình)
-        # Tương lai có thể tính toán từ resolution trong config
+        # Cấu hình rải quân
+        self.troops = farm_config.get("troops", [])
+        if not self.troops:
+            # Fallback nếu config thiếu
+            self.troops = [{
+                "name": "sneaky_goblin",
+                "template": "sneaky_goblin_card.png",
+                "count": 15,
+                "pattern": "perimeter"
+            }]
+        
+        # Region dự kiến cho số vàng và dầu
         self.gold_region = (120, 130, 150, 40)
         self.elixir_region = (120, 190, 150, 40)
 
@@ -146,32 +157,32 @@ class BotLogic:
                     self.adb.click(1750, 800)
                 time.sleep(3) # Chờ load mây
 
-    def deploy_sneaky_goblins(self, screen):
-        """Chiến thuật thả Sneaky Goblins."""
-        print("[ATTACKING] Đang triển khai Sneaky Goblins...")
-        # Ở cấp độ cơ bản, bot sẽ thả một vòng quanh map để Goblins tự chạy vào các mỏ ngoài
-        # Màn hình game thường là vùng trung tâm. Ta vẽ 1 hình chữ nhật lớn để click
-        # Phải chọn đúng icon Sneaky Goblins trước khi thả
+    def get_perimeter_points(self, w, h, n, margin):
+        """Trả về n tọa độ phân bố đều quanh viền màn hình (hình chữ nhật)."""
+        points = []
+        top_w = w - 2 * margin
+        side_h = h - 2 * margin
+        perimeter = 2 * top_w + 2 * side_h
         
-        # 1. Tìm thẻ lính Sneaky Goblin
-        goblin_card = self.vision.find_template(screen, "sneaky_goblin_card.png")
-        if goblin_card:
-            self.adb.click(goblin_card[0], goblin_card[1])
-        else:
-            print("[ATTACKING] Không tìm thấy ảnh thẻ lính, dùng tọa độ dự phòng (200, 950)")
-            self.adb.click(200, 950)
-        time.sleep(0.5)
+        for i in range(n):
+            d = (i * perimeter / n) + random.uniform(-10, 10)
+            d = d % perimeter
+            if d < top_w: # Cạnh trên
+                points.append((margin + d, margin))
+            elif d < top_w + side_h: # Cạnh phải
+                points.append((w - margin, margin + (d - top_w)))
+            elif d < 2 * top_w + side_h: # Cạnh dưới
+                points.append((w - margin - (d - (top_w + side_h)), h - margin))
+            else: # Cạnh trái
+                points.append((margin, h - margin - (d - (2 * top_w + side_h))))
+                
+        return [(int(x), int(y)) for x, y in points]
 
-        # 2. Thả lính quanh viền
-        # Cần xác định tọa độ biên (margins) của màn hình LDPlayer
-        margin = 150
-        # Cần width, height từ screen.shape
-        h, w = screen.shape[:-1]
-        
-        # Thả 10 con ngẫu nhiên ở viền
-        for _ in range(10):
-            # Chọn ngẫu nhiên cạnh trên, dưới, trái, phải
-            side = random.choice(["top", "bottom", "left", "right"])
+    def get_edge_cluster_points(self, w, h, n, margin):
+        """Trả về n tọa độ dồn vào một cạnh ngẫu nhiên."""
+        points = []
+        side = random.choice(["top", "bottom", "left", "right"])
+        for _ in range(n):
             if side == "top":
                 tx, ty = random.randint(margin, w - margin), margin
             elif side == "bottom":
@@ -180,14 +191,66 @@ class BotLogic:
                 tx, ty = margin, random.randint(margin, h - margin)
             else: # right
                 tx, ty = w - margin, random.randint(margin, h - margin)
+            points.append((tx, ty))
+        return points
+
+    def deploy_troops(self, screen):
+        """Thả quân dựa trên config farm.troops."""
+        h, w = screen.shape[:-1]
+        margin = 150
+        
+        delay_min = self.config.get("battle", {}).get("deploy_delay_min", 0.15)
+        delay_max = self.config.get("battle", {}).get("deploy_delay_max", 0.4)
+        offset = self.config.get("farm", {}).get("troop_count_offset", [-45, -55, 10, -20])
+        
+        print("[ATTACKING] Đang triển khai quân đội...")
+        
+        for troop in self.troops:
+            name = troop.get("name", "Unknown")
+            template = troop.get("template")
+            default_count = troop.get("count", 0)
+            pattern = troop.get("pattern", "perimeter")
             
-            self.adb.click(tx, ty)
-            time.sleep(0.2)
+            print(f"[ATTACKING] Chuẩn bị thả {name}...")
+            card_loc = self.vision.find_template(screen, template)
+            if not card_loc:
+                print(f"[ATTACKING] Không tìm thấy thẻ quân {name}. Bỏ qua.")
+                continue
+                
+            # Click chọn thẻ quân
+            self.adb.click(card_loc[0], card_loc[1])
+            time.sleep(0.5)
+            
+            # Đọc số lượng còn lại
+            count = self.vision.read_troop_count(screen, card_loc, offset)
+            if count <= 0:
+                print(f"[ATTACKING] OCR không đọc được số lượng {name} hoặc hết quân, dùng mặc định: {default_count}")
+                count = default_count
+                
+            if count <= 0:
+                continue
+                
+            print(f"[ATTACKING] Sẽ thả {count} {name} theo pattern '{pattern}'")
+            
+            # Tính toán danh sách điểm
+            if pattern == "edge_cluster":
+                points = self.get_edge_cluster_points(w, h, count, margin)
+            else:
+                points = self.get_perimeter_points(w, h, count, margin)
+                
+            for i, (tx, ty) in enumerate(points):
+                # Mỗi 6 con thì click lại thẻ quân 1 lần chống mất focus
+                if i > 0 and i % 6 == 0:
+                    self.adb.click(card_loc[0], card_loc[1])
+                    time.sleep(0.2)
+                    
+                self.adb.click(tx, ty)
+                time.sleep(random.uniform(delay_min, delay_max))
 
     def handle_attacking(self, screen):
         """Xử lý quá trình đánh."""
         # Gọi chiến thuật thả lính
-        self.deploy_sneaky_goblins(screen)
+        self.deploy_troops(screen)
         
         # Đánh xong, đợi kết thúc trận linh hoạt
         print("[ATTACKING] Đang tấn công... Chờ trận đấu kết thúc.")
