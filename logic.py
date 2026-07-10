@@ -35,7 +35,23 @@ class BotLogic:
     def run(self):
         """Vòng lặp chính của Bot."""
         print(f"Bắt đầu khởi chạy Bot... Mục tiêu: Vàng > {self.target_gold}, Dầu > {self.target_elixir}")
+        
+        # Đọc cấu hình an toàn
+        safety_config = self.config.get("safety", {})
+        session_hours = safety_config.get("session_hours", 2)
+        break_minutes = safety_config.get("break_minutes", 30)
+        
+        start_time = time.time()
+        
         while True:
+            # Kiểm tra thời gian chơi (chống ban)
+            elapsed_sec = time.time() - start_time
+            if session_hours > 0 and elapsed_sec > (session_hours * 3600):
+                print(f"[*] Đã cày cuốc liên tục {session_hours} giờ. Bắt đầu nghỉ giải lao {break_minutes} phút...")
+                time.sleep(break_minutes * 60)
+                print("[*] Đã nghỉ xong! Tiếp tục farm nào...")
+                start_time = time.time() # Reset lại mốc thời gian
+
             try:
                 screen = self.adb.screencap()
                 if screen is None:
@@ -223,9 +239,12 @@ class BotLogic:
             
             # Đọc số lượng còn lại
             count = self.vision.read_troop_count(screen, card_loc, offset)
-            if count <= 0:
-                print(f"[ATTACKING] OCR không đọc được số lượng {name} hoặc hết quân, dùng mặc định: {default_count}")
+            if count == -1:
+                print(f"[ATTACKING] OCR không đọc được số lượng {name}, dùng mặc định: {default_count}")
                 count = default_count
+            elif count == 0:
+                print(f"[ATTACKING] Hết quân {name}.")
+                continue
                 
             if count <= 0:
                 continue

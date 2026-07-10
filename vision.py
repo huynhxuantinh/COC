@@ -93,11 +93,12 @@ class Vision:
         clean_text = "".join(filter(str.isdigit, text))
         if clean_text:
             return int(clean_text)
-        return 0
+        return -1
 
     def read_resources(self, screen_img, region):
         """Đọc số lượng vàng/dầu (không scale để tối ưu tốc độ nếu số đủ lớn)."""
-        return self.read_number_region(screen_img, region, scale=1.0)
+        res = self.read_number_region(screen_img, region, scale=1.0)
+        return res if res != -1 else 0
         
     def read_troop_count(self, screen_img, card_center, offset):
         """
