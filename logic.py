@@ -145,14 +145,13 @@ class BotLogic:
                 goblin_card = self.vision.find_template(screen, "sneaky_goblin_card.png")
                 force_attack = self.vision.find_template(screen, "force_attack_btn.png")
                 
-                if force_attack:
+                if force_attack or goblin_card:
                     print("[SEARCHING] Bị vướng màn hình My Army. Bấm nút Attack xanh lá...")
-                    self.adb.click(force_attack[0], force_attack[1])
-                    time.sleep(3)
-                elif goblin_card:
-                    print("[SEARCHING] Bị vướng màn hình My Army. Bấm nút Attack xanh lá (tọa độ dự phòng)...")
-                    h, w = screen.shape[:-1]
-                    self.adb.click(w - 180, h - 140) # Tọa độ tương đối góc dưới phải
+                    # Nút Attack ở góc dưới bên phải, tọa độ chuẩn xác là quanh (1750, 940)
+                    if force_attack:
+                        self.adb.click(force_attack[0], force_attack[1])
+                    else:
+                        self.adb.click(1750, 940)
                     time.sleep(3)
                 else:
                     self.search_stuck_count += 1
