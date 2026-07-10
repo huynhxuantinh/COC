@@ -49,7 +49,18 @@ class BotLogic:
     def handle_idle(self, screen):
         """Xử lý khi ở nhà chính."""
         print("[IDLE] Đang ở nhà chính.")
-        # Kiểm tra nút Attack (Attack.png)
+        
+        # 1. Ưu tiên kiểm tra nút Attack xanh lá (nếu đang lỡ bị kẹt ở My Army từ trước)
+        force_attack = self.vision.find_template(screen, "force_attack_btn.png")
+        if force_attack:
+            self.idle_stuck_count = 0
+            print("[IDLE] Đang ở màn hình My Army. Bấm nút Attack xanh lá để bắt đầu tìm nhà...")
+            self.adb.click(force_attack[0], force_attack[1])
+            time.sleep(3)
+            self.state = "SEARCHING"
+            return
+            
+        # 2. Kiểm tra nút Attack bình thường (Attack.png)
         attack_btn = self.vision.find_template(screen, "attack_btn.png")
         if attack_btn:
             self.idle_stuck_count = 0
