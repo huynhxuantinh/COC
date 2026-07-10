@@ -62,8 +62,12 @@ class BotLogic:
             self.idle_stuck_count += 1
             print(f"[IDLE] Không thấy nút Tấn công ({self.idle_stuck_count}/3). Có thể đang mở menu khác...")
             if self.idle_stuck_count >= 3:
-                print("[IDLE] Bấm nút X (1850, 80) hoặc thoát để thử đóng menu.")
-                self.adb.click(1850, 80)
+                print("[IDLE] Bấm nút X hoặc thoát để thử đóng menu ẩn.")
+                close_btn = self.vision.find_template(screen, "close_btn.png")
+                if close_btn:
+                    self.adb.click(close_btn[0], close_btn[1])
+                else:
+                    self.adb.click(1850, 80) # Fallback tọa độ cứng
                 time.sleep(1)
                 self.idle_stuck_count = 0
 
@@ -96,9 +100,11 @@ class BotLogic:
                 print(f"[SEARCHING] Đang tải mây... chờ thêm ({self.search_stuck_count}/15).")
                 if self.search_stuck_count >= 15:
                     print("[SEARCHING] Kẹt quá lâu! Bấm X nhiều lần để thoát các menu ẩn...")
-                    self.adb.click(1850, 80)
+                    close_btn = self.vision.find_template(screen, "close_btn.png")
+                    cx, cy = close_btn if close_btn else (1850, 80)
+                    self.adb.click(cx, cy)
                     time.sleep(1)
-                    self.adb.click(1850, 80)
+                    self.adb.click(cx, cy)
                     time.sleep(2)
                     self.state = "IDLE"
                     self.search_stuck_count = 0
@@ -107,7 +113,12 @@ class BotLogic:
             else:
                 self.search_stuck_count = 0
                 print("[SEARCHING] Nghèo quá, Next!")
-                self.adb.click(next_btn[0], next_btn[1])
+                next_btn = self.vision.find_template(screen, "next_btn.png")
+                if next_btn:
+                    self.adb.click(next_btn[0], next_btn[1])
+                else:
+                    # Fallback tọa độ cứng
+                    self.adb.click(1750, 800)
                 time.sleep(3) # Chờ load mây
 
     def deploy_sneaky_goblins(self, screen):
@@ -117,9 +128,13 @@ class BotLogic:
         # Màn hình game thường là vùng trung tâm. Ta vẽ 1 hình chữ nhật lớn để click
         # Phải chọn đúng icon Sneaky Goblins trước khi thả
         
-        # 1. Hardcode tọa độ thẻ lính đầu tiên (Sneaky Goblin)
-        goblin_card = (200, 950)
-        self.adb.click(goblin_card[0], goblin_card[1])
+        # 1. Tìm thẻ lính Sneaky Goblin
+        goblin_card = self.vision.find_template(screen, "sneaky_goblin_card.png")
+        if goblin_card:
+            self.adb.click(goblin_card[0], goblin_card[1])
+        else:
+            print("[ATTACKING] Không tìm thấy ảnh thẻ lính, dùng tọa độ dự phòng (200, 950)")
+            self.adb.click(200, 950)
         time.sleep(0.5)
 
         # 2. Thả lính quanh viền
@@ -168,7 +183,13 @@ class BotLogic:
                 
             print(f"[ATTACKING] Vẫn đang đánh... ({i*2}/{max_wait}s)")
             
-        print("[ATTACKING] Timeout 60s. Bấm Về Nhà cứng (960, 950).")
-        self.adb.click(960, 950)
+        print("[ATTACKING] Timeout 60s. Bấm Về Nhà dự phòng.")
+        fallback_return_btn = self.vision.find_template(curr_screen, "return_home_btn.png") if curr_screen is not None else None
+        if fallback_return_btn:
+            self.adb.click(fallback_return_btn[0], fallback_return_btn[1])
+        else:
+            # Tọa độ cứng fallback theo màn 1920x1080
+            h, w = screen.shape[:-1]
+            self.adb.click(w // 2, h - 130)
         time.sleep(6)
         self.state = "IDLE"

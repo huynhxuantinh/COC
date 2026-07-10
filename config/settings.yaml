@@ -1,6 +1,6 @@
 emulator:
   type: ldplayer
-  install_dir: "D:/LDPlayer/LDPlayer9"
+  install_dir: "C:/Users/ASUS/OneDrive/Documents/COC/tools/platform-tools"
   index: 0
   name: LDPlayer
   adb_path: "C:/Users/ASUS/OneDrive/Documents/COC/tools/platform-tools/adb.exe"
