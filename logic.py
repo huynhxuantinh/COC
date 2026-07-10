@@ -92,7 +92,7 @@ class BotLogic:
 
         if gold >= self.target_gold or elixir >= self.target_elixir:
             self.search_stuck_count = 0
-            print(f"[SEARCHING] Đạt chỉ tiêu (>700k)! Bắt đầu tấn công.")
+            print(f"[SEARCHING] Đạt chỉ tiêu (Vàng>{self.target_gold} hoặc Dầu>{self.target_elixir})! Bắt đầu tấn công.")
             self.state = "ATTACKING"
         else:
             if gold == 0 and elixir == 0:
