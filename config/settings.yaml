@@ -1,0 +1,28 @@
+emulator:
+  type: ldplayer
+  install_dir: "D:/LDPlayer/LDPlayer9"
+  index: 0
+  name: LDPlayer
+  adb_path: "D:/LDPlayer/LDPlayer9/adb.exe"
+  device_id: emulator-5554
+  resolution: "1920x1080"
+  dpi: 240
+
+account:
+  count: 1
+
+farm:
+  resources:
+    - gold
+    - elixir
+  town_hall: 16
+  loot_threshold:
+    gold: 400000
+    elixir: 400000
+    dark: 0
+
+safety:
+  min_delay_sec: 2
+  max_delay_sec: 8
+  session_hours: 2
+  break_minutes: 30
