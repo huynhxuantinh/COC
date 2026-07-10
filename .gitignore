@@ -14,3 +14,7 @@ bot_screen.png
 
 # MacOS
 .DS_Store
+
+# Setup heavy files
+setup/*.exe
+setup/*.zip
