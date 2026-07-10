@@ -37,16 +37,35 @@ class ADBController:
             return False
 
     def screencap(self):
-        """Chụp màn hình giả lập và chuyển thành mảng numpy cho OpenCV."""
-        # Tránh dùng exec-out trên Windows vì lỗi xuống dòng \r\n làm hỏng ảnh
-        self.run_cmd("shell screencap -p /sdcard/bot_screen.png")
-        self.run_cmd("pull /sdcard/bot_screen.png bot_screen.png")
-        
-        if not os.path.exists("bot_screen.png"):
-            return None
+        """Chụp màn hình giả lập bằng pipe trực tiếp (không lưu file trung gian) và tự động reconnect nếu lỗi."""
+        # Dùng shell screencap -p qua stdout pipe, thay thế CRLF thành LF để tránh lỗi corrupt trên Windows
+        cmd = [self.adb_path, "-s", self.device_id, "shell", "screencap", "-p"]
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            data = result.stdout
             
-        img = cv2.imread("bot_screen.png", cv2.IMREAD_COLOR)
-        return img
+            if not data:
+                print(f"[!] ADB không phản hồi (có thể mất kết nối). Đang thử reconnect...")
+                self.connect()
+                return None
+                
+            # Xử lý vấn đề \r\n trên Windows
+            data = data.replace(b'\r\n', b'\n')
+            
+            # Giải mã bằng opencv
+            img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                print(f"[!] Lỗi giải mã ảnh từ ADB. Đang thử reconnect...")
+                self.connect()
+                
+            return img
+        except subprocess.TimeoutExpired:
+            print(f"[!] ADB Timeout! Mất kết nối. Đang thử reconnect...")
+            self.connect()
+            return None
+        except Exception as e:
+            print(f"[!] Lỗi screencap: {e}")
+            return None
 
     def click(self, x, y, randomize=True):
         """Click vào tọa độ (x, y) với độ lệch ngẫu nhiên để tránh bị phát hiện bot."""
