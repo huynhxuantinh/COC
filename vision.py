@@ -68,7 +68,7 @@ class Vision:
         
         return None
 
-    def read_number_region(self, screen_img, region, scale=1.0):
+    def read_number_region(self, screen_img, region, scale=1.0, whitelist='0123456789'):
         """
         Đọc số từ một vùng cụ thể. Có hỗ trợ scale ảnh để OCR đọc tốt hơn các số nhỏ.
         region: (x, y, width, height)
@@ -86,7 +86,7 @@ class Vision:
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         
-        config_ocr = '--psm 7 -c tessedit_char_whitelist=0123456789'
+        config_ocr = f'--psm 7 -c tessedit_char_whitelist={whitelist}'
         pil_img = Image.fromarray(thresh)
         text = pytesseract.image_to_string(pil_img, config=config_ocr)
         
@@ -107,8 +107,8 @@ class Vision:
         cx, cy = card_center
         dx1, dy1, dx2, dy2 = offset
         region = (cx + dx1, cy + dy1, dx2 - dx1, dy2 - dy1)
-        # Số lượng quân rất nhỏ, cần scale x2
-        return self.read_number_region(screen_img, region, scale=2.0)
+        # Số lượng quân rất nhỏ, cần scale x2. Có chữ x đứng trước số quân (vd: x97)
+        return self.read_number_region(screen_img, region, scale=2.0, whitelist='x0123456789')
 
 if __name__ == "__main__":
     v = Vision()

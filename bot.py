@@ -42,7 +42,7 @@ def main():
         sys.exit(1)
         
     # 2. Khởi tạo Vision
-    vision = Vision(template_dir=templates_dir)
+    vision = Vision(template_dir=templates_dir, config=config)
     
     # 3. Khởi tạo Logic
     bot_logic = BotLogic(adb, vision, config)

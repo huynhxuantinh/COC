@@ -254,7 +254,7 @@ class BotLogic:
         
         # Đánh xong, đợi kết thúc trận linh hoạt
         print("[ATTACKING] Đang tấn công... Chờ trận đấu kết thúc.")
-        max_wait = 60  # Đợi tối đa 60 giây
+        max_wait = self.config.get("battle", {}).get("max_wait_sec", 60)
         for i in range(max_wait // 2):
             time.sleep(2)
             curr_screen = self.adb.screencap()
