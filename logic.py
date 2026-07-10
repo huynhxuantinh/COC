@@ -31,6 +31,9 @@ class BotLogic:
         # Region dự kiến cho số vàng và dầu
         self.gold_region = (120, 130, 150, 40)
         self.elixir_region = (120, 190, 150, 40)
+        
+        # Thống kê farm
+        self.stats = {"attacks": 0, "gold": 0, "elixir": 0}
 
     def run(self):
         """Vòng lặp chính của Bot."""
@@ -129,6 +132,10 @@ class BotLogic:
         print(f"[SEARCHING] Vàng: {gold} | Tiên dược: {elixir}")
 
         if gold >= self.target_gold or elixir >= self.target_elixir:
+            self.stats["attacks"] += 1
+            self.stats["gold"] += gold
+            self.stats["elixir"] += elixir
+            print(f"[*] THỐNG KÊ: Đã đánh {self.stats['attacks']} trận | Cướp được: {self.stats['gold']:,} Vàng, {self.stats['elixir']:,} Dầu")
             self.search_stuck_count = 0
             print(f"[SEARCHING] Đạt chỉ tiêu (Vàng>{self.target_gold} hoặc Dầu>{self.target_elixir})! Bắt đầu tấn công.")
             self.state = "ATTACKING"

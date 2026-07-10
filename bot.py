@@ -6,6 +6,24 @@ from vision import Vision
 from logic import BotLogic
 
 import yaml
+import datetime
+
+class Logger(object):
+    def __init__(self, log_dir="logs"):
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        self.terminal = sys.stdout
+        date_str = datetime.datetime.now().strftime("%Y%m%d")
+        self.log_file = open(os.path.join(log_dir, f"bot_{date_str}.log"), "a", encoding="utf-8")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log_file.write(message)
+        self.log_file.flush()
+
+    def flush(self):
+        self.terminal.flush()
+        self.log_file.flush()
 
 def load_config():
     try:
@@ -16,6 +34,7 @@ def load_config():
         return None
 
 def main():
+    sys.stdout = Logger()
     print("=== Tool Auto Farm COC (Sneaky Goblins) ===")
     
     config = load_config()
