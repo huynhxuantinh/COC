@@ -3,8 +3,8 @@ emulator:
   install_dir: "D:/LDPlayer/LDPlayer9"
   index: 0
   name: LDPlayer
-  adb_path: "D:/LDPlayer/LDPlayer9/adb.exe"
-  device_id: emulator-5554
+  adb_path: "C:/Users/ASUS/OneDrive/Documents/COC/tools/platform-tools/adb.exe"
+  device_id: "127.0.0.1:5555"
   resolution: "1920x1080"
   dpi: 240
 

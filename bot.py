@@ -5,9 +5,23 @@ from adb_controller import ADBController
 from vision import Vision
 from logic import BotLogic
 
+import yaml
+
+def load_config():
+    try:
+        with open("config/settings.yaml", "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except Exception as e:
+        print(f"[!] Lỗi khi đọc file config: {e}")
+        return None
+
 def main():
     print("=== Tool Auto Farm COC (Sneaky Goblins) ===")
     
+    config = load_config()
+    if not config:
+        sys.exit(1)
+        
     # Tạo thư mục templates nếu chưa có
     templates_dir = "templates"
     if not os.path.exists(templates_dir):
@@ -20,7 +34,9 @@ def main():
         print("    - sneaky_goblin_card.png (Icon thẻ lính Sneaky Goblin)")
     
     # 1. Khởi tạo ADB
-    adb = ADBController(device_id="127.0.0.1:5555")
+    device_id = config.get("emulator", {}).get("device_id", "127.0.0.1:5555")
+    adb_path = config.get("emulator", {}).get("adb_path", None)
+    adb = ADBController(device_id=device_id, adb_path=adb_path)
     if not adb.connect():
         print("[!] Không thể kết nối giả lập. Đang thoát...")
         sys.exit(1)
@@ -29,7 +45,7 @@ def main():
     vision = Vision(template_dir=templates_dir)
     
     # 3. Khởi tạo Logic
-    bot_logic = BotLogic(adb, vision)
+    bot_logic = BotLogic(adb, vision, config)
     
     # Bắt đầu chạy
     try:

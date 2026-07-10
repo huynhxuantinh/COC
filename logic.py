@@ -2,37 +2,49 @@ import time
 import random
 
 class BotLogic:
-    def __init__(self, adb, vision):
+    def __init__(self, adb, vision, config=None):
         self.adb = adb
         self.vision = vision
+        self.config = config or {}
+        
         self.state = "IDLE"
         self.idle_stuck_count = 0
-        self.target_gold = 700000
-        self.target_elixir = 700000
+        self.search_stuck_count = 0
+        
+        # Đọc ngưỡng farm từ config
+        loot_config = self.config.get("farm", {}).get("loot_threshold", {})
+        self.target_gold = loot_config.get("gold", 700000)
+        self.target_elixir = loot_config.get("elixir", 700000)
         
         # Region dự kiến cho số vàng và dầu (cần điều chỉnh lại theo độ phân giải màn hình)
-        # Giả sử LDPlayer đang ở độ phân giải 1600x900
-        self.gold_region = (120, 130, 150, 40)   # Ví dụ: X, Y, Width, Height
+        # Tương lai có thể tính toán từ resolution trong config
+        self.gold_region = (120, 130, 150, 40)
         self.elixir_region = (120, 190, 150, 40)
 
     def run(self):
         """Vòng lặp chính của Bot."""
-        print("Bắt đầu khởi chạy Bot...")
+        print(f"Bắt đầu khởi chạy Bot... Mục tiêu: Vàng > {self.target_gold}, Dầu > {self.target_elixir}")
         while True:
-            screen = self.adb.screencap()
-            if screen is None:
-                print("Lỗi chụp màn hình. Đang thử lại...")
-                time.sleep(2)
-                continue
+            try:
+                screen = self.adb.screencap()
+                if screen is None:
+                    print("Lỗi chụp màn hình. Đang thử lại...")
+                    time.sleep(2)
+                    continue
 
-            if self.state == "IDLE":
-                self.handle_idle(screen)
-            elif self.state == "SEARCHING":
-                self.handle_searching(screen)
-            elif self.state == "ATTACKING":
-                self.handle_attacking(screen)
-            
-            time.sleep(1) # Chờ 1 giây giữa các chu kỳ
+                if self.state == "IDLE":
+                    self.handle_idle(screen)
+                elif self.state == "SEARCHING":
+                    self.handle_searching(screen)
+                elif self.state == "ATTACKING":
+                    self.handle_attacking(screen)
+                
+                time.sleep(1) # Chờ 1 giây giữa các chu kỳ
+            except Exception as e:
+                print(f"[!] LỖI NGHIÊM TRỌNG (Watchdog caught): {e}")
+                print("[!] Bot sẽ reset lại state về IDLE và thử lại sau 3 giây...")
+                self.state = "IDLE"
+                time.sleep(3)
 
     def handle_idle(self, screen):
         """Xử lý khi ở nhà chính."""
@@ -75,13 +87,25 @@ class BotLogic:
         print(f"[SEARCHING] Vàng: {gold} | Tiên dược: {elixir}")
 
         if gold >= self.target_gold or elixir >= self.target_elixir:
+            self.search_stuck_count = 0
             print(f"[SEARCHING] Đạt chỉ tiêu (>700k)! Bắt đầu tấn công.")
             self.state = "ATTACKING"
         else:
             if gold == 0 and elixir == 0:
-                print("[SEARCHING] Đang tải mây... chờ thêm.")
-                time.sleep(2)
+                self.search_stuck_count += 1
+                print(f"[SEARCHING] Đang tải mây... chờ thêm ({self.search_stuck_count}/15).")
+                if self.search_stuck_count >= 15:
+                    print("[SEARCHING] Kẹt quá lâu! Bấm X nhiều lần để thoát các menu ẩn...")
+                    self.adb.click(1850, 80)
+                    time.sleep(1)
+                    self.adb.click(1850, 80)
+                    time.sleep(2)
+                    self.state = "IDLE"
+                    self.search_stuck_count = 0
+                else:
+                    time.sleep(2)
             else:
+                self.search_stuck_count = 0
                 print("[SEARCHING] Nghèo quá, Next!")
                 self.adb.click(next_btn[0], next_btn[1])
                 time.sleep(3) # Chờ load mây
@@ -125,10 +149,26 @@ class BotLogic:
         # Gọi chiến thuật thả lính
         self.deploy_sneaky_goblins(screen)
         
-        # Đánh xong, chờ 35 giây rồi bấm Return Home (tọa độ cứng)
-        print("[ATTACKING] Đang tấn công... Chờ 35 giây.")
-        time.sleep(35)
-        print("[ATTACKING] Trận đấu kết thúc. Bấm Về Nhà.")
+        # Đánh xong, đợi kết thúc trận linh hoạt
+        print("[ATTACKING] Đang tấn công... Chờ trận đấu kết thúc.")
+        max_wait = 60  # Đợi tối đa 60 giây
+        for i in range(max_wait // 2):
+            time.sleep(2)
+            curr_screen = self.adb.screencap()
+            if curr_screen is None:
+                continue
+                
+            return_home = self.vision.find_template(curr_screen, "return_home_btn.png")
+            if return_home:
+                print(f"[ATTACKING] Phát hiện nút Về Nhà tại {return_home}. Trận đấu đã xong!")
+                self.adb.click(return_home[0], return_home[1])
+                time.sleep(6) # Chờ load về nhà
+                self.state = "IDLE"
+                return
+                
+            print(f"[ATTACKING] Vẫn đang đánh... ({i*2}/{max_wait}s)")
+            
+        print("[ATTACKING] Timeout 60s. Bấm Về Nhà cứng (960, 950).")
         self.adb.click(960, 950)
-        time.sleep(6) # Chờ load về nhà
+        time.sleep(6)
         self.state = "IDLE"

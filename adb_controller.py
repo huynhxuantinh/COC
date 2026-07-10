@@ -3,11 +3,15 @@ import cv2
 import numpy as np
 import time
 import random
+import os
 
 class ADBController:
-    def __init__(self, device_id="127.0.0.1:5555", adb_path=r"C:\Users\ASUS\OneDrive\Documents\COC\tools\platform-tools\adb.exe"):
+    def __init__(self, device_id="127.0.0.1:5555", adb_path=None):
         self.device_id = device_id
-        self.adb_path = adb_path
+        if adb_path:
+            self.adb_path = adb_path
+        else:
+            self.adb_path = r"C:\Users\ASUS\OneDrive\Documents\COC\tools\platform-tools\adb.exe"
 
     def run_cmd(self, cmd):
         """Chạy một lệnh ADB và trả về kết quả."""
@@ -34,17 +38,14 @@ class ADBController:
 
     def screencap(self):
         """Chụp màn hình giả lập và chuyển thành mảng numpy cho OpenCV."""
-        pipe = subprocess.Popen(
-            f"{self.adb_path} -s {self.device_id} exec-out screencap -p",
-            shell=True,
-            stdout=subprocess.PIPE
-        )
-        image_bytes = pipe.stdout.read()
-        if not image_bytes:
+        # Tránh dùng exec-out trên Windows vì lỗi xuống dòng \r\n làm hỏng ảnh
+        self.run_cmd("shell screencap -p /sdcard/bot_screen.png")
+        self.run_cmd("pull /sdcard/bot_screen.png bot_screen.png")
+        
+        if not os.path.exists("bot_screen.png"):
             return None
-        # Đọc ảnh từ byte array
-        image_array = np.asarray(bytearray(image_bytes), dtype=np.uint8)
-        img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+            
+        img = cv2.imread("bot_screen.png", cv2.IMREAD_COLOR)
         return img
 
     def click(self, x, y, randomize=True):
