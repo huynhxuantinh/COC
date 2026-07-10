@@ -96,20 +96,34 @@ class BotLogic:
             self.state = "ATTACKING"
         else:
             if gold == 0 and elixir == 0:
-                self.search_stuck_count += 1
-                print(f"[SEARCHING] Đang tải mây... chờ thêm ({self.search_stuck_count}/15).")
-                if self.search_stuck_count >= 15:
-                    print("[SEARCHING] Kẹt quá lâu! Bấm X nhiều lần để thoát các menu ẩn...")
-                    close_btn = self.vision.find_template(screen, "close_btn.png")
-                    cx, cy = close_btn if close_btn else (1850, 80)
-                    self.adb.click(cx, cy)
-                    time.sleep(1)
-                    self.adb.click(cx, cy)
-                    time.sleep(2)
-                    self.state = "IDLE"
-                    self.search_stuck_count = 0
+                # Kiểm tra xem có đang bị kẹt ở màn hình My Army (do cảnh báo Hero đang hồi máu) không
+                goblin_card = self.vision.find_template(screen, "sneaky_goblin_card.png")
+                force_attack = self.vision.find_template(screen, "force_attack_btn.png")
+                
+                if force_attack:
+                    print("[SEARCHING] Bị vướng màn hình My Army. Bấm nút Attack xanh lá...")
+                    self.adb.click(force_attack[0], force_attack[1])
+                    time.sleep(3)
+                elif goblin_card:
+                    print("[SEARCHING] Bị vướng màn hình My Army. Bấm nút Attack xanh lá (tọa độ dự phòng)...")
+                    h, w = screen.shape[:-1]
+                    self.adb.click(w - 180, h - 140) # Tọa độ tương đối góc dưới phải
+                    time.sleep(3)
                 else:
-                    time.sleep(2)
+                    self.search_stuck_count += 1
+                    print(f"[SEARCHING] Đang tải mây... chờ thêm ({self.search_stuck_count}/15).")
+                    if self.search_stuck_count >= 15:
+                        print("[SEARCHING] Kẹt quá lâu! Bấm X nhiều lần để thoát các menu ẩn...")
+                        close_btn = self.vision.find_template(screen, "close_btn.png")
+                        cx, cy = close_btn if close_btn else (1850, 80)
+                        self.adb.click(cx, cy)
+                        time.sleep(1)
+                        self.adb.click(cx, cy)
+                        time.sleep(2)
+                        self.state = "IDLE"
+                        self.search_stuck_count = 0
+                    else:
+                        time.sleep(2)
             else:
                 self.search_stuck_count = 0
                 print("[SEARCHING] Nghèo quá, Next!")
