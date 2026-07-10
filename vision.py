@@ -68,7 +68,7 @@ class Vision:
         
         return None
 
-    def read_number_region(self, screen_img, region, scale=1.0, whitelist='0123456789'):
+    def read_number_region(self, screen_img, region, scale=1.0, whitelist='0123456789', use_inrange=False):
         """
         Đọc số từ một vùng cụ thể. Có hỗ trợ scale ảnh để OCR đọc tốt hơn các số nhỏ.
         region: (x, y, width, height)
@@ -81,10 +81,14 @@ class Vision:
         
         # Scale ảnh nếu cần
         if scale != 1.0:
-            roi = cv2.resize(roi, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            roi = cv2.resize(roi, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
             
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        if use_inrange:
+            mask = cv2.inRange(roi, (200, 200, 200), (255, 255, 255))
+            thresh = cv2.bitwise_not(mask)
+        else:
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         
         config_ocr = f'--psm 7 -c tessedit_char_whitelist={whitelist}'
         pil_img = Image.fromarray(thresh)
@@ -96,8 +100,8 @@ class Vision:
         return -1
 
     def read_resources(self, screen_img, region):
-        """Đọc số lượng vàng/dầu (không scale để tối ưu tốc độ nếu số đủ lớn)."""
-        res = self.read_number_region(screen_img, region, scale=1.0)
+        """Đọc số lượng vàng/dầu."""
+        res = self.read_number_region(screen_img, region, scale=2.0, use_inrange=True)
         return res if res != -1 else 0
         
     def read_troop_count(self, screen_img, card_center, offset):

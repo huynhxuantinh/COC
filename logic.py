@@ -29,8 +29,8 @@ class BotLogic:
             }]
         
         # Region dự kiến cho số vàng và dầu (rộng hơn để đọc được số hàng triệu)
-        self.gold_region = (135, 130, 250, 40)
-        self.elixir_region = (135, 190, 250, 40)
+        self.gold_region = (70, 140, 250, 50)
+        self.elixir_region = (70, 210, 250, 50)
         
         # Thống kê farm
         self.stats = {"attacks": 0, "gold": 0, "elixir": 0}
