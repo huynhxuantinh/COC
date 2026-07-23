@@ -1,120 +1,125 @@
-import cv2
-import numpy as np
-import pytesseract
-from PIL import Image
-import os
+from __future__ import annotations
+
+import io
+import re
 import shutil
+from pathlib import Path
+from typing import Any
+
 
 class Vision:
-    def __init__(self, template_dir="templates", config=None):
-        self.template_dir = template_dir
-        self.config = config or {}
-        if not os.path.exists(self.template_dir):
-            os.makedirs(self.template_dir)
-            print(f"Đã tạo thư mục '{self.template_dir}'. Vui lòng thêm các ảnh mẫu vào đây.")
-            
-        self._setup_tesseract()
+    def __init__(self, config: dict[str, Any], log=None) -> None:
+        self.config = config
+        self.log = log or (lambda message: None)
+        self.enabled = bool(config["ocr"]["enabled"])
+        self.available = False
+        self.Image = None
+        self.ImageOps = None
+        self.pytesseract = None
+        self._init_ocr()
 
-    def _setup_tesseract(self):
-        """Thiết lập đường dẫn tesseract hợp lệ."""
-        # 1. Thử đọc từ config
-        tess_path = self.config.get("system", {}).get("tesseract_path", None)
-        
-        # 2. Thử tìm trong hệ thống
-        if not tess_path or not os.path.exists(tess_path):
-            tess_path = shutil.which("tesseract")
-            
-        # 3. Thử fallback trên Windows
+    def _init_ocr(self) -> None:
+        if not self.enabled:
+            self.log("[OCR] Đang tắt OCR, bot sẽ không đọc được loot.")
+            return
+
+        try:
+            from PIL import Image, ImageOps
+            import pytesseract
+        except ImportError:
+            self.log("[OCR] Thiếu Pillow/pytesseract. Chạy: python -m pip install -r requirements.txt")
+            return
+
+        tess_path = self.config["ocr"].get("tesseract_path") or shutil.which("tesseract")
         if not tess_path:
-            fallback = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-            if os.path.exists(fallback):
-                tess_path = fallback
-                
+            default_windows_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+            if Path(default_windows_path).exists():
+                tess_path = default_windows_path
         if tess_path:
             pytesseract.pytesseract.tesseract_cmd = tess_path
-            # print(f"[*] Sử dụng Tesseract OCR tại: {tess_path}")
+            self.available = True
+            self.Image = Image
+            self.ImageOps = ImageOps
+            self.pytesseract = pytesseract
+            self.log("[OCR] Sẵn sàng.")
         else:
-            print("[!] CẢNH BÁO: Không tìm thấy Tesseract OCR. Nhận diện số có thể bị lỗi.")
+            self.log("[OCR] Không thấy Tesseract OCR. Cài Tesseract hoặc điền ocr.tesseract_path.")
 
-    def find_template(self, screen_img, template_name, threshold=0.8):
-        """
-        Tìm kiếm một ảnh mẫu (template) trên màn hình.
-        Trả về tọa độ (x, y) trung tâm của vùng tìm thấy, hoặc None nếu không thấy.
-        """
-        template_path = os.path.join(self.template_dir, template_name)
-        if not os.path.exists(template_path):
-            print(f"Không tìm thấy template: {template_path}")
+    def image_from_png(self, png: bytes):
+        if self.Image is None:
             return None
+        return self.Image.open(io.BytesIO(png)).convert("RGB")
 
-        template = cv2.imread(template_path, cv2.IMREAD_COLOR)
-        if template is None or screen_img is None:
-            return None
+    def read_number(self, image, region: list[int], allow_percent: bool = False) -> int:
+        if not self.available or image is None:
+            return -1
 
-        # Template matching
-        res = cv2.matchTemplate(screen_img, template, cv2.TM_CCOEFF_NORMED)
-        loc = np.where(res >= threshold)
-        
-        # Nếu có ít nhất 1 kết quả đạt yêu cầu
-        if len(loc[0]) > 0:
-            # Lấy kết quả tốt nhất
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-            # Tọa độ góc trên bên trái
-            top_left = max_loc
-            # Tính toán tọa độ trung tâm
-            h, w = template.shape[:-1]
-            center_x = top_left[0] + w // 2
-            center_y = top_left[1] + h // 2
-            return (center_x, center_y)
-        
-        return None
-
-    def read_number_region(self, screen_img, region, scale=1.0, whitelist='0123456789', use_inrange=False):
-        """
-        Đọc số từ một vùng cụ thể. Có hỗ trợ scale ảnh để OCR đọc tốt hơn các số nhỏ.
-        region: (x, y, width, height)
-        """
         x, y, w, h = region
-        if x < 0 or y < 0 or y+h > screen_img.shape[0] or x+w > screen_img.shape[1]:
-            return 0
-            
-        roi = screen_img[y:y+h, x:x+w]
-        
-        # Scale ảnh nếu cần
-        if scale != 1.0:
-            roi = cv2.resize(roi, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-            
-        if use_inrange:
-            mask = cv2.inRange(roi, (200, 200, 200), (255, 255, 255))
-            thresh = cv2.bitwise_not(mask)
-        else:
-            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        
-        config_ocr = f'--psm 7 -c tessedit_char_whitelist={whitelist}'
-        pil_img = Image.fromarray(thresh)
-        text = pytesseract.image_to_string(pil_img, config=config_ocr)
-        
-        clean_text = "".join(filter(str.isdigit, text))
-        if clean_text:
-            return int(clean_text)
-        return -1
+        crop = image.crop((x, y, x + w, y + h))
+        crop = crop.resize((w * 3, h * 3))
+        gray = self.ImageOps.grayscale(crop)
+        gray = gray.point(lambda p: 255 if p > 145 else 0)
+        whitelist = "0123456789%" if allow_percent else "0123456789"
+        config = f"--psm 7 -c tessedit_char_whitelist={whitelist}"
+        text = self.pytesseract.image_to_string(gray, config=config)
+        digits = re.sub(r"\D", "", text)
+        if not digits:
+            return -1
+        return int(digits)
 
-    def read_resources(self, screen_img, region):
-        """Đọc số lượng vàng/dầu."""
-        res = self.read_number_region(screen_img, region, scale=2.0, use_inrange=True)
-        return res if res != -1 else 0
-        
-    def read_troop_count(self, screen_img, card_center, offset):
-        """
-        Đọc số quân còn lại trên thẻ bài.
-        offset = [x_start, y_start, x_end, y_end] (tương đối so với tâm thẻ quân)
-        """
-        cx, cy = card_center
-        dx1, dy1, dx2, dy2 = offset
-        region = (cx + dx1, cy + dy1, dx2 - dx1, dy2 - dy1)
-        # Số lượng quân rất nhỏ, cần scale x2. Có chữ x đứng trước số quân (vd: x97)
-        return self.read_number_region(screen_img, region, scale=2.0, whitelist='x0123456789')
+    def read_text(self, image, region: list[int]) -> str:
+        if not self.available or image is None:
+            return ""
 
-if __name__ == "__main__":
-    v = Vision()
-    # Test OCR nếu có ảnh mẫu
+        x, y, w, h = region
+        crop = image.crop((x, y, x + w, y + h))
+        crop = crop.resize((w * 3, h * 3))
+        gray = self.ImageOps.grayscale(crop)
+        gray = gray.point(lambda p: 255 if p > 135 else 0)
+        config = "--psm 7"
+        return self.pytesseract.image_to_string(gray, config=config).strip().lower()
+
+    def has_home_attack_button(self, png: bytes) -> bool:
+        if not self.available:
+            return True
+        image = self.image_from_png(png)
+        region = self.config["ocr"]["regions"].get("home_attack_button", [20, 715, 170, 160])
+        if self._has_attack_button_color(image, region):
+            return True
+        text = self.read_text(image, region)
+        compact = "".join(ch for ch in text if ch.isalpha())
+        return "attack" in compact
+
+    def _has_attack_button_color(self, image, region: list[int]) -> bool:
+        if image is None:
+            return False
+        x, y, w, h = region
+        crop = image.crop((x, y, x + w, y + h)).convert("RGB")
+        pixels = list(crop.getdata())
+        if not pixels:
+            return False
+        orange = 0
+        yellow = 0
+        for r, g, b in pixels:
+            if r >= 145 and 65 <= g <= 190 and b <= 95:
+                orange += 1
+            if r >= 190 and g >= 130 and b <= 105:
+                yellow += 1
+        return (orange / len(pixels)) >= 0.12 or (yellow / len(pixels)) >= 0.10
+
+    def read_loot(self, png: bytes) -> dict[str, int]:
+        image = self.image_from_png(png)
+        regions = self.config["ocr"]["regions"]
+        return {
+            "gold": self.read_number(image, regions["loot_gold"]),
+            "elixir": self.read_number(image, regions["loot_elixir"]),
+            "dark": self.read_number(image, regions["loot_dark"]),
+        }
+
+    def read_damage_percent(self, png: bytes) -> int:
+        image = self.image_from_png(png)
+        region = self.config["ocr"]["regions"]["damage_percent"]
+        value = self.read_number(image, region, allow_percent=True)
+        if value > 100:
+            return -1
+        return value

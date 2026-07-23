@@ -1,76 +1,336 @@
-import os
-import sys
-sys.stdout.reconfigure(encoding='utf-8')
-from adb_controller import ADBController
+from __future__ import annotations
+
+import random
+import threading
+import time
+from typing import Any
+
+from adb_client import ADBClient, ADBError
 from vision import Vision
-from logic import BotLogic
 
-import yaml
-import datetime
 
-class Logger(object):
-    def __init__(self, log_dir="logs"):
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-        self.terminal = sys.stdout
-        date_str = datetime.datetime.now().strftime("%Y%m%d")
-        self.log_file = open(os.path.join(log_dir, f"bot_{date_str}.log"), "a", encoding="utf-8")
+class FarmBot:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        log,
+        stop_event: threading.Event,
+        pause_event: threading.Event,
+    ) -> None:
+        self.config = config
+        self.log = log
+        self.stop_event = stop_event
+        self.pause_event = pause_event
+        self.adb = ADBClient(config["adb"]["path"], config["adb"]["device"], log=log)
+        self.vision = Vision(config, log=log)
+        self.stats = {"attacks": 0, "next": 0, "gold_seen": 0, "elixir_seen": 0, "dark_seen": 0}
 
-    def write(self, message):
-        self.terminal.write(message)
-        self.log_file.write(message)
-        self.log_file.flush()
+    def run(self) -> None:
+        try:
+            if self.config["adb"]["connect_on_start"]:
+                self.adb.connect()
+            if not self.config["game"]["skip_restart_game"]:
+                self.log("[GAME] Start Clash of Clans.")
+                self.adb.start_app(self.config["adb"]["package"])
+                self._sleep(10)
 
-    def flush(self):
-        self.terminal.flush()
-        self.log_file.flush()
+            self.log("[INFO] Bot started.")
+            while not self.stop_event.is_set():
+                self._pause_gate()
+                self._run_cycle()
+                self._sleep(self.config["timing"]["loop_sleep"])
+        except ADBError as exc:
+            self.log(f"[ERROR] {exc}")
+        except Exception as exc:
+            self.log(f"[ERROR] Bot stopped by error: {exc}")
+        finally:
+            self.log("[INFO] Bot stopped.")
 
-def load_config():
-    try:
-        with open("config/settings.yaml", "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"[!] Lỗi khi đọc file config: {e}")
-        return None
+    def _run_cycle(self) -> None:
+        if not self._ensure_home_attack_visible():
+            self.log("[HOME] Attack button still missing. Skip this cycle.")
+            return
 
-def main():
-    sys.stdout = Logger()
-    print("=== Tool Auto Farm COC (Sneaky Goblins) ===")
-    
-    config = load_config()
-    if not config:
-        sys.exit(1)
-        
-    # Tạo thư mục templates nếu chưa có
-    templates_dir = "templates"
-    if not os.path.exists(templates_dir):
-        os.makedirs(templates_dir)
-        print(f"[*] Vui lòng chụp các ảnh nút bấm trong game và lưu vào thư mục '{templates_dir}'")
-        print("    - attack_btn.png (Nút Attack ở nhà chính)")
-        print("    - find_match_btn.png (Nút Tìm trận)")
-        print("    - next_btn.png (Nút Next khi đang tìm nhà)")
-        print("    - return_home_btn.png (Nút Return Home sau khi đánh xong)")
-        print("    - sneaky_goblin_card.png (Icon thẻ lính Sneaky Goblin)")
-    
-    # 1. Khởi tạo ADB
-    device_id = config.get("emulator", {}).get("device_id", "127.0.0.1:5555")
-    adb_path = config.get("emulator", {}).get("adb_path", None)
-    adb = ADBController(device_id=device_id, adb_path=adb_path)
-    if not adb.connect():
-        print("[!] Không thể kết nối giả lập. Đang thoát...")
-        sys.exit(1)
-        
-    # 2. Khởi tạo Vision
-    vision = Vision(template_dir=templates_dir, config=config)
-    
-    # 3. Khởi tạo Logic
-    bot_logic = BotLogic(adb, vision, config)
-    
-    # Bắt đầu chạy
-    try:
-        bot_logic.run()
-    except KeyboardInterrupt:
-        print("\n[*] Đã dừng bot thủ công (Ctrl+C).")
+        self.log("[HOME] Tap Attack.")
+        self._tap_coord("home_attack")
+        self._sleep(self.config["timing"]["after_home_attack"])
 
-if __name__ == "__main__":
-    main()
+        self.log("[MATCH] Tap Find a Match.")
+        self._tap_coord("find_match")
+        self._sleep(self.config["timing"]["after_find_match"])
+
+        self.log("[ARMY] Confirm Attack in My Army.")
+        self._tap_coord("my_army_attack")
+        self._sleep(self.config["timing"]["after_my_army_attack"])
+
+        if self._search_base():
+            self._attack_base()
+            self._wait_return_home()
+
+    def _ensure_home_attack_visible(self) -> bool:
+        game = self.config["game"]
+        if not game.get("restart_if_attack_missing", True):
+            return True
+
+        retries = int(game.get("attack_missing_retries", 3))
+        for attempt in range(1, retries + 1):
+            self._pause_gate()
+            if self.stop_event.is_set():
+                return False
+            png = self.adb.screencap_png()
+            if self.vision.has_home_attack_button(png):
+                if attempt > 1:
+                    self.log("[HOME] Attack button found.")
+                return True
+            self.log(f"[HOME] Khong thay nut Attack ({attempt}/{retries}).")
+            self._sleep(1)
+
+        package = self.config["adb"]["package"]
+        wait_seconds = float(game.get("restart_wait_seconds", 18))
+        self.log("[HOME] Khong thay nut Attack. Restart game...")
+        self.adb.restart_app(package, wait_seconds=wait_seconds)
+
+        png = self.adb.screencap_png()
+        if self.vision.has_home_attack_button(png):
+            self.log("[HOME] Restart xong, da thay nut Attack.")
+            return True
+
+        self.log("[HOME] Restart xong nhung van khong thay nut Attack.")
+        return False
+
+    def _search_base(self) -> bool:
+        max_next = int(self.config["farm"]["max_next"])
+        ocr_fail_started_at: float | None = None
+        ocr_fail_restart_seconds = float(self.config["farm"].get("ocr_fail_restart_seconds", 30))
+        for index in range(max_next + 1):
+            self._pause_gate()
+            if self.stop_event.is_set():
+                return False
+
+            loot = self._read_loot()
+            if self._loot_is_valid(loot):
+                ocr_fail_started_at = None
+                self.log(
+                    f"[SEARCH] Loot: gold={loot['gold']:,} | elixir={loot['elixir']:,} | "
+                    f"dark={loot['dark']:,}"
+                )
+                if self._should_attack(loot):
+                    self.stats["attacks"] += 1
+                    self.stats["gold_seen"] += max(loot["gold"], 0)
+                    self.stats["elixir_seen"] += max(loot["elixir"], 0)
+                    self.stats["dark_seen"] += max(loot["dark"], 0)
+                    self.log("[SEARCH] Base matched. Deploy troops.")
+                    return True
+
+                self.stats["next"] += 1
+                self.log(f"[SEARCH] Base low. Next ({index + 1}/{max_next}).")
+                self._tap_coord("next")
+                self._sleep(self.config["timing"]["after_next"])
+            else:
+                if ocr_fail_started_at is None:
+                    ocr_fail_started_at = time.time()
+                fail_seconds = int(time.time() - ocr_fail_started_at)
+                self.log(f"[SEARCH] OCR could not read loot ({fail_seconds}s), wait.")
+                if fail_seconds >= ocr_fail_restart_seconds:
+                    self.log("[SEARCH] OCR failed too long. Restart game.")
+                    self._restart_game_from_search()
+                    return False
+                self._sleep(self.config["farm"]["search_delay_seconds"])
+
+        self.log("[SEARCH] Max Next reached, try returning home.")
+        self._tap_coord("end_battle")
+        self._sleep(1)
+        self._tap_coord("end_battle_okay")
+        return False
+
+    def _restart_game_from_search(self) -> None:
+        package = self.config["adb"]["package"]
+        wait_seconds = float(self.config["game"].get("restart_wait_seconds", 18))
+        self.adb.restart_app(package, wait_seconds=wait_seconds)
+
+    def _attack_base(self) -> None:
+        self._prepare_camera()
+
+        start = time.time()
+        self._deploy_troops()
+        self._cast_spells(start)
+        self._monitor_battle(start)
+
+    def _prepare_camera(self) -> None:
+        deploy = self.config["deploy"]
+        zoom_count = int(deploy.get("zoom_out_keyevents", 0))
+        if zoom_count > 0:
+            self.log(f"[CAMERA] Zoom out x{zoom_count}.")
+            for _ in range(zoom_count):
+                self.adb.shell("input", "keyevent", "169", timeout=5)
+                self._sleep(0.2)
+
+        swipes = deploy.get("camera_swipes", [])
+        if swipes:
+            self.log(f"[CAMERA] Move camera x{len(swipes)}.")
+        for swipe in swipes:
+            self.adb.swipe(*swipe)
+            self._sleep(0.35)
+
+        for swipe in deploy.get("pre_attack_swipes", []):
+            self.adb.swipe(*swipe)
+            self._sleep(0.35)
+
+        self._sleep(float(deploy.get("camera_settle_seconds", 0.5)))
+
+    def _deploy_troops(self) -> None:
+        points = self._deploy_points()
+        for step in self.config["deploy"]["sequence"]:
+            slot = step["slot"]
+            count = int(step["count"])
+            if count <= 0:
+                continue
+            self.log(f"[ATTACK] Select {slot}, deploy {count}.")
+            self._tap_slot(slot)
+            for i in range(count):
+                x, y = points[i % len(points)]
+                self.adb.tap(x, y)
+                self._sleep(float(step.get("delay", 0.2)))
+
+    def _cast_spells(self, attack_start: float) -> None:
+        for spell in self.config["deploy"]["spells"]:
+            if not spell.get("enabled", True):
+                continue
+            delay = float(spell.get("delay_after_deploy", 0))
+            while time.time() - attack_start < delay and not self.stop_event.is_set():
+                self._sleep(0.1)
+            self.log(f"[SPELL] Cast {spell['slot']}.")
+            self._tap_slot(spell["slot"])
+            points = spell.get("points", [])
+            max_casts = int(spell.get("max_casts", len(points)))
+            for x, y in points[:max_casts]:
+                self.adb.tap(int(x), int(y))
+                self._sleep(0.18)
+
+    def _monitor_battle(self, attack_start: float) -> None:
+        surrender = self.config["surrender"]
+        target_time = random.randint(
+            int(surrender["time_min_seconds"]),
+            int(surrender["time_max_seconds"]),
+        )
+        target_damage = random.randint(
+            int(surrender["destruction_min_percent"]),
+            int(surrender["destruction_max_percent"]),
+        )
+        max_seconds = int(surrender["max_battle_seconds"])
+
+        self.log(f"[BATTLE] Monitor. time={target_time}s, damage={target_damage}%.")
+        while not self.stop_event.is_set():
+            self._pause_gate()
+            elapsed = int(time.time() - attack_start)
+            png = self.adb.screencap_png()
+            damage = self.vision.read_damage_percent(png)
+            loot = self.vision.read_loot(png) if self.vision.available else {}
+
+            if not surrender["never_surrender"] and self._should_surrender(
+                elapsed,
+                damage,
+                loot,
+                target_time,
+                target_damage,
+            ):
+                self.log("[BATTLE] Surrender condition matched.")
+                self._tap_coord("end_battle")
+                self._sleep(1)
+                self._tap_coord("end_battle_okay")
+                return
+
+            if elapsed >= max_seconds:
+                self.log("[BATTLE] Max battle wait reached.")
+                if not surrender["never_surrender"]:
+                    self._tap_coord("end_battle")
+                    self._sleep(1)
+                    self._tap_coord("end_battle_okay")
+                return
+
+            shown_damage = "?" if damage < 0 else f"{damage}%"
+            self.log(f"[BATTLE] {elapsed}s | damage={shown_damage}")
+            self._sleep(3)
+
+    def _wait_return_home(self) -> None:
+        self.log("[RESULT] Wait result screen.")
+        self._sleep(6)
+        if self.stop_event.is_set():
+            return
+        self.log("[RESULT] Tap Return Home.")
+        self._tap_coord("return_home")
+        self._sleep(self.config["timing"]["after_return_home"])
+
+    def _read_loot(self) -> dict[str, int]:
+        if not self.vision.available:
+            raise RuntimeError("OCR is not ready, cannot read loot.")
+        png = self.adb.screencap_png()
+        return self.vision.read_loot(png)
+
+    def _loot_is_valid(self, loot: dict[str, int]) -> bool:
+        return loot["gold"] >= 0 or loot["elixir"] >= 0 or loot["dark"] >= 0
+
+    def _should_attack(self, loot: dict[str, int]) -> bool:
+        farm = self.config["farm"]
+        gold_ok = loot["gold"] >= int(farm["gold_min"])
+        elixir_ok = loot["elixir"] >= int(farm["elixir_min"])
+        dark_ok = loot["dark"] >= int(farm["dark_min"])
+        total_ok = (max(loot["gold"], 0) + max(loot["elixir"], 0)) >= int(farm["total_min"])
+        mode = farm.get("threshold_mode", "any")
+        if mode == "all":
+            return gold_ok and elixir_ok and dark_ok and total_ok
+        if mode == "total":
+            return total_ok or dark_ok
+        return gold_ok or elixir_ok or dark_ok or total_ok
+
+    def _should_surrender(
+        self,
+        elapsed: int,
+        damage: int,
+        loot: dict[str, int],
+        target_time: int,
+        target_damage: int,
+    ) -> bool:
+        surrender = self.config["surrender"]
+        if surrender["by_time"] and elapsed >= target_time:
+            return True
+        if surrender["by_destruction"] and damage >= target_damage:
+            return True
+        if surrender["when_low_loot"] and loot:
+            total = max(loot.get("gold", -1), 0) + max(loot.get("elixir", -1), 0)
+            if total < int(surrender["total_remaining_less_than"]):
+                return True
+        return False
+
+    def _deploy_points(self) -> list[list[int]]:
+        mode = self.config["farm"]["deploy_mode"]
+        deploy = self.config["deploy"]
+        if mode == "one_edge":
+            return deploy["one_edge_points"]
+        if mode == "four_corner":
+            return deploy["four_corner_points"]
+        if mode == "random":
+            x1, y1, x2, y2 = deploy["random_area"]
+            return [[random.randint(x1, x2), random.randint(y1, y2)] for _ in range(12)]
+        return deploy["line_points"]
+
+    def _tap_coord(self, name: str) -> None:
+        x, y = self.config["coords"][name]
+        self.adb.tap(int(x), int(y))
+        self._sleep(self.config["timing"]["after_click"])
+
+    def _tap_slot(self, name: str) -> None:
+        x, y = self.config["coords"]["slots"][name]
+        self.adb.tap(int(x), int(y))
+        self._sleep(0.18)
+
+    def _sleep(self, seconds: float) -> None:
+        end = time.time() + float(seconds)
+        while time.time() < end:
+            if self.stop_event.is_set():
+                return
+            time.sleep(min(0.1, end - time.time()))
+
+    def _pause_gate(self) -> None:
+        while self.pause_event.is_set() and not self.stop_event.is_set():
+            time.sleep(0.2)

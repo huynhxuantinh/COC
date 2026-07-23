@@ -1,20 +1,6 @@
-# Python
 __pycache__/
 *.pyc
-
-# Virtual Environment
+.venv/
 venv/
-env/
-
-# Screenshots & Debug
-*.png
-!templates/*.png
-!assets/*.png
-bot_screen.png
-
-# MacOS
-.DS_Store
-
-# Setup heavy files
-setup/*.exe
-setup/*.zip
+logs/
+screenshots/

@@ -1,0 +1,181 @@
+from __future__ import annotations
+
+import copy
+import json
+from pathlib import Path
+from typing import Any
+
+
+CONFIG_PATH = Path("config.json")
+
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    "adb": {
+        "path": "",
+        "device": "127.0.0.1:5555",
+        "package": "com.supercell.clashofclans",
+        "connect_on_start": True,
+    },
+    "game": {
+        "resolution": [1600, 900],
+        "language": "en",
+        "skip_restart_game": True,
+        "auto_stop": False,
+        "auto_restart_after_seconds": 60,
+        "donate_when_farming": False,
+        "change_combo_on_start": False,
+        "resource_stats": True,
+        "restart_if_attack_missing": True,
+        "attack_missing_retries": 3,
+        "restart_wait_seconds": 18,
+    },
+    "farm": {
+        "village": "main",
+        "combo": "Rong Dien",
+        "deploy_mode": "one_edge",
+        "threshold_mode": "any",
+        "gold_min": 900000,
+        "elixir_min": 900000,
+        "dark_min": 8000,
+        "total_min": 800000,
+        "max_next": 80,
+        "search_delay_seconds": 3.0,
+        "ocr_fail_restart_seconds": 30,
+    },
+    "surrender": {
+        "by_time": True,
+        "time_min_seconds": 50,
+        "time_max_seconds": 80,
+        "by_destruction": True,
+        "destruction_min_percent": 50,
+        "destruction_max_percent": 80,
+        "when_low_loot": True,
+        "total_remaining_less_than": 200000,
+        "never_surrender": False,
+        "max_battle_seconds": 190,
+    },
+    "ocr": {
+        "enabled": True,
+        "tesseract_path": "",
+        "regions": {
+            "loot_gold": [78, 125, 160, 35],
+            "loot_elixir": [78, 175, 160, 35],
+            "loot_dark": [78, 220, 140, 35],
+            "damage_percent": [1355, 630, 190, 70],
+            "home_attack_button": [20, 715, 170, 160],
+        },
+    },
+    "coords": {
+        "home_attack": [104, 795],
+        "find_match": [275, 666],
+        "my_army_attack": [1415, 801],
+        "next": [1455, 641],
+        "end_battle": [115, 672],
+        "end_battle_okay": [974, 580],
+        "return_home": [800, 772],
+        "slots": {
+            "dragon": [172, 815],
+            "balloon": [295, 815],
+            "titan": [414, 815],
+            "siege": [556, 815],
+            "hero": [676, 815],
+            "rage": [815, 815],
+            "freeze": [932, 815],
+            "poison": [1064, 815],
+        },
+    },
+    "deploy": {
+        "zoom_out_keyevents": 3,
+        "camera_swipes": [
+            [800, 250, 800, 560, 450],
+            [800, 250, 800, 560, 450],
+        ],
+        "camera_settle_seconds": 0.8,
+        "pre_attack_swipes": [],
+        "one_edge_points": [
+            [820, 135],
+            [880, 165],
+            [940, 200],
+            [1000, 240],
+            [1060, 285],
+            [1120, 330],
+            [1180, 375],
+            [1240, 425],
+        ],
+        "line_points": [
+            [560, 610],
+            [650, 640],
+            [740, 675],
+            [835, 700],
+            [930, 675],
+            [1020, 640],
+            [1080, 610],
+        ],
+        "four_corner_points": [
+            [315, 330],
+            [1245, 330],
+            [560, 610],
+            [1080, 610],
+        ],
+        "random_area": [260, 170, 1250, 700],
+        "sequence": [
+            {"slot": "siege", "count": 1, "delay": 0.35},
+            {"slot": "dragon", "count": 8, "delay": 0.18},
+            {"slot": "balloon", "count": 9, "delay": 0.16},
+            {"slot": "titan", "count": 1, "delay": 0.25},
+            {"slot": "hero", "count": 1, "delay": 0.25},
+        ],
+        "spells": [
+            {
+                "slot": "rage",
+                "enabled": True,
+                "max_casts": 2,
+                "delay_after_deploy": 4,
+                "points": [[940, 260], [1040, 330]],
+            },
+            {
+                "slot": "freeze",
+                "enabled": True,
+                "max_casts": 1,
+                "delay_after_deploy": 7,
+                "points": [[980, 230]],
+            },
+        ],
+    },
+    "timing": {
+        "after_click": 0.25,
+        "after_home_attack": 1.5,
+        "after_find_match": 1.5,
+        "after_my_army_attack": 4.0,
+        "after_next": 3.0,
+        "after_return_home": 5.0,
+        "loop_sleep": 0.2,
+    },
+}
+
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
+    if not path.exists():
+        save_config(DEFAULT_CONFIG, path)
+        return copy.deepcopy(DEFAULT_CONFIG)
+
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    return deep_merge(DEFAULT_CONFIG, data)
+
+
+def save_config(config: dict[str, Any], path: Path = CONFIG_PATH) -> None:
+    path.write_text(
+        json.dumps(config, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )

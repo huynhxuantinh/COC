@@ -1,0 +1,326 @@
+{
+  "adb": {
+    "path": "D:\\LDPlayer\\LDPlayer9\\adb.exe",
+    "device": "127.0.0.1:5555",
+    "package": "com.supercell.clashofclans",
+    "connect_on_start": true
+  },
+  "game": {
+    "resolution": [
+      1600,
+      900
+    ],
+    "language": "en",
+    "skip_restart_game": true,
+    "auto_stop": false,
+    "auto_restart_after_seconds": 60,
+    "donate_when_farming": false,
+    "change_combo_on_start": false,
+    "resource_stats": true,
+    "restart_if_attack_missing": true,
+    "attack_missing_retries": 3,
+    "restart_wait_seconds": 18
+  },
+  "farm": {
+    "village": "main",
+    "combo": "Rong Dien",
+    "deploy_mode": "one_edge",
+    "threshold_mode": "any",
+    "gold_min": 900000,
+    "elixir_min": 900000,
+    "dark_min": 8000,
+    "total_min": 800000,
+    "max_next": 80,
+    "search_delay_seconds": 3.0,
+    "ocr_fail_restart_seconds": 30
+  },
+  "surrender": {
+    "by_time": true,
+    "time_min_seconds": 50,
+    "time_max_seconds": 80,
+    "by_destruction": true,
+    "destruction_min_percent": 50,
+    "destruction_max_percent": 80,
+    "when_low_loot": true,
+    "total_remaining_less_than": 200000,
+    "never_surrender": false,
+    "max_battle_seconds": 190
+  },
+  "ocr": {
+    "enabled": true,
+    "tesseract_path": "",
+    "regions": {
+      "loot_gold": [
+        78,
+        125,
+        160,
+        35
+      ],
+      "loot_elixir": [
+        78,
+        175,
+        160,
+        35
+      ],
+      "loot_dark": [
+        78,
+        220,
+        140,
+        35
+      ],
+      "damage_percent": [
+        1355,
+        630,
+        190,
+        70
+      ],
+      "home_attack_button": [
+        20,
+        715,
+        170,
+        160
+      ]
+    }
+  },
+  "coords": {
+    "home_attack": [
+      104,
+      795
+    ],
+    "find_match": [
+      275,
+      666
+    ],
+    "my_army_attack": [
+      1415,
+      801
+    ],
+    "next": [
+      1455,
+      641
+    ],
+    "end_battle": [
+      115,
+      672
+    ],
+    "end_battle_okay": [
+      974,
+      580
+    ],
+    "return_home": [
+      800,
+      772
+    ],
+    "slots": {
+      "dragon": [
+        172,
+        815
+      ],
+      "balloon": [
+        295,
+        815
+      ],
+      "titan": [
+        414,
+        815
+      ],
+      "siege": [
+        556,
+        815
+      ],
+      "hero": [
+        676,
+        815
+      ],
+      "rage": [
+        815,
+        815
+      ],
+      "freeze": [
+        932,
+        815
+      ],
+      "poison": [
+        1064,
+        815
+      ]
+    }
+  },
+  "deploy": {
+    "zoom_out_keyevents": 3,
+    "camera_swipes": [
+      [
+        800,
+        250,
+        800,
+        560,
+        450
+      ],
+      [
+        800,
+        250,
+        800,
+        560,
+        450
+      ]
+    ],
+    "camera_settle_seconds": 0.8,
+    "pre_attack_swipes": [],
+    "one_edge_points": [
+      [
+        820,
+        135
+      ],
+      [
+        880,
+        165
+      ],
+      [
+        940,
+        200
+      ],
+      [
+        1000,
+        240
+      ],
+      [
+        1060,
+        285
+      ],
+      [
+        1120,
+        330
+      ],
+      [
+        1180,
+        375
+      ],
+      [
+        1240,
+        425
+      ]
+    ],
+    "line_points": [
+      [
+        560,
+        610
+      ],
+      [
+        720,
+        675
+      ],
+      [
+        810,
+        705
+      ],
+      [
+        930,
+        675
+      ],
+      [
+        1080,
+        610
+      ]
+    ],
+    "four_corner_points": [
+      [
+        315,
+        330
+      ],
+      [
+        1245,
+        330
+      ],
+      [
+        560,
+        610
+      ],
+      [
+        1080,
+        610
+      ]
+    ],
+    "random_area": [
+      260,
+      170,
+      1250,
+      700
+    ],
+    "sequence": [
+      {
+        "slot": "siege",
+        "count": 1,
+        "delay": 0.35
+      },
+      {
+        "slot": "dragon",
+        "count": 8,
+        "delay": 0.18
+      },
+      {
+        "slot": "balloon",
+        "count": 9,
+        "delay": 0.16
+      },
+      {
+        "slot": "titan",
+        "count": 1,
+        "delay": 0.25
+      },
+      {
+        "slot": "hero",
+        "count": 1,
+        "delay": 0.25
+      }
+    ],
+    "spells": [
+      {
+        "slot": "rage",
+        "enabled": true,
+        "delay_after_deploy": 4,
+        "points": [
+          [
+            800,
+            470
+          ],
+          [
+            800,
+            360
+          ],
+          [
+            760,
+            520
+          ]
+        ]
+      },
+      {
+        "slot": "freeze",
+        "enabled": true,
+        "delay_after_deploy": 7,
+        "points": [
+          [
+            720,
+            360
+          ],
+          [
+            900,
+            360
+          ],
+          [
+            800,
+            450
+          ]
+        ]
+      }
+    ]
+  },
+  "timing": {
+    "after_click": 0.25,
+    "after_home_attack": 1.5,
+    "after_find_match": 1.5,
+    "after_my_army_attack": 4.0,
+    "after_next": 3.0,
+    "after_return_home": 5.0,
+    "loop_sleep": 0.2
+  }
+}
