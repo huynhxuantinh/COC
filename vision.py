@@ -20,14 +20,14 @@ class Vision:
 
     def _init_ocr(self) -> None:
         if not self.enabled:
-            self.log("[OCR] Đang tắt OCR, bot sẽ không đọc được loot.")
+            self.log("[OCR] Dang tat OCR, bot se khong doc duoc loot.")
             return
 
         try:
             from PIL import Image, ImageOps
             import pytesseract
         except ImportError:
-            self.log("[OCR] Thiếu Pillow/pytesseract. Chạy: python -m pip install -r requirements.txt")
+            self.log("[OCR] Thieu Pillow/pytesseract. Chay: python -m pip install -r requirements.txt")
             return
 
         tess_path = self.config["ocr"].get("tesseract_path") or shutil.which("tesseract")
@@ -41,9 +41,9 @@ class Vision:
             self.Image = Image
             self.ImageOps = ImageOps
             self.pytesseract = pytesseract
-            self.log("[OCR] Sẵn sàng.")
+            self.log("[OCR] San sang.")
         else:
-            self.log("[OCR] Không thấy Tesseract OCR. Cài Tesseract hoặc điền ocr.tesseract_path.")
+            self.log("[OCR] Khong thay Tesseract OCR. Cai Tesseract hoac dien ocr.tesseract_path.")
 
     def image_from_png(self, png: bytes):
         if self.Image is None:

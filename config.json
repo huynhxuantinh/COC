@@ -277,38 +277,59 @@
       {
         "slot": "rage",
         "enabled": true,
+        "name": "No 1",
+        "max_casts": 3,
         "delay_after_deploy": 4,
         "points": [
           [
-            800,
-            470
+            807,
+            281
           ],
           [
-            800,
-            360
+            958,
+            371
           ],
           [
-            760,
-            520
+            1083,
+            466
           ]
         ]
       },
       {
         "slot": "freeze",
         "enabled": true,
+        "name": "Bang",
+        "max_casts": 1,
         "delay_after_deploy": 7,
         "points": [
           [
-            720,
-            360
+            781,
+            352
           ],
           [
-            900,
-            360
+            912,
+            436
           ],
           [
-            800,
-            450
+            986,
+            490
+          ]
+        ]
+      },
+      {
+        "slot": "rage",
+        "enabled": true,
+        "name": "No 2",
+        "max_casts": 2,
+        "delay_after_deploy": 10,
+        "points": [
+          [
+            742,
+            405
+          ],
+          [
+            952,
+            555
           ]
         ]
       }

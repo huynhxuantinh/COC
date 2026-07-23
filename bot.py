@@ -199,7 +199,8 @@ class FarmBot:
             delay = float(spell.get("delay_after_deploy", 0))
             while time.time() - attack_start < delay and not self.stop_event.is_set():
                 self._sleep(0.1)
-            self.log(f"[SPELL] Cast {spell['slot']}.")
+            spell_name = spell.get("name", spell["slot"])
+            self.log(f"[SPELL] Cast {spell_name} ({spell['slot']}).")
             self._tap_slot(spell["slot"])
             points = spell.get("points", [])
             max_casts = int(spell.get("max_casts", len(points)))
