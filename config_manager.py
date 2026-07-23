@@ -13,8 +13,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "adb": {
         "path": "",
         "device": "127.0.0.1:5555",
+        "devices": [],
         "package": "com.supercell.clashofclans",
         "connect_on_start": True,
+    },
+    "runtime": {
+        "stats_path": "stats.json",
     },
     "game": {
         "resolution": [1600, 900],
@@ -22,12 +26,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "skip_restart_game": True,
         "auto_stop": False,
         "auto_restart_after_seconds": 60,
+        "periodic_restart_game": False,
+        "periodic_restart_min_seconds": 3600,
+        "periodic_restart_max_seconds": 5400,
         "donate_when_farming": False,
         "change_combo_on_start": False,
         "resource_stats": True,
         "restart_if_attack_missing": True,
         "attack_missing_retries": 3,
         "restart_wait_seconds": 18,
+        "max_consecutive_cycle_errors": 8,
     },
     "farm": {
         "village": "main",
@@ -160,6 +168,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "after_next": 3.0,
         "after_return_home": 5.0,
         "loop_sleep": 0.2,
+        "sleep_jitter_percent": 0.15,
+        "sleep_jitter_min_seconds": 0.25,
+    },
+}
+
+
+DEFAULT_CONFIG["combos"] = {
+    "Rong Dien": {
+        "deploy": copy.deepcopy(DEFAULT_CONFIG["deploy"]),
     },
 }
 
@@ -181,7 +198,14 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
 
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    return deep_merge(DEFAULT_CONFIG, data)
+    merged = deep_merge(DEFAULT_CONFIG, data)
+    if "combos" not in data:
+        merged["combos"] = {
+            "Rong Dien": {
+                "deploy": copy.deepcopy(merged["deploy"]),
+            },
+        }
+    return merged
 
 
 def save_config(config: dict[str, Any], path: Path = CONFIG_PATH) -> None:

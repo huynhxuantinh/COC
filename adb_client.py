@@ -165,11 +165,11 @@ class ADBClient:
     def screencap_png(self) -> bytes:
         last_error = "Khong chup duoc man hinh tu ADB."
         for attempt in range(1, 4):
-            result = self._run(
-                ["-s", self.device, "exec-out", "screencap", "-p"],
-                timeout=8,
-            )
             try:
+                result = self._run(
+                    ["-s", self.device, "exec-out", "screencap", "-p"],
+                    timeout=8,
+                )
                 return self._normalize_png(result.stdout)
             except ADBError as exc:
                 last_error = str(exc)

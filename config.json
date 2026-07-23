@@ -2,8 +2,12 @@
   "adb": {
     "path": "D:\\LDPlayer\\LDPlayer9\\adb.exe",
     "device": "127.0.0.1:5555",
+    "devices": [],
     "package": "com.supercell.clashofclans",
     "connect_on_start": true
+  },
+  "runtime": {
+    "stats_path": "stats.json"
   },
   "game": {
     "resolution": [
@@ -14,6 +18,9 @@
     "skip_restart_game": true,
     "auto_stop": false,
     "auto_restart_after_seconds": 60,
+    "periodic_restart_game": false,
+    "periodic_restart_min_seconds": 3600,
+    "periodic_restart_max_seconds": 5400,
     "donate_when_farming": false,
     "change_combo_on_start": false,
     "resource_stats": true,
@@ -29,15 +36,15 @@
     "gold_min": 900000,
     "elixir_min": 900000,
     "dark_min": 8000,
-    "total_min": 800000,
+    "total_min": 1500000,
     "max_next": 80,
     "search_delay_seconds": 3.0,
     "ocr_fail_restart_seconds": 30
   },
   "surrender": {
     "by_time": true,
-    "time_min_seconds": 50,
-    "time_max_seconds": 80,
+    "time_min_seconds": 80,
+    "time_max_seconds": 90,
     "by_destruction": true,
     "destruction_min_percent": 50,
     "destruction_max_percent": 80,
@@ -342,6 +349,201 @@
     "after_my_army_attack": 4.0,
     "after_next": 3.0,
     "after_return_home": 5.0,
-    "loop_sleep": 0.2
+    "loop_sleep": 0.2,
+    "sleep_jitter_percent": 0.15,
+    "sleep_jitter_min_seconds": 0.25
+  },
+  "combos": {
+    "Rong Dien": {
+      "deploy": {
+        "zoom_out_keyevents": 3,
+        "camera_swipes": [
+          [
+            800,
+            250,
+            800,
+            560,
+            450
+          ],
+          [
+            800,
+            250,
+            800,
+            560,
+            450
+          ]
+        ],
+        "camera_settle_seconds": 0.8,
+        "pre_attack_swipes": [],
+        "one_edge_points": [
+          [
+            820,
+            135
+          ],
+          [
+            880,
+            165
+          ],
+          [
+            940,
+            200
+          ],
+          [
+            1000,
+            240
+          ],
+          [
+            1060,
+            285
+          ],
+          [
+            1120,
+            330
+          ],
+          [
+            1180,
+            375
+          ],
+          [
+            1240,
+            425
+          ]
+        ],
+        "line_points": [
+          [
+            560,
+            610
+          ],
+          [
+            720,
+            675
+          ],
+          [
+            810,
+            705
+          ],
+          [
+            930,
+            675
+          ],
+          [
+            1080,
+            610
+          ]
+        ],
+        "four_corner_points": [
+          [
+            315,
+            330
+          ],
+          [
+            1245,
+            330
+          ],
+          [
+            560,
+            610
+          ],
+          [
+            1080,
+            610
+          ]
+        ],
+        "random_area": [
+          260,
+          170,
+          1250,
+          700
+        ],
+        "sequence": [
+          {
+            "slot": "siege",
+            "count": 1,
+            "delay": 0.35
+          },
+          {
+            "slot": "dragon",
+            "count": 8,
+            "delay": 0.18
+          },
+          {
+            "slot": "balloon",
+            "count": 9,
+            "delay": 0.16
+          },
+          {
+            "slot": "titan",
+            "count": 1,
+            "delay": 0.25
+          },
+          {
+            "slot": "hero",
+            "count": 1,
+            "delay": 0.25
+          }
+        ],
+        "spells": [
+          {
+            "slot": "rage",
+            "enabled": true,
+            "name": "No 1",
+            "max_casts": 3,
+            "delay_after_deploy": 4,
+            "points": [
+              [
+                807,
+                281
+              ],
+              [
+                958,
+                371
+              ],
+              [
+                1083,
+                466
+              ]
+            ]
+          },
+          {
+            "slot": "freeze",
+            "enabled": true,
+            "name": "Bang",
+            "max_casts": 1,
+            "delay_after_deploy": 7,
+            "points": [
+              [
+                781,
+                352
+              ],
+              [
+                912,
+                436
+              ],
+              [
+                986,
+                490
+              ]
+            ]
+          },
+          {
+            "slot": "rage",
+            "enabled": true,
+            "name": "No 2",
+            "max_casts": 2,
+            "delay_after_deploy": 10,
+            "points": [
+              [
+                742,
+                405
+              ],
+              [
+                952,
+                555
+              ]
+            ]
+          }
+        ]
+      }
+    }
   }
 }

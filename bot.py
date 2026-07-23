@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import random
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from adb_client import ADBClient, ADBError
@@ -10,12 +13,15 @@ from vision import Vision
 
 
 class FarmBot:
+    STAT_KEYS = ("attacks", "next", "gold_seen", "elixir_seen", "dark_seen")
+
     def __init__(
         self,
         config: dict[str, Any],
         log,
         stop_event: threading.Event,
         pause_event: threading.Event,
+        stats_callback=None,
     ) -> None:
         self.config = config
         self.log = log
@@ -23,27 +29,51 @@ class FarmBot:
         self.pause_event = pause_event
         self.adb = ADBClient(config["adb"]["path"], config["adb"]["device"], log=log)
         self.vision = Vision(config, log=log)
-        self.stats = {"attacks": 0, "next": 0, "gold_seen": 0, "elixir_seen": 0, "dark_seen": 0}
+        self.stats = {key: 0 for key in self.STAT_KEYS}
+        self.stats_callback = stats_callback or (lambda stats: None)
+        self.stats_path = Path(config.get("runtime", {}).get("stats_path", "stats.json"))
+        self.debug_dir = Path("debug")
+        self.session_started_at = datetime.now().isoformat(timespec="seconds")
+        self.base_total_stats = self._load_total_stats()
+        self.run_started_at = 0.0
+        self.auto_stop_at = 0.0
+        self.active_combo = self._select_active_combo()
+        self.active_deploy = self._active_deploy()
 
     def run(self) -> None:
         try:
             if self.config["adb"]["connect_on_start"]:
                 self.adb.connect()
+            self.log(f"[COMBO] Dang dung: {self.active_combo}.")
             if not self.config["game"]["skip_restart_game"]:
                 self.log("[GAME] Start Clash of Clans.")
                 self.adb.start_app(self.config["adb"]["package"])
                 self._sleep(10)
 
+            self._publish_stats()
             self.log("[INFO] Bot started.")
+            self.run_started_at = time.time()
+            auto_stop_after = self._auto_stop_after_seconds()
+            self.auto_stop_at = self.run_started_at + auto_stop_after if auto_stop_after > 0 else 0.0
+            next_periodic_restart_at = self._next_periodic_restart_at(self.run_started_at)
             cycle_errors = 0
+            max_cycle_errors = int(self.config["game"].get("max_consecutive_cycle_errors", 8))
             while not self.stop_event.is_set():
                 self._pause_gate()
+                if self._auto_stop_due():
+                    break
+                if next_periodic_restart_at and time.time() >= next_periodic_restart_at:
+                    self._periodic_restart_game()
+                    next_periodic_restart_at = self._next_periodic_restart_at(time.time())
+                    continue
                 try:
                     self._run_cycle()
                     cycle_errors = 0
                 except ADBError as exc:
                     cycle_errors += 1
                     self.log(f"[WARN] Cycle ADB error ({cycle_errors}): {exc}. Retry next cycle.")
+                    if self._too_many_cycle_errors(cycle_errors, max_cycle_errors):
+                        break
                     try:
                         self.adb.connect()
                     except ADBError as reconnect_exc:
@@ -52,6 +82,8 @@ class FarmBot:
                 except Exception as exc:
                     cycle_errors += 1
                     self.log(f"[WARN] Cycle error ({cycle_errors}): {exc}. Retry next cycle.")
+                    if self._too_many_cycle_errors(cycle_errors, max_cycle_errors):
+                        break
                     self._sleep(3)
                 self._sleep(self.config["timing"]["loop_sleep"])
         except ADBError as exc:
@@ -59,6 +91,7 @@ class FarmBot:
         except Exception as exc:
             self.log(f"[ERROR] Bot stopped by error: {exc}")
         finally:
+            self._publish_stats()
             self.log("[INFO] Bot stopped.")
 
     def _run_cycle(self) -> None:
@@ -82,17 +115,79 @@ class FarmBot:
             self._attack_base()
             self._wait_return_home()
 
+    def _too_many_cycle_errors(self, cycle_errors: int, max_cycle_errors: int) -> bool:
+        if max_cycle_errors <= 0 or cycle_errors < max_cycle_errors:
+            return False
+        self.log(
+            f"[ERROR] Qua nhieu loi cycle lien tiep ({cycle_errors}/{max_cycle_errors}). "
+            "Tu dong dung bot."
+        )
+        self.stop_event.set()
+        return True
+
+    def _select_active_combo(self) -> str:
+        combos = self.config.get("combos", {})
+        if not combos:
+            return self.config["farm"].get("combo", "Rong Dien")
+
+        names = list(combos.keys())
+        selected = self.config["farm"].get("combo") or names[0]
+        if self.config["game"].get("change_combo_on_start", False):
+            selected = random.choice(names)
+        if selected not in combos:
+            selected = names[0]
+        self.config["farm"]["combo"] = selected
+        return selected
+
+    def _active_deploy(self) -> dict[str, Any]:
+        combos = self.config.get("combos", {})
+        if self.active_combo in combos:
+            return combos[self.active_combo].get("deploy", combos[self.active_combo])
+        return self.config["deploy"]
+
+    def _auto_stop_after_seconds(self) -> int:
+        game = self.config["game"]
+        if not game.get("auto_stop", False):
+            return 0
+        return max(0, int(game.get("auto_restart_after_seconds", 0)))
+
+    def _auto_stop_due(self) -> bool:
+        if self.auto_stop_at <= 0 or time.time() < self.auto_stop_at:
+            return False
+        elapsed = int(time.time() - self.run_started_at)
+        self.log(f"[SCHEDULE] Auto stop sau {elapsed}s.")
+        self.stop_event.set()
+        return True
+
+    def _next_periodic_restart_at(self, now: float) -> float:
+        game = self.config["game"]
+        if not game.get("periodic_restart_game", False):
+            return 0.0
+        min_seconds = max(1, int(game.get("periodic_restart_min_seconds", 3600)))
+        max_seconds = max(min_seconds, int(game.get("periodic_restart_max_seconds", min_seconds)))
+        delay = random.randint(min_seconds, max_seconds)
+        self.log(f"[SCHEDULE] Restart game tiep theo sau {delay}s.")
+        return now + delay
+
+    def _periodic_restart_game(self) -> None:
+        package = self.config["adb"]["package"]
+        wait_seconds = float(self.config["game"].get("restart_wait_seconds", 18))
+        self.log("[SCHEDULE] Restart game dinh ky.")
+        self.adb.restart_app(package, wait_seconds=wait_seconds)
+
     def _ensure_home_attack_visible(self) -> bool:
         game = self.config["game"]
         if not game.get("restart_if_attack_missing", True):
             return True
 
         retries = int(game.get("attack_missing_retries", 3))
+        last_png = b""
         for attempt in range(1, retries + 1):
             self._pause_gate()
             if self.stop_event.is_set():
                 return False
             png = self.adb.screencap_png()
+            last_png = png
             if self.vision.has_home_attack_button(png):
                 if attempt > 1:
                     self.log("[HOME] Attack button found.")
@@ -100,6 +195,7 @@ class FarmBot:
             self.log(f"[HOME] Khong thay nut Attack ({attempt}/{retries}).")
             self._sleep(1)
 
+        self._dump_debug_png("home_attack_missing_before_restart", last_png)
         package = self.config["adb"]["package"]
         wait_seconds = float(game.get("restart_wait_seconds", 18))
         self.log("[HOME] Khong thay nut Attack. Restart game...")
@@ -110,6 +206,7 @@ class FarmBot:
             self.log("[HOME] Restart xong, da thay nut Attack.")
             return True
 
+        self._dump_debug_png("home_attack_missing_after_restart", png)
         self.log("[HOME] Restart xong nhung van khong thay nut Attack.")
         return False
 
@@ -122,7 +219,7 @@ class FarmBot:
             if self.stop_event.is_set():
                 return False
 
-            loot = self._read_loot()
+            png, loot = self._read_loot_frame()
             if self._loot_is_valid(loot):
                 ocr_fail_started_at = None
                 self.log(
@@ -134,10 +231,12 @@ class FarmBot:
                     self.stats["gold_seen"] += max(loot["gold"], 0)
                     self.stats["elixir_seen"] += max(loot["elixir"], 0)
                     self.stats["dark_seen"] += max(loot["dark"], 0)
+                    self._publish_stats()
                     self.log("[SEARCH] Base matched. Deploy troops.")
                     return True
 
                 self.stats["next"] += 1
+                self._publish_stats()
                 self.log(f"[SEARCH] Base low. Next ({index + 1}/{max_next}).")
                 self._tap_coord("next")
                 self._sleep(self.config["timing"]["after_next"])
@@ -147,6 +246,7 @@ class FarmBot:
                 fail_seconds = int(time.time() - ocr_fail_started_at)
                 self.log(f"[SEARCH] OCR could not read loot ({fail_seconds}s), wait.")
                 if fail_seconds >= ocr_fail_restart_seconds:
+                    self._dump_debug_png("loot_ocr_fail_restart", png)
                     self.log("[SEARCH] OCR failed too long. Restart game.")
                     self._restart_game_from_search()
                     return False
@@ -173,7 +273,7 @@ class FarmBot:
         self._monitor_battle(attack_start)
 
     def _prepare_camera(self) -> None:
-        deploy = self.config["deploy"]
+        deploy = self.active_deploy
         zoom_count = int(deploy.get("zoom_out_keyevents", 0))
         if zoom_count > 0:
             self.log(f"[CAMERA] Zoom out x{zoom_count}.")
@@ -196,7 +296,7 @@ class FarmBot:
 
     def _deploy_troops(self) -> None:
         points = self._deploy_points()
-        for step in self.config["deploy"]["sequence"]:
+        for step in self.active_deploy["sequence"]:
             slot = step["slot"]
             count = int(step["count"])
             if count <= 0:
@@ -209,7 +309,7 @@ class FarmBot:
                 self._sleep(float(step.get("delay", 0.2)))
 
     def _cast_spells(self, deploy_finished: float) -> None:
-        for spell in self.config["deploy"]["spells"]:
+        for spell in self.active_deploy["spells"]:
             if not spell.get("enabled", True):
                 continue
             delay = float(spell.get("delay_after_deploy", 0))
@@ -287,10 +387,13 @@ class FarmBot:
         self._sleep(self.config["timing"]["after_return_home"])
 
     def _read_loot(self) -> dict[str, int]:
+        return self._read_loot_frame()[1]
+
+    def _read_loot_frame(self) -> tuple[bytes, dict[str, int]]:
         if not self.vision.available:
             raise RuntimeError("OCR is not ready, cannot read loot.")
         png = self.adb.screencap_png()
-        return self.vision.read_loot(png)
+        return png, self.vision.read_loot(png)
 
     def _loot_is_valid(self, loot: dict[str, int]) -> bool:
         return loot["gold"] >= 0 and loot["elixir"] >= 0
@@ -331,7 +434,7 @@ class FarmBot:
 
     def _deploy_points(self) -> list[list[int]]:
         mode = self.config["farm"]["deploy_mode"]
-        deploy = self.config["deploy"]
+        deploy = self.active_deploy
         if mode == "one_edge":
             return deploy["one_edge_points"]
         if mode == "four_corner":
@@ -352,12 +455,70 @@ class FarmBot:
         self._sleep(0.18)
 
     def _sleep(self, seconds: float) -> None:
-        end = time.time() + float(seconds)
+        end = time.time() + self._jittered_sleep_seconds(seconds)
         while time.time() < end:
-            if self.stop_event.is_set():
+            if self.stop_event.is_set() or self._auto_stop_due():
                 return
             time.sleep(min(0.1, end - time.time()))
+
+    def _jittered_sleep_seconds(self, seconds: float) -> float:
+        base = max(0.0, float(seconds))
+        timing = self.config.get("timing", {})
+        min_seconds = float(timing.get("sleep_jitter_min_seconds", 0.25))
+        jitter_percent = max(0.0, float(timing.get("sleep_jitter_percent", 0.15)))
+        if base < min_seconds or jitter_percent <= 0:
+            return base
+        delta = base * jitter_percent
+        return max(0.0, random.uniform(base - delta, base + delta))
 
     def _pause_gate(self) -> None:
         while self.pause_event.is_set() and not self.stop_event.is_set():
             time.sleep(0.2)
+
+    def _load_total_stats(self) -> dict[str, int]:
+        try:
+            with self.stats_path.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+        except (OSError, json.JSONDecodeError):
+            return {key: 0 for key in self.STAT_KEYS}
+
+        total = data.get("total", {})
+        return {key: int(total.get(key, 0)) for key in self.STAT_KEYS}
+
+    def _publish_stats(self) -> None:
+        payload = self._stats_payload()
+        self._save_stats(payload)
+        self.stats_callback(payload)
+
+    def _stats_payload(self) -> dict[str, Any]:
+        total = {
+            key: self.base_total_stats.get(key, 0) + self.stats.get(key, 0)
+            for key in self.STAT_KEYS
+        }
+        return {
+            "session_started_at": self.session_started_at,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "current_session": dict(self.stats),
+            "total": total,
+        }
+
+    def _save_stats(self, payload: dict[str, Any]) -> None:
+        try:
+            self.stats_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.stats_path.open("w", encoding="utf-8") as file:
+                json.dump(payload, file, ensure_ascii=True, indent=2)
+        except OSError as exc:
+            self.log(f"[WARN] Khong ghi duoc stats.json: {exc}")
+
+    def _dump_debug_png(self, reason: str, png: bytes) -> None:
+        if not png:
+            return
+        safe_reason = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in reason)
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = self.debug_dir / f"{timestamp}-{safe_reason}.png"
+        try:
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(png)
+            self.log(f"[DEBUG] Saved screencap: {path}")
+        except OSError as exc:
+            self.log(f"[WARN] Khong ghi duoc debug screencap: {exc}")

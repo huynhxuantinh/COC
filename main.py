@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import copy
+import json
 import queue
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, ttk
 
 from adb_client import ADBClient, ADBError, COMMON_DEVICES, discover_adb_paths
@@ -20,11 +23,16 @@ class COCFarmApp(tk.Tk):
 
         self.config_data = load_config()
         self.log_queue: queue.Queue[str] = queue.Queue()
+        self.stats_queue: queue.Queue[dict] = queue.Queue()
         self.bot_thread: threading.Thread | None = None
+        self.bot_threads: list[threading.Thread] = []
+        self.active_devices: list[str] = []
+        self.stats_by_device: dict[str, dict] = {}
         self.stop_event = threading.Event()
         self.pause_event = threading.Event()
         self.adb_ready = False
         self.vars: dict[str, tk.Variable] = {}
+        self.stat_vars: dict[str, tk.StringVar] = {}
 
         self._style()
         self._build_ui()
@@ -54,6 +62,7 @@ class COCFarmApp(tk.Tk):
         root.pack(fill="both", expand=True, padx=16, pady=16)
 
         self._build_header(root)
+        self._build_stats(root)
         self._build_tabs(root)
         self._build_logs(root)
 
@@ -91,6 +100,51 @@ class COCFarmApp(tk.Tk):
         )
         status.pack(fill="x", pady=(10, 12))
 
+    def _build_stats(self, parent: tk.Frame) -> None:
+        stats = self._load_saved_stats().get("current_session", {})
+        card = tk.Frame(parent, bg="#2b2f36", padx=12, pady=10)
+        card.pack(fill="x", pady=(0, 12))
+
+        tk.Label(
+            card,
+            text="Stats phien",
+            bg="#2b2f36",
+            fg="#ffffff",
+            font=("Segoe UI", 10, "bold"),
+        ).pack(side="left", padx=(0, 14))
+
+        items = [
+            ("attacks", "Tran"),
+            ("next", "Next"),
+            ("gold_seen", "Vang"),
+            ("elixir_seen", "Dau"),
+            ("dark_seen", "Dau den"),
+        ]
+        for key, label in items:
+            value = int(stats.get(key, 0))
+            self.stat_vars[key] = tk.StringVar(value=f"{label}: {value:,}")
+            tk.Label(
+                card,
+                textvariable=self.stat_vars[key],
+                bg="#2b2f36",
+                fg="#dce3ea",
+                font=("Segoe UI", 10),
+            ).pack(side="left", padx=10)
+
+    def _load_saved_stats(self) -> dict:
+        try:
+            with Path("stats.json").open("r", encoding="utf-8") as file:
+                return json.load(file)
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _combo_names(self) -> list[str]:
+        combos = self.config_data.get("combos", {})
+        if combos:
+            return list(combos.keys())
+        combo = self.config_data.get("farm", {}).get("combo", "Rong Dien")
+        return [combo]
+
     def _build_tabs(self, parent: tk.Frame) -> None:
         notebook = ttk.Notebook(parent)
         notebook.pack(fill="x")
@@ -110,11 +164,16 @@ class COCFarmApp(tk.Tk):
         self.vars["skip_restart_game"] = tk.BooleanVar(value=game["skip_restart_game"])
         self.vars["auto_stop"] = tk.BooleanVar(value=game["auto_stop"])
         self.vars["auto_restart_after_seconds"] = tk.StringVar(value=str(game["auto_restart_after_seconds"]))
+        self.vars["periodic_restart_game"] = tk.BooleanVar(value=game.get("periodic_restart_game", False))
+        self.vars["periodic_restart_min_seconds"] = tk.StringVar(value=str(game.get("periodic_restart_min_seconds", 3600)))
+        self.vars["periodic_restart_max_seconds"] = tk.StringVar(value=str(game.get("periodic_restart_max_seconds", 5400)))
         self.vars["donate_when_farming"] = tk.BooleanVar(value=game["donate_when_farming"])
         self.vars["change_combo_on_start"] = tk.BooleanVar(value=game["change_combo_on_start"])
         self.vars["resource_stats"] = tk.BooleanVar(value=game["resource_stats"])
         self.vars["restart_if_attack_missing"] = tk.BooleanVar(value=game.get("restart_if_attack_missing", True))
-        self.vars["combo"] = tk.StringVar(value="Rong Dien")
+        combo_names = self._combo_names()
+        selected_combo = farm.get("combo") if farm.get("combo") in combo_names else combo_names[0]
+        self.vars["combo"] = tk.StringVar(value=selected_combo)
         self.vars["deploy_mode"] = tk.StringVar(value=self._deploy_label(farm["deploy_mode"]))
         self.vars["gold_min"] = tk.StringVar(value=f"{farm['gold_min']:,}")
         self.vars["elixir_min"] = tk.StringVar(value=f"{farm['elixir_min']:,}")
@@ -136,19 +195,28 @@ class COCFarmApp(tk.Tk):
             ("Tu dong doi combo khi bat dau", "change_combo_on_start"),
             ("Thong ke tai nguyen", "resource_stats"),
             ("Khong thay Attack thi mo lai game", "restart_if_attack_missing"),
+            ("Restart game dinh ky", "periodic_restart_game"),
         ]
         for i, (text, key) in enumerate(checks, start=1):
             ttk.Checkbutton(left, text=text, variable=self.vars[key]).grid(
                 row=i, column=0, columnspan=2, sticky="w", pady=5
             )
 
-        ttk.Label(left, text="Tu dong bat lai sau", style="Card.TLabel").grid(row=7, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(left, text="Tu dong dung sau", style="Card.TLabel").grid(row=8, column=0, sticky="w", pady=(10, 0))
         ttk.Entry(left, textvariable=self.vars["auto_restart_after_seconds"], width=8).grid(
-            row=7, column=1, sticky="w", pady=(10, 0)
+            row=8, column=1, sticky="w", pady=(10, 0)
+        )
+        self._range(
+            left,
+            9,
+            "Restart game tu",
+            self.vars["periodic_restart_min_seconds"],
+            self.vars["periodic_restart_max_seconds"],
+            "s",
         )
 
         ttk.Label(right, text="Nguong farm", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
-        self._field(right, 1, "Combo", self.vars["combo"], values=["Rong Dien"])
+        self._field(right, 1, "Combo", self.vars["combo"], values=self._combo_names())
         self._field(right, 2, "Vang toi thieu", self.vars["gold_min"])
         self._field(right, 3, "Dau toi thieu", self.vars["elixir_min"])
         self._field(right, 4, "Dau den toi thieu", self.vars["dark_min"])
@@ -261,7 +329,7 @@ class COCFarmApp(tk.Tk):
         )
 
     def start_bot(self) -> None:
-        if self.bot_thread and self.bot_thread.is_alive():
+        if self._bot_running():
             self._log("[INFO] Bot dang chay roi.")
             return
         if not self.adb_ready:
@@ -278,12 +346,47 @@ class COCFarmApp(tk.Tk):
         self.stop_event.clear()
         self.pause_event.clear()
         self.status_var.set("Dang khoi dong...")
-        bot = FarmBot(self.config_data, self._log_threadsafe, self.stop_event, self.pause_event)
-        self.bot_thread = threading.Thread(target=bot.run, daemon=True)
-        self.bot_thread.start()
+        devices = self._configured_devices()
+        self.bot_threads = []
+        self.active_devices = devices
+        self.stats_by_device = {}
+        for device in devices:
+            bot_config = copy.deepcopy(self.config_data)
+            bot_config["adb"]["device"] = device
+            bot_config.setdefault("runtime", {})["stats_path"] = f"stats/{self._safe_device_name(device)}.json"
+            bot = FarmBot(
+                bot_config,
+                lambda message, dev=device: self._log_threadsafe(f"[{dev}] {message}"),
+                self.stop_event,
+                self.pause_event,
+                lambda stats, dev=device: self._stats_threadsafe(dev, stats),
+            )
+            thread = threading.Thread(target=bot.run, daemon=True, name=f"FarmBot-{device}")
+            self.bot_threads.append(thread)
+            thread.start()
+        self.bot_thread = self.bot_threads[0] if self.bot_threads else None
+
+    def _bot_running(self) -> bool:
+        return any(thread.is_alive() for thread in self.bot_threads) or bool(
+            self.bot_thread and self.bot_thread.is_alive()
+        )
+
+    def _configured_devices(self) -> list[str]:
+        devices = list(self.config_data["adb"].get("devices") or [])
+        if not devices:
+            devices = [self.config_data["adb"].get("device", "127.0.0.1:5555")]
+        return [device for device in devices if device]
+
+    def _parse_device_list(self, raw: str) -> list[str]:
+        parts = raw.replace("\n", ",").replace(";", ",").split(",")
+        devices = [part.strip() for part in parts if part.strip()]
+        return devices or ["127.0.0.1:5555"]
+
+    def _safe_device_name(self, device: str) -> str:
+        return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in device)
 
     def scan_adb(self) -> None:
-        if self.bot_thread and self.bot_thread.is_alive():
+        if self._bot_running():
             self._log("[ADB] Dung bot truoc khi scan.")
             return
         self.adb_ready = False
@@ -299,8 +402,12 @@ class COCFarmApp(tk.Tk):
             return
 
         devices = []
+        configured_devices = self.config_data["adb"].get("devices") or []
+        for device in configured_devices:
+            if device not in devices:
+                devices.append(device)
         configured_device = self.config_data["adb"].get("device", "")
-        if configured_device:
+        if configured_device and configured_device not in devices:
             devices.append(configured_device)
         for device in COMMON_DEVICES:
             if device not in devices:
@@ -309,6 +416,7 @@ class COCFarmApp(tk.Tk):
         self._log_threadsafe(f"[ADB] Tim thay {len(paths)} path. Dang thu ket noi...")
         for path in paths:
             self._log_threadsafe(f"[ADB] Thu path: {path}")
+            connected_devices = []
             for device in devices:
                 try:
                     client = ADBClient(path, device, log=self._log_threadsafe)
@@ -318,12 +426,18 @@ class COCFarmApp(tk.Tk):
                     self._log_threadsafe(f"[ADB] Fail {device}: {exc}")
                     continue
 
+                self._log_threadsafe(f"[ADB] OK: {path} | {device}")
+                connected_devices.append(device)
+
+            if connected_devices:
                 self.config_data["adb"]["path"] = path
-                self.config_data["adb"]["device"] = device
+                self.config_data["adb"]["device"] = connected_devices[0]
+                self.config_data["adb"]["devices"] = connected_devices
                 save_config(self.config_data)
                 self.adb_ready = True
-                self._log_threadsafe(f"[ADB] OK: {path} | {device}")
-                self.after(0, lambda: self.status_var.set("ADB da ket noi. Co the Start."))
+                count = len(connected_devices)
+                self._log_threadsafe(f"[ADB] Da ket noi {count} device: {', '.join(connected_devices)}")
+                self.after(0, lambda c=count: self.status_var.set(f"ADB da ket noi {c} device. Co the Start."))
                 return
 
         self._log_threadsafe("[ADB] Co adb.exe nhung khong connect duoc LDPlayer.")
@@ -357,7 +471,7 @@ class COCFarmApp(tk.Tk):
         win.grab_set()
 
         adb_path = tk.StringVar(value=self.config_data["adb"]["path"])
-        device = tk.StringVar(value=self.config_data["adb"]["device"])
+        device = tk.StringVar(value=", ".join(self._configured_devices()))
         tess_path = tk.StringVar(value=self.config_data["ocr"]["tesseract_path"])
         max_next = tk.StringVar(value=str(self.config_data["farm"]["max_next"]))
 
@@ -372,7 +486,9 @@ class COCFarmApp(tk.Tk):
         def save() -> None:
             try:
                 self.config_data["adb"]["path"] = adb_path.get().strip()
-                self.config_data["adb"]["device"] = device.get().strip() or "127.0.0.1:5555"
+                devices = self._parse_device_list(device.get())
+                self.config_data["adb"]["devices"] = devices
+                self.config_data["adb"]["device"] = devices[0]
                 self.config_data["ocr"]["tesseract_path"] = tess_path.get().strip()
                 self.config_data["farm"]["max_next"] = int(max_next.get().replace(",", "").strip())
                 save_config(self.config_data)
@@ -409,12 +525,17 @@ class COCFarmApp(tk.Tk):
         game["skip_restart_game"] = bool(self.vars["skip_restart_game"].get())
         game["auto_stop"] = bool(self.vars["auto_stop"].get())
         game["auto_restart_after_seconds"] = self._int_var("auto_restart_after_seconds")
+        game["periodic_restart_game"] = bool(self.vars["periodic_restart_game"].get())
+        game["periodic_restart_min_seconds"] = self._int_var("periodic_restart_min_seconds")
+        game["periodic_restart_max_seconds"] = self._int_var("periodic_restart_max_seconds")
+        if game["periodic_restart_min_seconds"] > game["periodic_restart_max_seconds"]:
+            raise ValueError("periodic_restart_min_seconds phai <= periodic_restart_max_seconds.")
         game["donate_when_farming"] = bool(self.vars["donate_when_farming"].get())
         game["change_combo_on_start"] = bool(self.vars["change_combo_on_start"].get())
         game["resource_stats"] = bool(self.vars["resource_stats"].get())
         game["restart_if_attack_missing"] = bool(self.vars["restart_if_attack_missing"].get())
 
-        farm["combo"] = "Rong Dien"
+        farm["combo"] = str(self.vars["combo"].get())
         farm["deploy_mode"] = self._deploy_value(str(self.vars["deploy_mode"].get()))
         farm["gold_min"] = self._money_var("gold_min")
         farm["elixir_min"] = self._money_var("elixir_min")
@@ -459,22 +580,64 @@ class COCFarmApp(tk.Tk):
     def _log_threadsafe(self, message: str) -> None:
         self.log_queue.put(message)
 
+    def _stats_threadsafe(self, device: str, stats: dict) -> None:
+        self.stats_queue.put({"device": device, "stats": stats})
+
     def _log(self, message: str) -> None:
         self.log_text.insert("end", message + "\n")
         self.log_text.see("end")
 
     def _drain_logs(self) -> None:
+        self._drain_stats()
         while True:
             try:
                 message = self.log_queue.get_nowait()
             except queue.Empty:
                 break
             self._log(message)
-            if message.startswith("[INFO] Bot started"):
+            if "Bot started" in message:
                 self.status_var.set("Dang chay...")
-            if message.startswith("[INFO] Bot stopped") or message.startswith("[ERROR]"):
+            if "Bot stopped" in message and not self._bot_running():
+                self.status_var.set("Da dung.")
+            if "[ERROR]" in message and not self._bot_running():
                 self.status_var.set("Da dung.")
         self.after(120, self._drain_logs)
+
+    def _drain_stats(self) -> None:
+        latest = None
+        while True:
+            try:
+                latest = self.stats_queue.get_nowait()
+            except queue.Empty:
+                break
+            if latest:
+                device = latest.get("device", "")
+                self.stats_by_device[device] = latest.get("stats", {})
+        if self.stats_by_device:
+            self._update_stats_display(self._aggregate_session_stats())
+
+    def _aggregate_session_stats(self) -> dict:
+        keys = ("attacks", "next", "gold_seen", "elixir_seen", "dark_seen")
+        total = {key: 0 for key in keys}
+        for stats in self.stats_by_device.values():
+            session = stats.get("current_session", stats)
+            for key in keys:
+                total[key] += int(session.get(key, 0))
+        return total
+
+    def _update_stats_display(self, stats: dict) -> None:
+        session = stats.get("current_session", stats)
+        labels = {
+            "attacks": "Tran",
+            "next": "Next",
+            "gold_seen": "Vang",
+            "elixir_seen": "Dau",
+            "dark_seen": "Dau den",
+        }
+        for key, label in labels.items():
+            value = int(session.get(key, 0))
+            if key in self.stat_vars:
+                self.stat_vars[key].set(f"{label}: {value:,}")
 
 
 if __name__ == "__main__":
