@@ -4,7 +4,8 @@
     "device": "127.0.0.1:5555",
     "devices": [],
     "package": "com.supercell.clashofclans",
-    "connect_on_start": true
+    "connect_on_start": true,
+    "deep_scan": false
   },
   "runtime": {
     "stats_path": "stats.json"
@@ -27,7 +28,8 @@
     "restart_if_attack_missing": true,
     "attack_missing_retries": 3,
     "restart_wait_seconds": 18,
-    "max_consecutive_cycle_errors": 8
+    "max_consecutive_cycle_errors": 8,
+    "max_home_restart_failures": 3
   },
   "farm": {
     "village": "main",
@@ -54,7 +56,8 @@
     "total_remaining_less_than": 200000,
     "never_surrender": true,
     "max_battle_seconds": 175,
-    "damage_jump_confirm_percent": 40
+    "damage_jump_confirm_percent": 40,
+    "damage_jump_max_pending_reads": 3
   },
   "ocr": {
     "enabled": true,

@@ -42,7 +42,7 @@ COMMON_DEVICES = [
 ]
 
 
-def discover_adb_paths(configured_path: str = "") -> list[str]:
+def discover_adb_paths(configured_path: str = "", deep_scan: bool = False) -> list[str]:
     candidates: list[Path] = []
     if configured_path:
         candidates.append(Path(configured_path))
@@ -52,6 +52,24 @@ def discover_adb_paths(configured_path: str = "") -> list[str]:
     if path_adb:
         candidates.append(Path(path_adb))
 
+    if deep_scan:
+        candidates.extend(_deep_discover_adb_paths())
+
+    found: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        try:
+            resolved = str(item.resolve())
+        except OSError:
+            resolved = str(item)
+        if resolved not in seen and item.exists():
+            seen.add(resolved)
+            found.append(resolved)
+    return found
+
+
+def _deep_discover_adb_paths() -> list[Path]:
+    candidates: list[Path] = []
     for root in [
         Path(r"C:\LDPlayer"),
         Path(r"D:\LDPlayer"),
@@ -70,18 +88,7 @@ def discover_adb_paths(configured_path: str = "") -> list[str]:
                     candidates.extend(child.rglob("dnadb.exe"))
         except OSError:
             continue
-
-    found: list[str] = []
-    seen: set[str] = set()
-    for item in candidates:
-        try:
-            resolved = str(item.resolve())
-        except OSError:
-            resolved = str(item)
-        if resolved not in seen and item.exists():
-            seen.add(resolved)
-            found.append(resolved)
-    return found
+    return candidates
 
 
 class ADBClient:
@@ -193,7 +200,17 @@ class ADBClient:
             return fixed
 
         preview = data[:16].hex(" ")
-        raise ADBError(f"Screencap PNG hong. Header={preview}")
+        fixed_preview = fixed[:16].hex(" ")
+        self.log(
+            "[ADB] Screencap khong phai PNG hop le sau khi sua CRLF. "
+            f"Header={preview} | Fixed={fixed_preview}. "
+            "Se retry; neu lap lai, thu doi adb.exe/LDPlayer ADB hoac dung exec-out khac."
+        )
+        raise ADBError(
+            "Screencap PNG hong sau normalize CRLF. "
+            f"Header={preview}; fixed={fixed_preview}. "
+            "Goi y: doi adb.exe/LDPlayer ADB hoac kiem tra ket noi gia lap."
+        )
 
     def sleep_after_action(self, seconds: float) -> None:
         if seconds > 0:

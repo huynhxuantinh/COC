@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useConfigEditor } from "../hooks/useConfigEditor";
 import type { BotStatus } from "../services/types";
 import { StatusBadge } from "./StatusBadge";
 
@@ -11,6 +12,8 @@ const navItems = [
 ];
 
 export function AppShell({ status }: { status: BotStatus | null }) {
+  const { isDirty } = useConfigEditor();
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.14),_transparent_32%),linear-gradient(145deg,#090b10,#111827_55%,#0f131b)] text-slate-100">
       <div className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col gap-4 px-4 py-4 lg:flex-row lg:gap-6 lg:px-6">
@@ -23,6 +26,7 @@ export function AppShell({ status }: { status: BotStatus | null }) {
             </div>
             <StatusBadge status={status} />
           </div>
+
           <nav className="mt-5 grid grid-cols-2 gap-2 lg:grid-cols-1">
             {navItems.map((item) => (
               <NavLink
@@ -38,14 +42,21 @@ export function AppShell({ status }: { status: BotStatus | null }) {
               </NavLink>
             ))}
           </nav>
+
           <div className="mt-5 rounded-xl border border-white/10 bg-black/25 p-4 text-sm text-slate-300">
             <p className="font-semibold text-white">Trạng thái</p>
             <p className="mt-2 text-slate-400">{status?.status ?? "Đang kết nối backend..."}</p>
+            {isDirty ? (
+              <p className="mt-3 rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-xs font-semibold text-amber-100">
+                Có thay đổi chưa lưu
+              </p>
+            ) : null}
             {status?.active_devices?.length ? (
               <p className="mt-2 text-xs text-slate-500">Device: {status.active_devices.join(", ")}</p>
             ) : null}
           </div>
         </aside>
+
         <main className="min-w-0 flex-1 pb-6">
           <Outlet />
         </main>

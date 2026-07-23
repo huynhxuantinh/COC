@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 import queue
 import threading
@@ -8,8 +7,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, ttk
 
-from adb_client import ADBClient, ADBError, COMMON_DEVICES, discover_adb_paths
-from bot import FarmBot
+from bot_runtime import configured_devices, scan_adb_connection, start_farm_threads
 from config_manager import load_config, save_config
 
 
@@ -513,24 +511,15 @@ class COCFarmApp(tk.Tk):
         self.stop_event.clear()
         self.pause_event.clear()
         self.status_var.set("Đang khởi động...")
-        devices = self._configured_devices()
         self.bot_threads = []
-        self.active_devices = devices
         self.stats_by_device = {}
-        for device in devices:
-            bot_config = copy.deepcopy(self.config_data)
-            bot_config["adb"]["device"] = device
-            bot_config.setdefault("runtime", {})["stats_path"] = f"stats/{self._safe_device_name(device)}.json"
-            bot = FarmBot(
-                bot_config,
-                lambda message, dev=device: self._log_threadsafe(f"[{dev}] {message}"),
-                self.stop_event,
-                self.pause_event,
-                lambda stats, dev=device: self._stats_threadsafe(dev, stats),
-            )
-            thread = threading.Thread(target=bot.run, daemon=True, name=f"FarmBot-{device}")
-            self.bot_threads.append(thread)
-            thread.start()
+        self.bot_threads, self.active_devices = start_farm_threads(
+            self.config_data,
+            self._log_threadsafe,
+            self.stop_event,
+            self.pause_event,
+            self._stats_threadsafe,
+        )
         self.bot_thread = self.bot_threads[0] if self.bot_threads else None
 
     def _bot_running(self) -> bool:
@@ -538,17 +527,10 @@ class COCFarmApp(tk.Tk):
             self.bot_thread and self.bot_thread.is_alive()
         )
 
-    def _configured_devices(self) -> list[str]:
-        device = self.config_data["adb"].get("device", "127.0.0.1:5555")
-        return [device]
-
     def _parse_device_list(self, raw: str) -> list[str]:
         parts = raw.replace("\n", ",").replace(";", ",").split(",")
         devices = [part.strip() for part in parts if part.strip()]
         return devices or ["127.0.0.1:5555"]
-
-    def _safe_device_name(self, device: str) -> str:
-        return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in device)
 
     def scan_adb(self) -> None:
         if self._bot_running():
@@ -560,47 +542,16 @@ class COCFarmApp(tk.Tk):
 
     def _scan_adb_worker(self) -> None:
         self._log_threadsafe("[ADB] Đang quét adb.exe...")
-        paths = discover_adb_paths(self.config_data["adb"].get("path", ""))
-        if not paths:
-            self._log_threadsafe("[ADB] Không tìm thấy adb.exe. Bấm Cài đặt để chọn file.")
-            self.after(0, lambda: self.status_var.set("Không thấy ADB."))
+        try:
+            scan_adb_connection(self.config_data, self._log_threadsafe)
+        except RuntimeError as exc:
+            status = "Không thấy ADB." if "Không tìm thấy" in str(exc) else "Kết nối ADB thất bại."
+            self.after(0, lambda: self.status_var.set(status))
             return
 
-        devices = []
-        configured_devices = self.config_data["adb"].get("devices") or []
-        for device in configured_devices:
-            if device not in devices:
-                devices.append(device)
-        configured_device = self.config_data["adb"].get("device", "")
-        if configured_device and configured_device not in devices:
-            devices.append(configured_device)
-        for device in COMMON_DEVICES:
-            if device not in devices:
-                devices.append(device)
-
-        self._log_threadsafe(f"[ADB] Tìm thấy {len(paths)} path. Đang thử kết nối...")
-        for path in paths:
-            self._log_threadsafe(f"[ADB] Thử path: {path}")
-            for device in devices:
-                try:
-                    client = ADBClient(path, device, log=self._log_threadsafe)
-                    client.connect()
-                    client.screencap_png()
-                except ADBError as exc:
-                    self._log_threadsafe(f"[ADB] Fail {device}: {exc}")
-                    continue
-
-                self.config_data["adb"]["path"] = path
-                self.config_data["adb"]["device"] = device
-                self.config_data["adb"]["devices"] = []
-                save_config(self.config_data)
-                self.adb_ready = True
-                self._log_threadsafe(f"[ADB] OK: {path} | {device}")
-                self.after(0, lambda: self.status_var.set("ADB đã kết nối 1 device. Có thể Bắt đầu."))
-                return
-
-        self._log_threadsafe("[ADB] Có adb.exe nhưng không kết nối được LDPlayer.")
-        self.after(0, lambda: self.status_var.set("Kết nối ADB thất bại."))
+        save_config(self.config_data)
+        self.adb_ready = True
+        self.after(0, lambda: self.status_var.set("ADB đã kết nối 1 device. Có thể Bắt đầu."))
 
     def toggle_pause(self) -> None:
         if self.pause_event.is_set():
@@ -631,7 +582,7 @@ class COCFarmApp(tk.Tk):
         win.grab_set()
 
         adb_path = tk.StringVar(value=self.config_data["adb"]["path"])
-        device = tk.StringVar(value=self._configured_devices()[0])
+        device = tk.StringVar(value=configured_devices(self.config_data)[0])
         tess_path = tk.StringVar(value=self.config_data["ocr"]["tesseract_path"])
         max_next = tk.StringVar(value=str(self.config_data["farm"]["max_next"]))
 

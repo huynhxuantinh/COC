@@ -38,6 +38,12 @@ export function SettingsPage() {
         )}
         <div className="grid gap-4">
           <TextInput label="ADB path" hint="Có thể để trống để tool tự dò adb.exe." value={adb.path ?? ""} onChange={(event) => updatePath(["adb", "path"], event.target.value)} />
+          <Toggle
+            label="Quét sâu tìm ADB"
+            hint="Mặc định tắt để Quét ADB nhanh hơn. Chỉ bật nếu path phổ biến không tìm thấy adb.exe."
+            checked={Boolean(adb.deep_scan)}
+            onChange={(value) => updatePath(["adb", "deep_scan"], value)}
+          />
           <TextInput label="Device" value={adb.device ?? "127.0.0.1:5555"} onChange={(event) => updatePath(["adb", "device"], event.target.value)} />
           <TextInput label="Package game" value={adb.package ?? "com.supercell.clashofclans"} onChange={(event) => updatePath(["adb", "package"], event.target.value)} />
           <TextInput label="Tesseract path" hint="Ví dụ: C:\\Program Files\\Tesseract-OCR\\tesseract.exe" value={ocr.tesseract_path ?? ""} onChange={(event) => updatePath(["ocr", "tesseract_path"], event.target.value)} />

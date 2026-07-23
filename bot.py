@@ -42,11 +42,14 @@ class FarmBot:
         self.active_combo = self._select_active_combo()
         self.active_deploy = self._active_deploy()
         self.current_attack_view = ""
+        self.home_restart_failures = 0
 
     def run(self) -> None:
         try:
             if self.config["adb"]["connect_on_start"]:
                 self.adb.connect()
+            if not self._ocr_ready_or_stop():
+                return
             self.log(f"[COMBO] Dang dung: {self.active_combo}.")
             if not self.config["game"]["skip_restart_game"]:
                 self.log("[GAME] Start Clash of Clans.")
@@ -128,6 +131,17 @@ class FarmBot:
         self.stop_event.set()
         return True
 
+    def _ocr_ready_or_stop(self) -> bool:
+        if self.vision.available:
+            return True
+        tesseract_path = self.config.get("ocr", {}).get("tesseract_path") or "PATH/default Windows path"
+        self.log(
+            "[ERROR] OCR chua san sang. Kiem tra ocr.tesseract_path, cai Tesseract OCR, "
+            f"va cai Pillow/pytesseract. Hien tai tesseract_path={tesseract_path!r}."
+        )
+        self.stop_event.set()
+        return False
+
     def _select_active_combo(self) -> str:
         combos = self.config.get("combos", {})
         if not combos:
@@ -194,6 +208,7 @@ class FarmBot:
             if self.vision.has_home_attack_button(png):
                 if attempt > 1:
                     self.log("[HOME] Attack button found.")
+                self.home_restart_failures = 0
                 return True
             self.log(f"[HOME] Khong thay nut Attack ({attempt}/{retries}).")
             self._sleep(1)
@@ -207,10 +222,19 @@ class FarmBot:
         png = self.adb.screencap_png()
         if self.vision.has_home_attack_button(png):
             self.log("[HOME] Restart xong, da thay nut Attack.")
+            self.home_restart_failures = 0
             return True
 
         self._dump_debug_png("home_attack_missing_after_restart", png)
-        self.log("[HOME] Restart xong nhung van khong thay nut Attack.")
+        self.home_restart_failures += 1
+        max_failures = int(game.get("max_home_restart_failures", 3))
+        self.log(
+            f"[HOME] Restart xong nhung van khong thay nut Attack "
+            f"({self.home_restart_failures}/{max_failures})."
+        )
+        if max_failures > 0 and self.home_restart_failures >= max_failures:
+            self.log("[ERROR] Qua nhieu lan restart home that bai. Tu dong dung bot.")
+            self.stop_event.set()
         return False
 
     def _search_base(self) -> bool:
@@ -285,6 +309,7 @@ class FarmBot:
         self._deploy_troops()
         deploy_finished = time.time()
         self._cast_spells(deploy_finished)
+        self._activate_post_deploy_slots(deploy_finished)
         self._monitor_battle(attack_start)
 
     def _prepare_camera(self) -> None:
@@ -326,6 +351,7 @@ class FarmBot:
                     break
                 x, y = points[i % len(points)]
                 self.adb.tap(x, y)
+                self._optimized_action_pause()
                 self._sleep(delay)
 
     def _cast_spells(self, deploy_finished: float) -> None:
@@ -348,6 +374,7 @@ class FarmBot:
             for x, y in points[:max_casts]:
                 self._spell_random_delay(spell["slot"])
                 self.adb.tap(int(x), int(y))
+                self._optimized_action_pause()
                 self._sleep(0.18)
 
     def _cast_spell_groups(self, spell_groups: list[dict[str, Any]], deploy_finished: float) -> None:
@@ -375,7 +402,35 @@ class FarmBot:
                 self._tap_slot(slot)
                 self._spell_random_delay(slot)
                 self.adb.tap(int(x), int(y))
+                self._optimized_action_pause()
                 self._sleep(delay_between)
+
+    def _activate_post_deploy_slots(self, deploy_finished: float) -> None:
+        if not self._custom_attack_timing_enabled():
+            return
+
+        activations = [
+            ("hero", "hero_skill_min_ms", "hero_skill_max_ms", "Skill tuong"),
+            ("siege", "siege_activation_min_ms", "siege_activation_max_ms", "Quan giao"),
+        ]
+        scheduled: list[tuple[float, str, str]] = []
+        for slot, min_key, max_key, label in activations:
+            if not self._sequence_uses_slot(slot):
+                continue
+            delay = self._random_timing_seconds(min_key, max_key)
+            scheduled.append((delay, slot, label))
+
+        for delay, slot, label in sorted(scheduled):
+            while time.time() - deploy_finished < delay and not self.stop_event.is_set():
+                self._sleep(0.1)
+            if self.stop_event.is_set():
+                return
+            if slot == "hero":
+                hero_search_delay = float(self._attack_timing().get("hero_search_delay_seconds", 0))
+                if hero_search_delay > 0:
+                    self._sleep(hero_search_delay)
+            self.log(f"[SKILL] Activate {label} ({slot}).")
+            self._tap_slot(slot)
 
     def _monitor_battle(self, attack_start: float) -> None:
         surrender = self.config["surrender"]
@@ -389,8 +444,9 @@ class FarmBot:
         )
         max_seconds = min(int(surrender["max_battle_seconds"]), 175)
         best_damage = -1
-        pending_damage = -1
+        pending_damage: dict[str, int] = {"value": -1, "reads": 0}
         max_jump = int(surrender.get("damage_jump_confirm_percent", 40))
+        max_pending_reads = int(surrender.get("damage_jump_max_pending_reads", 3))
 
         self.log(f"[BATTLE] Monitor. time={target_time}s, damage={target_damage}%.")
         while not self.stop_event.is_set():
@@ -403,6 +459,7 @@ class FarmBot:
                 best_damage,
                 pending_damage,
                 max_jump,
+                max_pending_reads,
             )
             damage = best_damage
             loot = self.vision.read_loot(png) if self.vision.available else {}
@@ -437,9 +494,10 @@ class FarmBot:
         self,
         raw_damage: int,
         best_damage: int,
-        pending_damage: int,
+        pending_damage: dict[str, int],
         max_jump: int,
-    ) -> tuple[int, int]:
+        max_pending_reads: int,
+    ) -> tuple[int, dict[str, int]]:
         if raw_damage < 0:
             return best_damage, pending_damage
         if raw_damage < best_damage:
@@ -448,13 +506,25 @@ class FarmBot:
 
         baseline = max(best_damage, 0)
         if best_damage >= 0 and raw_damage - baseline > max_jump:
-            if pending_damage >= 0 and abs(raw_damage - pending_damage) <= 5:
+            pending_value = int(pending_damage.get("value", -1))
+            pending_reads = int(pending_damage.get("reads", 0))
+            if pending_value >= 0 and abs(raw_damage - pending_value) <= 5:
                 self.log(f"[BATTLE] Confirm OCR damage jump {best_damage}% -> {raw_damage}%.")
-                return raw_damage, -1
-            self.log(f"[BATTLE] Hold OCR damage jump {best_damage}% -> {raw_damage}% for confirm.")
-            return best_damage, raw_damage
+                return raw_damage, {"value": -1, "reads": 0}
+            pending_reads = pending_reads + 1 if pending_value >= 0 else 1
+            if max_pending_reads > 0 and pending_reads >= max_pending_reads:
+                self.log(
+                    f"[BATTLE] Accept OCR damage jump after hold "
+                    f"{best_damage}% -> {raw_damage}% ({pending_reads}/{max_pending_reads})."
+                )
+                return raw_damage, {"value": -1, "reads": 0}
+            self.log(
+                f"[BATTLE] Hold OCR damage jump {best_damage}% -> {raw_damage}% "
+                f"({pending_reads}/{max_pending_reads}) for confirm."
+            )
+            return best_damage, {"value": raw_damage, "reads": pending_reads}
 
-        return raw_damage, -1
+        return raw_damage, {"value": -1, "reads": 0}
 
     def _wait_return_home(self) -> None:
         self.log("[RESULT] Wait result screen.")
@@ -587,11 +657,13 @@ class FarmBot:
     def _tap_coord(self, name: str) -> None:
         x, y = self.config["coords"][name]
         self.adb.tap(int(x), int(y))
+        self._optimized_action_pause()
         self._sleep(self._after_click_seconds())
 
     def _tap_slot(self, name: str) -> None:
         x, y = self.config["coords"]["slots"][name]
         self.adb.tap(int(x), int(y))
+        self._optimized_action_pause()
         self._sleep(0.18)
 
     def _tap_limit(self, value: Any, fallback: int) -> int:
@@ -626,17 +698,35 @@ class FarmBot:
                 return slot
         return ""
 
+    def _sequence_uses_slot(self, slot: str) -> bool:
+        for step in self.active_deploy.get("sequence", []):
+            if step.get("slot") == slot and self._tap_limit(step.get("count", 0), int(step.get("max_taps", 0))) > 0:
+                return True
+        return False
+
     def _attack_timing(self) -> dict[str, Any]:
         return self.config.get("attack_timing", {})
 
     def _custom_attack_timing_enabled(self) -> bool:
         return not bool(self._attack_timing().get("use_default", True))
 
+    def _optimized_action_pause(self) -> None:
+        if self._custom_attack_timing_enabled() and self._attack_timing().get("optimized_mode", False):
+            self._sleep(0.12)
+
     def _troop_delay_seconds(self, fallback: float) -> float:
         if not self._custom_attack_timing_enabled():
             return fallback
         timing = self._attack_timing()
         return max(0.0, float(timing.get("troop_delay_ms", int(fallback * 1000))) / 1000.0)
+
+    def _random_timing_seconds(self, min_key: str, max_key: str) -> float:
+        timing = self._attack_timing()
+        minimum = int(timing.get(min_key, 0))
+        maximum = int(timing.get(max_key, minimum))
+        if maximum < minimum:
+            maximum = minimum
+        return random.randint(minimum, maximum) / 1000.0
 
     def _spell_random_delay(self, slot: str) -> None:
         if not self._custom_attack_timing_enabled():

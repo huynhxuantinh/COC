@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { getConfig, getOptions, saveConfig } from "../services/configApi";
 import { apiErrorMessage } from "../services/http";
 import type { AppConfig, OptionsPayload } from "../services/types";
@@ -25,13 +26,34 @@ export function numberValue(value: string): number {
   return Number.parseInt(normalized || "0", 10);
 }
 
-export function useConfigEditor() {
+function configSignature(config: AppConfig | null): string {
+  return config ? JSON.stringify(config) : "";
+}
+
+type ConfigEditorContextValue = {
+  config: AppConfig | null;
+  options: OptionsPayload | null;
+  loading: boolean;
+  saving: boolean;
+  error: string;
+  savedMessage: string;
+  isDirty: boolean;
+  updatePath: (path: string[], value: unknown) => void;
+  save: () => Promise<void>;
+  reload: () => Promise<void>;
+};
+
+const ConfigEditorContext = createContext<ConfigEditorContextValue | null>(null);
+
+export function ConfigEditorProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [options, setOptions] = useState<OptionsPayload | null>(null);
+  const [savedSignature, setSavedSignature] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
+  const isDirty = Boolean(config) && configSignature(config) !== savedSignature;
 
   const load = useCallback(async () => {
     setError("");
@@ -39,6 +61,7 @@ export function useConfigEditor() {
     try {
       const [configPayload, optionsPayload] = await Promise.all([getConfig(), getOptions()]);
       setConfig(configPayload);
+      setSavedSignature(configSignature(configPayload));
       setOptions(optionsPayload);
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -52,6 +75,7 @@ export function useConfigEditor() {
   }, [load]);
 
   const updatePath = useCallback((path: string[], value: unknown) => {
+    setSavedMessage("");
     setConfig((current) => (current ? setConfigPath(current, path, value) : current));
   }, []);
 
@@ -65,6 +89,7 @@ export function useConfigEditor() {
     try {
       const saved = await saveConfig(config);
       setConfig(saved);
+      setSavedSignature(configSignature(saved));
       setSavedMessage("Đã lưu cấu hình. Cần quét ADB lại trước khi chạy.");
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -73,5 +98,30 @@ export function useConfigEditor() {
     }
   }, [config]);
 
-  return { config, options, loading, saving, error, savedMessage, updatePath, save, reload: load };
+  useEffect(() => {
+    if (!isDirty) {
+      return;
+    }
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  const value = useMemo(
+    () => ({ config, options, loading, saving, error, savedMessage, isDirty, updatePath, save, reload: load }),
+    [config, options, loading, saving, error, savedMessage, isDirty, updatePath, save, load],
+  );
+
+  return <ConfigEditorContext.Provider value={value}>{children}</ConfigEditorContext.Provider>;
+}
+
+export function useConfigEditor() {
+  const context = useContext(ConfigEditorContext);
+  if (!context) {
+    throw new Error("useConfigEditor must be used within ConfigEditorProvider");
+  }
+  return context;
 }

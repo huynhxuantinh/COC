@@ -49,6 +49,6 @@ def test_tap(payload: TapPayload) -> ApiMessage:
 @router.post("/save-points", response_model=ConfigPayload)
 def save_points(payload: SavePointsPayload) -> ConfigPayload:
     try:
-        return ConfigPayload(config=bot_service.save_points(payload.target, payload.points))
+        return ConfigPayload(config=bot_service.save_points(payload.target, payload.points, payload.combo_name))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

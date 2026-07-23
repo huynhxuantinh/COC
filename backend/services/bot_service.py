@@ -9,12 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from adb_client import ADBClient, ADBError, COMMON_DEVICES, discover_adb_paths
-from bot import FarmBot
+from adb_client import ADBClient
+from bot_runtime import STAT_KEYS, scan_adb_connection, start_farm_threads
 from config_manager import load_config, save_config
-
-
-STAT_KEYS = ("attacks", "next", "gold_seen", "elixir_seen", "dark_seen")
 
 
 class BotService:
@@ -97,40 +94,18 @@ class BotService:
             self.status = "Đang quét ADB..."
         self._log("[ADB] Đang quét adb.exe...")
 
-        paths = discover_adb_paths(self.config_data["adb"].get("path", ""))
-        if not paths:
+        try:
+            scan_adb_connection(self.config_data, self._log)
+        except RuntimeError as exc:
             with self.lock:
-                self.status = "Không thấy ADB."
-            self._log("[ADB] Không tìm thấy adb.exe. Vào Cài đặt để chọn file.")
-            raise RuntimeError("Không tìm thấy adb.exe.")
-
-        devices = self._candidate_devices()
-        self._log(f"[ADB] Tìm thấy {len(paths)} path. Đang thử kết nối...")
-        for path in paths:
-            self._log(f"[ADB] Thử path: {path}")
-            for device in devices:
-                try:
-                    client = ADBClient(path, device, log=self._log)
-                    client.connect()
-                    client.screencap_png()
-                except ADBError as exc:
-                    self._log(f"[ADB] Fail {device}: {exc}")
-                    continue
-
-                with self.lock:
-                    self.config_data["adb"]["path"] = path
-                    self.config_data["adb"]["device"] = device
-                    self.config_data["adb"]["devices"] = []
-                    save_config(self.config_data)
-                    self.adb_ready = True
-                    self.status = "ADB đã kết nối 1 device. Có thể bắt đầu."
-                self._log(f"[ADB] OK: {path} | {device}")
-                return self.get_status()
+                self.status = "Không thấy ADB." if "Không tìm thấy" in str(exc) else "Kết nối ADB thất bại."
+            raise
 
         with self.lock:
-            self.status = "Kết nối ADB thất bại."
-        self._log("[ADB] Có adb.exe nhưng không kết nối được LDPlayer.")
-        raise RuntimeError("Kết nối ADB thất bại.")
+            save_config(self.config_data)
+            self.adb_ready = True
+            self.status = "ADB đã kết nối 1 device. Có thể bắt đầu."
+        return self.get_status()
 
     def start_bot(self) -> dict[str, Any]:
         with self.lock:
@@ -146,25 +121,14 @@ class BotService:
             self.stop_event.clear()
             self.pause_event.clear()
             self.status = "Đang khởi động..."
-            devices = self._configured_devices()
-            self.bot_threads = []
-            self.active_devices = devices
             self.stats_by_device = {}
-
-            for device in devices:
-                bot_config = copy.deepcopy(self.config_data)
-                bot_config["adb"]["device"] = device
-                bot_config.setdefault("runtime", {})["stats_path"] = f"stats/{self._safe_device_name(device)}.json"
-                bot = FarmBot(
-                    bot_config,
-                    lambda message, dev=device: self._log(f"[{dev}] {message}"),
-                    self.stop_event,
-                    self.pause_event,
-                    lambda stats, dev=device: self._stats_threadsafe(dev, stats),
-                )
-                thread = threading.Thread(target=bot.run, daemon=True, name=f"FarmBot-{device}")
-                self.bot_threads.append(thread)
-                thread.start()
+            self.bot_threads, self.active_devices = start_farm_threads(
+                self.config_data,
+                self._log,
+                self.stop_event,
+                self.pause_event,
+                self._stats_threadsafe,
+            )
         return self.get_status()
 
     def toggle_pause(self) -> dict[str, Any]:
@@ -261,7 +225,7 @@ class BotService:
         client.tap(int(x), int(y), jitter=0)
         self._log(f"[COORD] Test tap {int(x)},{int(y)}.")
 
-    def save_points(self, target: str, points: list[list[int]]) -> dict[str, Any]:
+    def save_points(self, target: str, points: list[list[int]], combo_name: str = "") -> dict[str, Any]:
         allowed = {
             "edge_top": ["deploy", "edge_points", "top"],
             "edge_bottom": ["deploy", "edge_points", "bottom"],
@@ -281,27 +245,27 @@ class BotService:
         with self.lock:
             self._set_config_path(self.config_data, allowed[target], normalized)
             combos = self.config_data.get("combos", {})
-            combo_name = self.config_data.get("farm", {}).get("combo")
-            if combo_name in combos:
-                combo_deploy = combos[combo_name].setdefault("deploy", copy.deepcopy(self.config_data.get("deploy", {})))
-                self._set_config_path(combo_deploy, allowed[target][1:] if allowed[target][0] == "deploy" else allowed[target], normalized)
+            selected_combo = combo_name or self.config_data.get("farm", {}).get("combo", "")
+            combo_path = allowed[target][1:] if allowed[target][0] == "deploy" else allowed[target]
+            updated_combos: list[str] = []
+
+            if selected_combo == "__global__":
+                updated_combos = []
+            elif selected_combo == "__all__":
+                for name, combo in combos.items():
+                    combo_deploy = combo.setdefault("deploy", copy.deepcopy(self.config_data.get("deploy", {})))
+                    self._set_config_path(combo_deploy, combo_path, normalized)
+                    updated_combos.append(str(name))
+            elif selected_combo:
+                if selected_combo not in combos:
+                    raise ValueError(f"Combo khong hop le: {selected_combo}")
+                combo_deploy = combos[selected_combo].setdefault("deploy", copy.deepcopy(self.config_data.get("deploy", {})))
+                self._set_config_path(combo_deploy, combo_path, normalized)
+                updated_combos.append(selected_combo)
             save_config(self.config_data)
-        self._log(f"[COORD] Saved {len(normalized)} point(s) to {target}.")
+        combo_label = ", ".join(updated_combos) if updated_combos else "global deploy"
+        self._log(f"[COORD] Saved {len(normalized)} point(s) to {target} | {combo_label}.")
         return self.get_config()
-
-    def _candidate_devices(self) -> list[str]:
-        devices: list[str] = []
-        configured_device = self.config_data["adb"].get("device", "")
-        if configured_device:
-            devices.append(configured_device)
-        for device in COMMON_DEVICES:
-            if device not in devices:
-                devices.append(device)
-        return devices
-
-    def _configured_devices(self) -> list[str]:
-        device = self.config_data["adb"].get("device", "127.0.0.1:5555")
-        return [device]
 
     def _bot_running_locked(self) -> bool:
         return any(thread.is_alive() for thread in self.bot_threads)
@@ -409,9 +373,6 @@ class BotService:
         for min_key, max_key, label in timing_ranges:
             if int(attack_timing.get(min_key, 0)) > int(attack_timing.get(max_key, 0)):
                 raise ValueError(f"{label}: gia tri tu phai <= den.")
-
-    def _safe_device_name(self, device: str) -> str:
-        return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in device)
 
     def _set_config_path(self, root: dict[str, Any], path: list[str], value: Any) -> None:
         cursor: Any = root

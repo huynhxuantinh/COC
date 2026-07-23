@@ -65,6 +65,13 @@ $env:VITE_API_BASE_URL="http://127.0.0.1:8000"
 npm run dev
 ```
 
+Nếu frontend chạy cổng/domain khác, cấu hình CORS cho backend:
+
+```powershell
+$env:COC_CORS_ORIGINS="http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:3000"
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
 ## Ghi chú
 
 - Code Tkinter cũ ở gốc vẫn giữ nguyên.

@@ -76,3 +76,4 @@ class TapPayload(BaseModel):
 class SavePointsPayload(BaseModel):
     target: str
     points: list[list[int]]
+    combo_name: str = ""

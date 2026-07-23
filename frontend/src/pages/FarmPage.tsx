@@ -69,6 +69,7 @@ export function FarmPage() {
         <div className="mt-4 grid gap-4 md:grid-cols-3">
           <TextInput label="Tự động dừng sau (giây)" value={String(game.auto_restart_after_seconds)} onChange={(event) => updatePath(["game", "auto_restart_after_seconds"], numberValue(event.target.value))} />
           <TextInput label="Số lỗi cycle liên tiếp tối đa" value={String(game.max_consecutive_cycle_errors)} onChange={(event) => updatePath(["game", "max_consecutive_cycle_errors"], numberValue(event.target.value))} />
+          <TextInput label="Restart home fail tối đa" value={String(game.max_home_restart_failures ?? 3)} onChange={(event) => updatePath(["game", "max_home_restart_failures"], numberValue(event.target.value))} />
           <TextInput label="Thời gian chờ restart game" value={String(game.restart_wait_seconds)} onChange={(event) => updatePath(["game", "restart_wait_seconds"], numberValue(event.target.value))} />
         </div>
       </Card>

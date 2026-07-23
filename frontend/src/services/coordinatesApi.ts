@@ -20,7 +20,11 @@ export async function testTap(x: number, y: number): Promise<void> {
   await http.post("/api/coordinates/test-tap", { x, y });
 }
 
-export async function saveCoordinatePoints(target: string, points: number[][]): Promise<AppConfig> {
-  const response = await http.post<{ config: AppConfig }>("/api/coordinates/save-points", { target, points });
+export async function saveCoordinatePoints(target: string, points: number[][], comboName = ""): Promise<AppConfig> {
+  const response = await http.post<{ config: AppConfig }>("/api/coordinates/save-points", {
+    target,
+    points,
+    combo_name: comboName,
+  });
   return response.data.config;
 }

@@ -2,7 +2,7 @@ import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { SelectInput } from "../components/FormControls";
-import { getConfig } from "../services/configApi";
+import { useConfigEditor } from "../hooks/useConfigEditor";
 import {
   captureScreenshot,
   listReferenceImages,
@@ -45,10 +45,11 @@ function readPoints(config: AppConfig | null, target: string): number[][] {
 
 export function CoordinatesPage() {
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const [config, setConfig] = useState<AppConfig | null>(null);
+  const { config, options, isDirty, reload } = useConfigEditor();
   const [referenceImages, setReferenceImages] = useState<ReferenceImageItem[]>([]);
   const [referenceName, setReferenceName] = useState("");
   const [target, setTarget] = useState("edge_top");
+  const [comboName, setComboName] = useState("");
   const [image, setImage] = useState<ScreenshotPayload | null>(null);
   const [imageSourceLabel, setImageSourceLabel] = useState("");
   const [points, setPoints] = useState<number[][]>([]);
@@ -58,9 +59,8 @@ export function CoordinatesPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([getConfig(), listReferenceImages()])
-      .then(([configPayload, images]) => {
-        setConfig(configPayload);
+    listReferenceImages()
+      .then((images) => {
         setReferenceImages(images);
         if (images.length > 0) {
           setReferenceName(images[0].name);
@@ -74,6 +74,13 @@ export function CoordinatesPage() {
     setSelectedIndex(null);
   }, [config, target]);
 
+  useEffect(() => {
+    const activeCombo = config?.farm?.combo ?? "";
+    if (activeCombo && !comboName) {
+      setComboName(activeCombo);
+    }
+  }, [config, comboName]);
+
   const imageSrc = image ? `data:image/png;base64,${image.image_base64}` : "";
   const selectedPoint = useMemo(() => {
     if (selectedIndex === null) return null;
@@ -84,6 +91,11 @@ export function CoordinatesPage() {
     label: `${item.label} (${item.width}x${item.height})`,
     value: item.name,
   }));
+  const comboOptions = [
+    ...(options?.combos ?? []).map((name) => ({ label: `Combo: ${name}`, value: name })),
+    { label: "Tất cả combo", value: "__all__" },
+    { label: "Chỉ deploy mặc định", value: "__global__" },
+  ];
 
   async function run(name: string, action: () => Promise<void>) {
     setBusy(name);
@@ -135,9 +147,13 @@ export function CoordinatesPage() {
   }
 
   async function handleSave() {
+    if (isDirty) {
+      setError("Đang có thay đổi cấu hình chưa lưu. Bấm Lưu cấu hình trước rồi hãy lưu tọa độ.");
+      return;
+    }
     await run("save", async () => {
-      const saved = await saveCoordinatePoints(target, points);
-      setConfig(saved);
+      await saveCoordinatePoints(target, points, comboName || config?.farm?.combo || "");
+      await reload();
       setMessage(`Đã lưu ${points.length} tọa độ vào ${targets.find((item) => item.value === target)?.label}.`);
     });
   }
@@ -224,6 +240,12 @@ export function CoordinatesPage() {
 
           <aside className="space-y-4">
             <SelectInput label="Lưu vào nhóm tọa độ" value={target} options={targets} onChange={(event) => setTarget(event.target.value)} />
+            <SelectInput
+              label="Lưu cho combo"
+              value={comboName || config?.farm?.combo || ""}
+              options={comboOptions}
+              onChange={(event) => setComboName(event.target.value)}
+            />
             <div className="grid grid-cols-2 gap-2">
               <Button variant="success" disabled={busy !== ""} onClick={handleSave}>
                 Lưu điểm
