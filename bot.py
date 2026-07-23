@@ -443,14 +443,13 @@ class FarmBot:
         farm = self.config["farm"]
         gold_ok = loot["gold"] >= int(farm["gold_min"])
         elixir_ok = loot["elixir"] >= int(farm["elixir_min"])
-        dark_ok = loot["dark"] >= int(farm["dark_min"])
         total_ok = self._loot_total(loot) >= int(farm["total_min"])
         mode = farm.get("threshold_mode", "any")
         if mode == "all":
-            return gold_ok and elixir_ok and dark_ok and total_ok
+            return gold_ok and elixir_ok and total_ok
         if mode == "total":
-            return total_ok or dark_ok
-        return gold_ok or elixir_ok or dark_ok or total_ok
+            return total_ok
+        return gold_ok or elixir_ok or total_ok
 
     def _surrender_reason(
         self,
@@ -472,11 +471,7 @@ class FarmBot:
         return ""
 
     def _loot_total(self, loot: dict[str, int]) -> int:
-        return (
-            max(loot.get("gold", -1), 0)
-            + max(loot.get("elixir", -1), 0)
-            + max(loot.get("dark", -1), 0)
-        )
+        return max(loot.get("gold", -1), 0) + max(loot.get("elixir", -1), 0)
 
     def _deploy_points(self) -> list[list[int]]:
         mode = self.config["farm"]["deploy_mode"]

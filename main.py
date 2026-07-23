@@ -17,9 +17,23 @@ class COCFarmApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("COC Auto Farm - LDPlayer 1600x900")
-        self.geometry("920x820")
-        self.minsize(860, 720)
-        self.configure(bg="#1f2227")
+        self.geometry("1120x760")
+        self.minsize(900, 640)
+        self.colors = {
+            "bg": "#171a1f",
+            "panel": "#222731",
+            "panel_2": "#282e39",
+            "panel_3": "#11151b",
+            "line": "#394250",
+            "text": "#f3f6f9",
+            "muted": "#9da8b5",
+            "blue": "#2f8cff",
+            "green": "#22c55e",
+            "red": "#ef4444",
+            "amber": "#f59e0b",
+            "slate": "#64748b",
+        }
+        self.configure(bg=self.colors["bg"])
 
         self.config_data = load_config()
         self.log_queue: queue.Queue[str] = queue.Queue()
@@ -33,85 +47,174 @@ class COCFarmApp(tk.Tk):
         self.adb_ready = False
         self.vars: dict[str, tk.Variable] = {}
         self.stat_vars: dict[str, tk.StringVar] = {}
+        self.responsive_mode = ""
 
         self._style()
         self._build_ui()
+        self.bind("<Configure>", self._on_resize)
         self.after(120, self._drain_logs)
 
     def _style(self) -> None:
+        c = self.colors
         style = ttk.Style(self)
         style.theme_use("clam")
-        style.configure("TFrame", background="#1f2227")
-        style.configure("Card.TFrame", background="#2b2f36", relief="flat")
-        style.configure("TLabel", background="#1f2227", foreground="#eef2f6", font=("Segoe UI", 10))
-        style.configure("Card.TLabel", background="#2b2f36", foreground="#eef2f6", font=("Segoe UI", 10))
-        style.configure("Title.TLabel", background="#2b2f36", foreground="#ffffff", font=("Segoe UI", 11, "bold"))
-        style.configure("Muted.TLabel", background="#2b2f36", foreground="#9aa5b1")
-        style.configure("TCheckbutton", background="#2b2f36", foreground="#eef2f6", font=("Segoe UI", 10))
-        style.map("TCheckbutton", background=[("active", "#2b2f36")])
-        style.configure("TRadiobutton", background="#2b2f36", foreground="#eef2f6", font=("Segoe UI", 10))
-        style.map("TRadiobutton", background=[("active", "#2b2f36")])
-        style.configure("TNotebook", background="#1f2227", borderwidth=0)
-        style.configure("TNotebook.Tab", background="#343944", foreground="#dce3ea", padding=(14, 8))
-        style.map("TNotebook.Tab", background=[("selected", "#485161")], foreground=[("selected", "#ffffff")])
-        style.configure("TEntry", fieldbackground="#20242a", foreground="#ffffff", bordercolor="#56606c")
-        style.configure("TCombobox", fieldbackground="#20242a", background="#20242a", foreground="#ffffff")
+        style.configure("TFrame", background=c["bg"])
+        style.configure("Panel.TFrame", background=c["panel"], relief="flat")
+        style.configure("Card.TFrame", background=c["panel_2"], relief="flat")
+        style.configure("TLabel", background=c["bg"], foreground=c["text"], font=("Segoe UI", 10))
+        style.configure("Panel.TLabel", background=c["panel"], foreground=c["text"], font=("Segoe UI", 10))
+        style.configure("Card.TLabel", background=c["panel_2"], foreground=c["text"], font=("Segoe UI", 10))
+        style.configure("Title.TLabel", background=c["panel"], foreground=c["text"], font=("Segoe UI", 12, "bold"))
+        style.configure("CardTitle.TLabel", background=c["panel_2"], foreground=c["text"], font=("Segoe UI", 10, "bold"))
+        style.configure("Muted.TLabel", background=c["panel"], foreground=c["muted"], font=("Segoe UI", 9))
+        style.configure("TCheckbutton", background=c["panel"], foreground=c["text"], font=("Segoe UI", 10))
+        style.map("TCheckbutton", background=[("active", c["panel"])], foreground=[("disabled", c["muted"])])
+        style.configure("TRadiobutton", background=c["panel"], foreground=c["text"], font=("Segoe UI", 10))
+        style.map("TRadiobutton", background=[("active", c["panel"])])
+        style.configure("TNotebook", background=c["panel"], borderwidth=0)
+        style.configure("TNotebook.Tab", background=c["panel_3"], foreground=c["muted"], padding=(16, 9), borderwidth=0)
+        style.map("TNotebook.Tab", background=[("selected", c["panel_2"])], foreground=[("selected", c["text"])])
+        style.configure(
+            "TEntry",
+            fieldbackground=c["panel_3"],
+            foreground=c["text"],
+            bordercolor=c["line"],
+            lightcolor=c["line"],
+            darkcolor=c["line"],
+            padding=(8, 6),
+        )
+        style.configure(
+            "TCombobox",
+            fieldbackground=c["panel_3"],
+            background=c["panel_3"],
+            foreground=c["text"],
+            bordercolor=c["line"],
+            arrowcolor=c["text"],
+            padding=(8, 6),
+        )
 
     def _build_ui(self) -> None:
-        root = tk.Frame(self, bg="#1f2227")
+        root = tk.Frame(self, bg=self.colors["bg"])
         root.pack(fill="both", expand=True, padx=16, pady=16)
+        root.grid_columnconfigure(0, weight=1)
+        root.grid_rowconfigure(2, weight=1)
 
         self._build_header(root)
-        self._build_stats(root)
-        self._build_tabs(root)
-        self._build_logs(root)
+
+        content = tk.Frame(root, bg=self.colors["bg"])
+        content.grid(row=2, column=0, sticky="nsew")
+        self.content_frame = content
+
+        left = tk.Frame(content, bg=self.colors["panel"], padx=14, pady=14)
+        right = tk.Frame(content, bg=self.colors["bg"])
+        self.left_panel = left
+        self.right_panel = right
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(1, weight=1)
+
+        self._build_tabs(left)
+        self._build_stats(right)
+        self._build_logs(right)
+        self._apply_responsive_layout(self.winfo_width())
+
+    def _on_resize(self, event) -> None:
+        if event.widget is self:
+            self._apply_responsive_layout(event.width)
+
+    def _apply_responsive_layout(self, width: int) -> None:
+        if not hasattr(self, "content_frame"):
+            return
+        mode = "compact" if width < 1040 else "wide"
+        if mode == self.responsive_mode:
+            return
+        self.responsive_mode = mode
+
+        content = self.content_frame
+        left = self.left_panel
+        right = self.right_panel
+        left.grid_forget()
+        right.grid_forget()
+
+        if mode == "compact":
+            self.header_frame.grid_columnconfigure(1, weight=0)
+            self.actions_frame.grid(row=1, column=0, sticky="w", pady=(12, 0))
+            content.grid_columnconfigure(0, weight=1, minsize=0)
+            content.grid_columnconfigure(1, weight=0, minsize=0)
+            content.grid_rowconfigure(0, weight=0)
+            content.grid_rowconfigure(1, weight=1)
+            left.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, 12))
+            right.grid(row=1, column=0, sticky="nsew")
+            return
+
+        self.actions_frame.grid(row=0, column=1, sticky="e", pady=0)
+        content.grid_columnconfigure(0, weight=0, minsize=430)
+        content.grid_columnconfigure(1, weight=1, minsize=0)
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_rowconfigure(1, weight=0)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 14), pady=0)
+        right.grid(row=0, column=1, sticky="nsew")
 
     def _build_header(self, parent: tk.Frame) -> None:
-        header = tk.Frame(parent, bg="#2b2f36", padx=14, pady=12)
-        header.pack(fill="x")
+        c = self.colors
+        header = tk.Frame(parent, bg=c["panel"], padx=16, pady=14)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+        self.header_frame = header
 
+        title_box = tk.Frame(header, bg=c["panel"])
+        title_box.grid(row=0, column=0, sticky="w")
+        self.title_box = title_box
         tk.Label(
-            header,
+            title_box,
             text="COC Auto Farm",
-            bg="#2b2f36",
-            fg="#ffffff",
-            font=("Segoe UI", 15, "bold"),
-        ).pack(side="left")
+            bg=c["panel"],
+            fg=c["text"],
+            font=("Segoe UI", 17, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            title_box,
+            text="LDPlayer 1600x900 - farm lang chinh qua ADB",
+            bg=c["panel"],
+            fg=c["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(2, 0))
 
-        actions = tk.Frame(header, bg="#2b2f36")
-        actions.pack(side="right")
+        actions = tk.Frame(header, bg=c["panel"])
+        actions.grid(row=0, column=1, sticky="e")
+        self.actions_frame = actions
 
-        self._button(actions, "Scan ADB", self.scan_adb, "#2478d4").pack(side="left", padx=5)
-        self._button(actions, "Start", self.start_bot, "#25c766").pack(side="left", padx=5)
-        self._button(actions, "Pause / Resume", self.toggle_pause, "#69788f").pack(side="left", padx=5)
-        self._button(actions, "Stop", self.stop_bot, "#e53138").pack(side="left", padx=5)
-        self._button(actions, "Cai dat", self.open_settings_hint, "#56657a").pack(side="left", padx=5)
+        self._button(actions, "Scan ADB", self.scan_adb, c["blue"], width=11).pack(side="left", padx=4)
+        self._button(actions, "Start", self.start_bot, c["green"], width=9).pack(side="left", padx=4)
+        self._button(actions, "Pause", self.toggle_pause, c["slate"], width=9).pack(side="left", padx=4)
+        self._button(actions, "Stop", self.stop_bot, c["red"], width=9).pack(side="left", padx=4)
+        self._button(actions, "Cai dat", self.open_settings_hint, "#4b5563", width=9).pack(side="left", padx=4)
 
         self.status_var = tk.StringVar(value="Chua scan ADB.")
         status = tk.Label(
             parent,
             textvariable=self.status_var,
-            bg="#111418",
-            fg="#47a7ff",
+            bg=c["panel_3"],
+            fg=c["blue"],
             anchor="w",
             padx=14,
             pady=9,
             font=("Segoe UI", 10, "bold"),
         )
-        status.pack(fill="x", pady=(10, 12))
+        status.grid(row=1, column=0, sticky="ew", pady=(10, 14))
 
     def _build_stats(self, parent: tk.Frame) -> None:
+        c = self.colors
         stats = self._load_saved_stats()
-        card = tk.Frame(parent, bg="#2b2f36", padx=12, pady=10)
+        card = tk.Frame(parent, bg=c["panel"], padx=14, pady=12)
         card.pack(fill="x", pady=(0, 12))
 
         tk.Label(
             card,
-            text="Stats phien",
-            bg="#2b2f36",
-            fg="#ffffff",
-            font=("Segoe UI", 10, "bold"),
-        ).pack(side="left", padx=(0, 14))
+            text="Thong ke phien",
+            bg=c["panel"],
+            fg=c["text"],
+            font=("Segoe UI", 12, "bold"),
+        ).pack(anchor="w")
 
         items = [
             ("attacks", "Tran"),
@@ -120,16 +223,27 @@ class COCFarmApp(tk.Tk):
             ("elixir_seen", "Dau"),
             ("dark_seen", "Dau den"),
         ]
+        row = tk.Frame(card, bg=c["panel"])
+        row.pack(fill="x", pady=(10, 0))
         for key, label in items:
             value = int(stats.get(key, 0))
-            self.stat_vars[key] = tk.StringVar(value=f"{label}: {value:,}")
+            self.stat_vars[key] = tk.StringVar(value=f"{value:,}")
+            item = tk.Frame(row, bg=c["panel_2"], padx=10, pady=8)
+            item.pack(side="left", fill="x", expand=True, padx=(0, 8))
             tk.Label(
-                card,
+                item,
+                text=label,
+                bg=c["panel_2"],
+                fg=c["muted"],
+                font=("Segoe UI", 8, "bold"),
+            ).pack(anchor="w")
+            tk.Label(
+                item,
                 textvariable=self.stat_vars[key],
-                bg="#2b2f36",
-                fg="#dce3ea",
-                font=("Segoe UI", 10),
-            ).pack(side="left", padx=10)
+                bg=c["panel_2"],
+                fg=c["text"],
+                font=("Segoe UI", 12, "bold"),
+            ).pack(anchor="w", pady=(2, 0))
 
     def _load_saved_stats(self) -> dict:
         multi_stats = self._load_multi_device_stats()
@@ -170,10 +284,10 @@ class COCFarmApp(tk.Tk):
 
     def _build_tabs(self, parent: tk.Frame) -> None:
         notebook = ttk.Notebook(parent)
-        notebook.pack(fill="x")
+        notebook.pack(fill="both", expand=True)
 
-        farm_tab = ttk.Frame(notebook, style="Card.TFrame", padding=16)
-        surrender_tab = ttk.Frame(notebook, style="Card.TFrame", padding=16)
+        farm_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=14)
+        surrender_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=14)
         notebook.add(farm_tab, text="Farm")
         notebook.add(surrender_tab, text="Dau hang")
 
@@ -203,12 +317,11 @@ class COCFarmApp(tk.Tk):
         self.vars["dark_min"] = tk.StringVar(value=f"{farm['dark_min']:,}")
         self.vars["total_min"] = tk.StringVar(value=f"{farm['total_min']:,}")
 
-        left = ttk.Frame(parent, style="Card.TFrame")
-        right = ttk.Frame(parent, style="Card.TFrame")
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 24))
-        right.grid(row=0, column=1, sticky="nsew")
+        left = ttk.Frame(parent, style="Panel.TFrame")
+        right = ttk.Frame(parent, style="Panel.TFrame")
+        left.grid(row=0, column=0, sticky="ew")
+        right.grid(row=1, column=0, sticky="ew", pady=(18, 0))
         parent.columnconfigure(0, weight=1)
-        parent.columnconfigure(1, weight=1)
 
         ttk.Label(left, text="Cai dat chay", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
         checks = [
@@ -225,7 +338,7 @@ class COCFarmApp(tk.Tk):
                 row=i, column=0, columnspan=2, sticky="w", pady=5
             )
 
-        ttk.Label(left, text="Tu dong dung sau", style="Card.TLabel").grid(row=8, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(left, text="Tu dong dung sau", style="Panel.TLabel").grid(row=8, column=0, sticky="w", pady=(10, 0))
         ttk.Entry(left, textvariable=self.vars["auto_restart_after_seconds"], width=8).grid(
             row=8, column=1, sticky="w", pady=(10, 0)
         )
@@ -242,10 +355,10 @@ class COCFarmApp(tk.Tk):
         self._field(right, 1, "Combo", self.vars["combo"], values=self._combo_names())
         self._field(right, 2, "Vang toi thieu", self.vars["gold_min"])
         self._field(right, 3, "Dau toi thieu", self.vars["elixir_min"])
-        self._field(right, 4, "Dau den toi thieu", self.vars["dark_min"])
-        self._field(right, 5, "Tong tai nguyen", self.vars["total_min"])
+        self._field(right, 4, "Dau den (chi thong ke)", self.vars["dark_min"])
+        self._field(right, 5, "Tong vang + dau", self.vars["total_min"])
 
-        ttk.Label(right, text="Che do tha", style="Card.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 6))
+        ttk.Label(right, text="Che do tha", style="Panel.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 6))
         modes = ["Tha 1 canh", "Tha theo hang", "Tha 4 goc map", "Ngau nhien"]
         for i, label in enumerate(modes, start=7):
             ttk.Radiobutton(right, text=label, variable=self.vars["deploy_mode"], value=label).grid(
@@ -280,33 +393,43 @@ class COCFarmApp(tk.Tk):
         ttk.Checkbutton(parent, text="Dau hang khi con it tai nguyen", variable=self.vars["when_low_loot"]).grid(
             row=5, column=0, columnspan=4, sticky="w", pady=(14, 5)
         )
-        self._field(parent, 6, "Tong tai nguyen <", self.vars["total_remaining_less_than"])
+        self._field(parent, 6, "Tong vang + dau <", self.vars["total_remaining_less_than"])
         ttk.Checkbutton(parent, text="Khong dau hang (danh het)", variable=self.vars["never_surrender"]).grid(
             row=7, column=0, columnspan=4, sticky="w", pady=(14, 5)
         )
 
     def _build_logs(self, parent: tk.Frame) -> None:
-        log_card = tk.Frame(parent, bg="#111418", padx=10, pady=10)
-        log_card.pack(fill="both", expand=True, pady=(14, 0))
+        c = self.colors
+        log_card = tk.Frame(parent, bg=c["panel"], padx=14, pady=12)
+        log_card.pack(fill="both", expand=True)
 
-        top = tk.Frame(log_card, bg="#111418")
+        top = tk.Frame(log_card, bg=c["panel"])
         top.pack(fill="x", pady=(0, 8))
-        tk.Label(top, text="Logs", bg="#111418", fg="#ffffff", font=("Segoe UI", 11, "bold")).pack(side="left")
-        self._button(top, "Clear", self.clear_logs, "#343944", width=9).pack(side="right")
+        tk.Label(top, text="Logs", bg=c["panel"], fg=c["text"], font=("Segoe UI", 12, "bold")).pack(side="left")
+        tk.Label(
+            top,
+            text="Theo doi scan, search, attack va loi ADB/OCR",
+            bg=c["panel"],
+            fg=c["muted"],
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=(10, 0))
+        self._button(top, "Clear", self.clear_logs, "#374151", width=9).pack(side="right")
 
-        body = tk.Frame(log_card, bg="#111418")
+        body = tk.Frame(log_card, bg=c["panel_3"])
         body.pack(fill="both", expand=True)
         self.log_text = tk.Text(
             body,
-            bg="#0c0f13",
-            fg="#e7edf3",
+            bg=c["panel_3"],
+            fg="#e6edf3",
             insertbackground="white",
             relief="flat",
             wrap="word",
             font=("Consolas", 10),
+            padx=10,
+            pady=10,
             height=18,
         )
-        scroll = tk.Scrollbar(body, command=self.log_text.yview)
+        scroll = tk.Scrollbar(body, command=self.log_text.yview, bg=c["panel_3"], troughcolor=c["panel_3"])
         self.log_text.configure(yscrollcommand=scroll.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
@@ -319,7 +442,7 @@ class COCFarmApp(tk.Tk):
         var: tk.StringVar,
         values: list[str] | None = None,
     ) -> None:
-        ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", pady=6, padx=(0, 12))
+        ttk.Label(parent, text=label, style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=6, padx=(0, 12))
         if values:
             ttk.Combobox(parent, textvariable=var, values=values, width=20, state="readonly").grid(
                 row=row, column=1, sticky="ew", pady=6
@@ -328,14 +451,14 @@ class COCFarmApp(tk.Tk):
             ttk.Entry(parent, textvariable=var, width=20).grid(row=row, column=1, sticky="ew", pady=6)
 
     def _range(self, parent: ttk.Frame, row: int, label: str, start: tk.StringVar, end: tk.StringVar, suffix: str) -> None:
-        ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", pady=6)
+        ttk.Label(parent, text=label, style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=6)
         ttk.Entry(parent, textvariable=start, width=8).grid(row=row, column=1, sticky="w", padx=8)
-        ttk.Label(parent, text="-", style="Card.TLabel").grid(row=row, column=2, sticky="w")
+        ttk.Label(parent, text="-", style="Panel.TLabel").grid(row=row, column=2, sticky="w")
         ttk.Entry(parent, textvariable=end, width=8).grid(row=row, column=3, sticky="w", padx=8)
-        ttk.Label(parent, text=suffix, style="Card.TLabel").grid(row=row, column=4, sticky="w")
+        ttk.Label(parent, text=suffix, style="Panel.TLabel").grid(row=row, column=4, sticky="w")
 
     def _button(self, parent, text: str, command, bg: str, width: int = 12) -> tk.Button:
-        return tk.Button(
+        button = tk.Button(
             parent,
             text=text,
             command=command,
@@ -348,8 +471,21 @@ class COCFarmApp(tk.Tk):
             width=width,
             padx=8,
             pady=7,
+            cursor="hand2",
+            highlightthickness=0,
             font=("Segoe UI", 9, "bold"),
         )
+        button.bind("<Enter>", lambda _event: button.configure(bg=self._lighten(bg)))
+        button.bind("<Leave>", lambda _event: button.configure(bg=bg))
+        return button
+
+    def _lighten(self, color: str) -> str:
+        color = color.lstrip("#")
+        if len(color) != 6:
+            return color
+        channels = [int(color[index : index + 2], 16) for index in (0, 2, 4)]
+        lighter = [min(255, int(channel + (255 - channel) * 0.12)) for channel in channels]
+        return "#" + "".join(f"{channel:02x}" for channel in lighter)
 
     def start_bot(self) -> None:
         if self._bot_running():
@@ -478,10 +614,11 @@ class COCFarmApp(tk.Tk):
         self.log_text.delete("1.0", "end")
 
     def open_settings_hint(self) -> None:
+        c = self.colors
         win = tk.Toplevel(self)
         win.title("Cai dat")
         win.geometry("650x270")
-        win.configure(bg="#1f2227")
+        win.configure(bg=c["bg"])
         win.transient(self)
         win.grab_set()
 
@@ -490,7 +627,7 @@ class COCFarmApp(tk.Tk):
         tess_path = tk.StringVar(value=self.config_data["ocr"]["tesseract_path"])
         max_next = tk.StringVar(value=str(self.config_data["farm"]["max_next"]))
 
-        frame = ttk.Frame(win, style="Card.TFrame", padding=16)
+        frame = ttk.Frame(win, style="Panel.TFrame", padding=16)
         frame.pack(fill="both", expand=True, padx=14, pady=14)
 
         self._settings_row(frame, 0, "ADB path", adb_path, True)
@@ -515,13 +652,13 @@ class COCFarmApp(tk.Tk):
             self._log("[INFO] Da luu cai dat.")
             win.destroy()
 
-        self._button(frame, "Luu", save, "#25c766").grid(row=4, column=1, sticky="e", pady=18)
+        self._button(frame, "Luu", save, c["green"]).grid(row=4, column=1, sticky="e", pady=18)
 
     def _settings_row(self, parent: ttk.Frame, row: int, label: str, var: tk.StringVar, browse: bool = False) -> None:
-        ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", pady=8)
+        ttk.Label(parent, text=label, style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=8)
         ttk.Entry(parent, textvariable=var, width=52).grid(row=row, column=1, sticky="ew", pady=8, padx=8)
         if browse:
-            self._button(parent, "Chon", lambda: self._pick_file(var), "#56657a", width=8).grid(row=row, column=2)
+            self._button(parent, "Chon", lambda: self._pick_file(var), self.colors["slate"], width=8).grid(row=row, column=2)
 
     def _pick_file(self, target_var: tk.StringVar) -> None:
         path = filedialog.askopenfilename(
@@ -652,7 +789,7 @@ class COCFarmApp(tk.Tk):
         for key, label in labels.items():
             value = int(session.get(key, 0))
             if key in self.stat_vars:
-                self.stat_vars[key].set(f"{label}: {value:,}")
+                self.stat_vars[key].set(f"{value:,}")
 
 
 if __name__ == "__main__":

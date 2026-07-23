@@ -45,7 +45,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "gold_min": 900000,
         "elixir_min": 900000,
         "dark_min": 8000,
-        "total_min": 800000,
+        "total_min": 1700000,
         "max_next": 80,
         "search_delay_seconds": 3.0,
         "ocr_fail_restart_seconds": 30,
