@@ -2,10 +2,7 @@
   "adb": {
     "path": "D:\\LDPlayer\\LDPlayer9\\adb.exe",
     "device": "127.0.0.1:5555",
-    "devices": [
-      "127.0.0.1:5555",
-      "emulator-5554"
-    ],
+    "devices": [],
     "package": "com.supercell.clashofclans",
     "connect_on_start": true
   },
@@ -55,7 +52,8 @@
     "when_low_loot": true,
     "total_remaining_less_than": 200000,
     "never_surrender": false,
-    "max_battle_seconds": 190
+    "max_battle_seconds": 175,
+    "damage_jump_confirm_percent": 40
   },
   "ocr": {
     "enabled": true,
@@ -84,6 +82,18 @@
         630,
         190,
         70
+      ],
+      "next_button": [
+        1325,
+        575,
+        250,
+        130
+      ],
+      "damage_panel": [
+        1320,
+        615,
+        260,
+        120
       ],
       "home_attack_button": [
         20,

@@ -90,6 +90,21 @@ class Vision:
         compact = "".join(ch for ch in text if ch.isalpha())
         return "attack" in compact
 
+    def has_battle_started(self, png: bytes) -> bool:
+        if not self.available:
+            return False
+        image = self.image_from_png(png)
+        text = self.read_text(image, [690, 0, 260, 110])
+        compact = "".join(ch for ch in text if ch.isalpha())
+        if "battleendsin" in compact:
+            return True
+        if "battlestartsin" in compact:
+            return False
+
+        next_region = self.config["ocr"]["regions"].get("next_button", [1325, 575, 250, 130])
+        damage_region = self.config["ocr"]["regions"].get("damage_panel", [1320, 615, 260, 120])
+        return self._has_dark_damage_panel(image, damage_region) and not self._has_orange_button(image, next_region)
+
     def _has_attack_button_color(self, image, region: list[int]) -> bool:
         if image is None:
             return False
@@ -106,6 +121,34 @@ class Vision:
             if r >= 190 and g >= 130 and b <= 105:
                 yellow += 1
         return (orange / len(pixels)) >= 0.12 or (yellow / len(pixels)) >= 0.10
+
+    def _has_orange_button(self, image, region: list[int]) -> bool:
+        if image is None:
+            return False
+        x, y, w, h = region
+        crop = image.crop((x, y, x + w, y + h)).convert("RGB")
+        pixels = list(crop.getdata())
+        if not pixels:
+            return False
+        orange = 0
+        for r, g, b in pixels:
+            if r >= 180 and 70 <= g <= 170 and b <= 80:
+                orange += 1
+        return (orange / len(pixels)) >= 0.08
+
+    def _has_dark_damage_panel(self, image, region: list[int]) -> bool:
+        if image is None:
+            return False
+        x, y, w, h = region
+        crop = image.crop((x, y, x + w, y + h)).convert("RGB")
+        pixels = list(crop.getdata())
+        if not pixels:
+            return False
+        dark = 0
+        for r, g, b in pixels:
+            if r <= 80 and g <= 90 and b <= 80:
+                dark += 1
+        return (dark / len(pixels)) >= 0.25
 
     def read_loot(self, png: bytes) -> dict[str, int]:
         image = self.image_from_png(png)

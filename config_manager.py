@@ -60,7 +60,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "when_low_loot": True,
         "total_remaining_less_than": 200000,
         "never_surrender": False,
-        "max_battle_seconds": 190,
+        "max_battle_seconds": 175,
+        "damage_jump_confirm_percent": 40,
     },
     "ocr": {
         "enabled": True,
@@ -70,6 +71,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "loot_elixir": [78, 175, 160, 35],
             "loot_dark": [78, 220, 140, 35],
             "damage_percent": [1355, 630, 190, 70],
+            "next_button": [1325, 575, 250, 130],
+            "damage_panel": [1320, 615, 260, 120],
             "home_attack_button": [20, 715, 170, 160],
         },
     },

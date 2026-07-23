@@ -87,9 +87,11 @@ def discover_adb_paths(configured_path: str = "") -> list[str]:
 class ADBClient:
     PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
-    def __init__(self, adb_path: str, device: str, log=None) -> None:
+    def __init__(self, adb_path: str, device: str, log=None, resolution: tuple[int, int] = (1600, 900)) -> None:
         self.device = device
         self.log = log or (lambda message: None)
+        self.max_x = max(0, int(resolution[0]) - 1)
+        self.max_y = max(0, int(resolution[1]) - 1)
         self.adb_path = self._resolve_adb(adb_path)
 
     def _resolve_adb(self, configured_path: str) -> str:
@@ -148,7 +150,9 @@ class ADBClient:
         if jitter > 0:
             x += random.randint(-jitter, jitter)
             y += random.randint(-jitter, jitter)
-        self.shell("input", "tap", str(max(0, x)), str(max(0, y)), timeout=8)
+        x = min(self.max_x, max(0, x))
+        y = min(self.max_y, max(0, y))
+        self.shell("input", "tap", str(x), str(y), timeout=8)
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300) -> None:
         self.shell(

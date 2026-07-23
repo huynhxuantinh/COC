@@ -27,7 +27,8 @@ class FarmBot:
         self.log = log
         self.stop_event = stop_event
         self.pause_event = pause_event
-        self.adb = ADBClient(config["adb"]["path"], config["adb"]["device"], log=log)
+        resolution = tuple(config["game"].get("resolution", [1600, 900]))
+        self.adb = ADBClient(config["adb"]["path"], config["adb"]["device"], log=log, resolution=resolution)
         self.vision = Vision(config, log=log)
         self.stats = {key: 0 for key in self.STAT_KEYS}
         self.stats_callback = stats_callback or (lambda stats: None)
@@ -174,7 +175,7 @@ class FarmBot:
         package = self.config["adb"]["package"]
         wait_seconds = float(self.config["game"].get("restart_wait_seconds", 18))
         self.log("[SCHEDULE] Restart game dinh ky.")
-        self.adb.restart_app(package, wait_seconds=wait_seconds)
+        self._restart_app_interruptible(package, wait_seconds)
 
     def _ensure_home_attack_visible(self) -> bool:
         game = self.config["game"]
@@ -200,7 +201,7 @@ class FarmBot:
         package = self.config["adb"]["package"]
         wait_seconds = float(game.get("restart_wait_seconds", 18))
         self.log("[HOME] Khong thay nut Attack. Restart game...")
-        self.adb.restart_app(package, wait_seconds=wait_seconds)
+        self._restart_app_interruptible(package, wait_seconds)
 
         png = self.adb.screencap_png()
         if self.vision.has_home_attack_button(png):
@@ -242,6 +243,9 @@ class FarmBot:
                 self._tap_coord("next")
                 self._sleep(self.config["timing"]["after_next"])
             else:
+                if self.vision.has_battle_started(png):
+                    self.log("[SEARCH] Da vao battle screen. Continue deploy.")
+                    return True
                 if ocr_fail_started_at is None:
                     ocr_fail_started_at = time.time()
                 fail_seconds = int(time.time() - ocr_fail_started_at)
@@ -262,7 +266,15 @@ class FarmBot:
     def _restart_game_from_search(self) -> None:
         package = self.config["adb"]["package"]
         wait_seconds = float(self.config["game"].get("restart_wait_seconds", 18))
-        self.adb.restart_app(package, wait_seconds=wait_seconds)
+        self._restart_app_interruptible(package, wait_seconds)
+
+    def _restart_app_interruptible(self, package: str, wait_seconds: float) -> None:
+        self.adb.force_stop_app(package)
+        self._sleep(1)
+        if self.stop_event.is_set():
+            return
+        self.adb.start_app(package)
+        self._sleep(wait_seconds)
 
     def _attack_base(self) -> None:
         self._prepare_camera()
@@ -335,8 +347,10 @@ class FarmBot:
             int(surrender["destruction_min_percent"]),
             int(surrender["destruction_max_percent"]),
         )
-        max_seconds = int(surrender["max_battle_seconds"])
+        max_seconds = min(int(surrender["max_battle_seconds"]), 175)
         best_damage = -1
+        pending_damage = -1
+        max_jump = int(surrender.get("damage_jump_confirm_percent", 40))
 
         self.log(f"[BATTLE] Monitor. time={target_time}s, damage={target_damage}%.")
         while not self.stop_event.is_set():
@@ -344,11 +358,12 @@ class FarmBot:
             elapsed = int(time.time() - attack_start)
             png = self.adb.screencap_png()
             raw_damage = self.vision.read_damage_percent(png)
-            if raw_damage >= 0:
-                if raw_damage >= best_damage:
-                    best_damage = raw_damage
-                else:
-                    self.log(f"[BATTLE] Ignore OCR damage drop {best_damage}% -> {raw_damage}%.")
+            best_damage, pending_damage = self._filter_damage_reading(
+                raw_damage,
+                best_damage,
+                pending_damage,
+                max_jump,
+            )
             damage = best_damage
             loot = self.vision.read_loot(png) if self.vision.available else {}
 
@@ -378,6 +393,29 @@ class FarmBot:
             self.log(f"[BATTLE] {elapsed}s | damage={shown_damage}")
             self._sleep(3)
 
+    def _filter_damage_reading(
+        self,
+        raw_damage: int,
+        best_damage: int,
+        pending_damage: int,
+        max_jump: int,
+    ) -> tuple[int, int]:
+        if raw_damage < 0:
+            return best_damage, pending_damage
+        if raw_damage < best_damage:
+            self.log(f"[BATTLE] Ignore OCR damage drop {best_damage}% -> {raw_damage}%.")
+            return best_damage, pending_damage
+
+        baseline = max(best_damage, 0)
+        if best_damage >= 0 and raw_damage - baseline > max_jump:
+            if pending_damage >= 0 and abs(raw_damage - pending_damage) <= 5:
+                self.log(f"[BATTLE] Confirm OCR damage jump {best_damage}% -> {raw_damage}%.")
+                return raw_damage, -1
+            self.log(f"[BATTLE] Hold OCR damage jump {best_damage}% -> {raw_damage}% for confirm.")
+            return best_damage, raw_damage
+
+        return raw_damage, -1
+
     def _wait_return_home(self) -> None:
         self.log("[RESULT] Wait result screen.")
         self._sleep(6)
@@ -406,7 +444,7 @@ class FarmBot:
         gold_ok = loot["gold"] >= int(farm["gold_min"])
         elixir_ok = loot["elixir"] >= int(farm["elixir_min"])
         dark_ok = loot["dark"] >= int(farm["dark_min"])
-        total_ok = (max(loot["gold"], 0) + max(loot["elixir"], 0)) >= int(farm["total_min"])
+        total_ok = self._loot_total(loot) >= int(farm["total_min"])
         mode = farm.get("threshold_mode", "any")
         if mode == "all":
             return gold_ok and elixir_ok and dark_ok and total_ok
@@ -428,10 +466,17 @@ class FarmBot:
         if surrender["by_destruction"] and damage >= target_damage:
             return f"damage {damage}% >= {target_damage}%"
         if surrender["when_low_loot"] and loot:
-            total = max(loot.get("gold", -1), 0) + max(loot.get("elixir", -1), 0)
+            total = self._loot_total(loot)
             if total < int(surrender["total_remaining_less_than"]):
                 return f"remaining loot {total:,} < {int(surrender['total_remaining_less_than']):,}"
         return ""
+
+    def _loot_total(self, loot: dict[str, int]) -> int:
+        return (
+            max(loot.get("gold", -1), 0)
+            + max(loot.get("elixir", -1), 0)
+            + max(loot.get("dark", -1), 0)
+        )
 
     def _deploy_points(self) -> list[list[int]]:
         mode = self.config["farm"]["deploy_mode"]
@@ -473,8 +518,15 @@ class FarmBot:
         return max(0.0, random.uniform(base - delta, base + delta))
 
     def _pause_gate(self) -> None:
+        pause_started_at = 0.0
         while self.pause_event.is_set() and not self.stop_event.is_set():
+            if pause_started_at <= 0:
+                pause_started_at = time.time()
             time.sleep(0.2)
+        if pause_started_at > 0 and self.auto_stop_at > 0:
+            paused_seconds = time.time() - pause_started_at
+            self.auto_stop_at += paused_seconds
+            self.log(f"[SCHEDULE] Pause {int(paused_seconds)}s, auto-stop duoc doi lai.")
 
     def _load_total_stats(self) -> dict[str, int]:
         try:

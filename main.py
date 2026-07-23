@@ -395,10 +395,8 @@ class COCFarmApp(tk.Tk):
         )
 
     def _configured_devices(self) -> list[str]:
-        devices = list(self.config_data["adb"].get("devices") or [])
-        if not devices:
-            devices = [self.config_data["adb"].get("device", "127.0.0.1:5555")]
-        return [device for device in devices if device]
+        device = self.config_data["adb"].get("device", "127.0.0.1:5555")
+        return [device]
 
     def _parse_device_list(self, raw: str) -> list[str]:
         parts = raw.replace("\n", ",").replace(";", ",").split(",")
@@ -439,7 +437,6 @@ class COCFarmApp(tk.Tk):
         self._log_threadsafe(f"[ADB] Tim thay {len(paths)} path. Dang thu ket noi...")
         for path in paths:
             self._log_threadsafe(f"[ADB] Thu path: {path}")
-            connected_devices = []
             for device in devices:
                 try:
                     client = ADBClient(path, device, log=self._log_threadsafe)
@@ -449,18 +446,13 @@ class COCFarmApp(tk.Tk):
                     self._log_threadsafe(f"[ADB] Fail {device}: {exc}")
                     continue
 
-                self._log_threadsafe(f"[ADB] OK: {path} | {device}")
-                connected_devices.append(device)
-
-            if connected_devices:
                 self.config_data["adb"]["path"] = path
-                self.config_data["adb"]["device"] = connected_devices[0]
-                self.config_data["adb"]["devices"] = connected_devices
+                self.config_data["adb"]["device"] = device
+                self.config_data["adb"]["devices"] = []
                 save_config(self.config_data)
                 self.adb_ready = True
-                count = len(connected_devices)
-                self._log_threadsafe(f"[ADB] Da ket noi {count} device: {', '.join(connected_devices)}")
-                self.after(0, lambda c=count: self.status_var.set(f"ADB da ket noi {c} device. Co the Start."))
+                self._log_threadsafe(f"[ADB] OK: {path} | {device}")
+                self.after(0, lambda: self.status_var.set("ADB da ket noi 1 device. Co the Start."))
                 return
 
         self._log_threadsafe("[ADB] Co adb.exe nhung khong connect duoc LDPlayer.")
@@ -494,7 +486,7 @@ class COCFarmApp(tk.Tk):
         win.grab_set()
 
         adb_path = tk.StringVar(value=self.config_data["adb"]["path"])
-        device = tk.StringVar(value=", ".join(self._configured_devices()))
+        device = tk.StringVar(value=self._configured_devices()[0])
         tess_path = tk.StringVar(value=self.config_data["ocr"]["tesseract_path"])
         max_next = tk.StringVar(value=str(self.config_data["farm"]["max_next"]))
 
@@ -510,8 +502,8 @@ class COCFarmApp(tk.Tk):
             try:
                 self.config_data["adb"]["path"] = adb_path.get().strip()
                 devices = self._parse_device_list(device.get())
-                self.config_data["adb"]["devices"] = devices
                 self.config_data["adb"]["device"] = devices[0]
+                self.config_data["adb"]["devices"] = []
                 self.config_data["ocr"]["tesseract_path"] = tess_path.get().strip()
                 self.config_data["farm"]["max_next"] = int(max_next.get().replace(",", "").strip())
                 save_config(self.config_data)
