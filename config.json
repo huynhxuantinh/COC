@@ -2,7 +2,10 @@
   "adb": {
     "path": "D:\\LDPlayer\\LDPlayer9\\adb.exe",
     "device": "127.0.0.1:5555",
-    "devices": [],
+    "devices": [
+      "127.0.0.1:5555",
+      "emulator-5554"
+    ],
     "package": "com.supercell.clashofclans",
     "connect_on_start": true
   },
@@ -17,7 +20,7 @@
     "language": "en",
     "skip_restart_game": true,
     "auto_stop": false,
-    "auto_restart_after_seconds": 60,
+    "auto_restart_after_seconds": 80,
     "periodic_restart_game": false,
     "periodic_restart_min_seconds": 3600,
     "periodic_restart_max_seconds": 5400,
@@ -26,7 +29,8 @@
     "resource_stats": true,
     "restart_if_attack_missing": true,
     "attack_missing_retries": 3,
-    "restart_wait_seconds": 18
+    "restart_wait_seconds": 18,
+    "max_consecutive_cycle_errors": 8
   },
   "farm": {
     "village": "main",

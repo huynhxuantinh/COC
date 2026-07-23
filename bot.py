@@ -32,6 +32,7 @@ class FarmBot:
         self.stats = {key: 0 for key in self.STAT_KEYS}
         self.stats_callback = stats_callback or (lambda stats: None)
         self.stats_path = Path(config.get("runtime", {}).get("stats_path", "stats.json"))
+        self.safe_device = self._safe_name(config["adb"]["device"])
         self.debug_dir = Path("debug")
         self.session_started_at = datetime.now().isoformat(timespec="seconds")
         self.base_total_stats = self._load_total_stats()
@@ -457,7 +458,7 @@ class FarmBot:
     def _sleep(self, seconds: float) -> None:
         end = time.time() + self._jittered_sleep_seconds(seconds)
         while time.time() < end:
-            if self.stop_event.is_set() or self._auto_stop_due():
+            if self.stop_event.is_set():
                 return
             time.sleep(min(0.1, end - time.time()))
 
@@ -513,12 +514,15 @@ class FarmBot:
     def _dump_debug_png(self, reason: str, png: bytes) -> None:
         if not png:
             return
-        safe_reason = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in reason)
+        safe_reason = self._safe_name(reason)
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        path = self.debug_dir / f"{timestamp}-{safe_reason}.png"
+        path = self.debug_dir / f"{self.safe_device}-{timestamp}-{safe_reason}.png"
         try:
             self.debug_dir.mkdir(parents=True, exist_ok=True)
             path.write_bytes(png)
             self.log(f"[DEBUG] Saved screencap: {path}")
         except OSError as exc:
             self.log(f"[WARN] Khong ghi duoc debug screencap: {exc}")
+
+    def _safe_name(self, value: str) -> str:
+        return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in value)

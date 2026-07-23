@@ -101,7 +101,7 @@ class COCFarmApp(tk.Tk):
         status.pack(fill="x", pady=(10, 12))
 
     def _build_stats(self, parent: tk.Frame) -> None:
-        stats = self._load_saved_stats().get("current_session", {})
+        stats = self._load_saved_stats()
         card = tk.Frame(parent, bg="#2b2f36", padx=12, pady=10)
         card.pack(fill="x", pady=(0, 12))
 
@@ -132,11 +132,34 @@ class COCFarmApp(tk.Tk):
             ).pack(side="left", padx=10)
 
     def _load_saved_stats(self) -> dict:
+        multi_stats = self._load_multi_device_stats()
+        if multi_stats:
+            return multi_stats
         try:
             with Path("stats.json").open("r", encoding="utf-8") as file:
-                return json.load(file)
+                data = json.load(file)
+                return data.get("current_session", data)
         except (OSError, json.JSONDecodeError):
             return {}
+
+    def _load_multi_device_stats(self) -> dict:
+        stats_dir = Path("stats")
+        if not stats_dir.exists():
+            return {}
+        keys = ("attacks", "next", "gold_seen", "elixir_seen", "dark_seen")
+        total = {key: 0 for key in keys}
+        loaded = 0
+        for path in stats_dir.glob("*.json"):
+            try:
+                with path.open("r", encoding="utf-8") as file:
+                    data = json.load(file)
+            except (OSError, json.JSONDecodeError):
+                continue
+            session = data.get("current_session", data)
+            for key in keys:
+                total[key] += int(session.get(key, 0))
+            loaded += 1
+        return total if loaded else {}
 
     def _combo_names(self) -> list[str]:
         combos = self.config_data.get("combos", {})
