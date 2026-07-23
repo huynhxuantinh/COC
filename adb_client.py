@@ -85,6 +85,8 @@ def discover_adb_paths(configured_path: str = "") -> list[str]:
 
 
 class ADBClient:
+    PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
     def __init__(self, adb_path: str, device: str, log=None) -> None:
         self.device = device
         self.log = log or (lambda message: None)
@@ -114,9 +116,17 @@ class ADBClient:
         self._run(["connect", self.device], timeout=10)
         result = self._run(["devices"], timeout=10)
         text = result.stdout.decode("utf-8", errors="ignore")
-        if self.device not in text or "offline" in text:
+        state = self._device_state(text)
+        if state != "device":
             raise ADBError("Khong ket noi duoc LDPlayer. Kiem tra ADB debugging/port.")
         self.log("[ADB] Connected.")
+
+    def _device_state(self, adb_devices_text: str) -> str:
+        for line in adb_devices_text.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 2 and parts[0] == self.device:
+                return parts[1]
+        return ""
 
     def shell(self, *parts: str, timeout: float = 15) -> str:
         result = self._run(["-s", self.device, "shell", *parts], timeout=timeout)
@@ -153,16 +163,33 @@ class ADBClient:
         )
 
     def screencap_png(self) -> bytes:
-        result = self._run(
-            ["-s", self.device, "exec-out", "screencap", "-p"],
-            timeout=8,
-        )
-        data = result.stdout
-        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
-            data = data.replace(b"\r\r\n", b"\r\n").replace(b"\r\n", b"\n")
+        last_error = "Khong chup duoc man hinh tu ADB."
+        for attempt in range(1, 4):
+            result = self._run(
+                ["-s", self.device, "exec-out", "screencap", "-p"],
+                timeout=8,
+            )
+            try:
+                return self._normalize_png(result.stdout)
+            except ADBError as exc:
+                last_error = str(exc)
+                self.log(f"[ADB] Screencap fail ({attempt}/3): {last_error}")
+                time.sleep(0.5)
+        raise ADBError(last_error)
+
+    def _normalize_png(self, data: bytes) -> bytes:
         if not data:
             raise ADBError("Khong chup duoc man hinh tu ADB.")
-        return data
+        if data.startswith(self.PNG_SIGNATURE):
+            return data
+
+        marker = b"__ADB_ORIGINAL_CRLF__"
+        fixed = data.replace(b"\r\r\n", marker).replace(b"\r\n", b"\n").replace(marker, b"\r\n")
+        if fixed.startswith(self.PNG_SIGNATURE):
+            return fixed
+
+        preview = data[:16].hex(" ")
+        raise ADBError(f"Screencap PNG hong. Header={preview}")
 
     def sleep_after_action(self, seconds: float) -> None:
         if seconds > 0:

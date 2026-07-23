@@ -35,9 +35,24 @@ class FarmBot:
                 self._sleep(10)
 
             self.log("[INFO] Bot started.")
+            cycle_errors = 0
             while not self.stop_event.is_set():
                 self._pause_gate()
-                self._run_cycle()
+                try:
+                    self._run_cycle()
+                    cycle_errors = 0
+                except ADBError as exc:
+                    cycle_errors += 1
+                    self.log(f"[WARN] Cycle ADB error ({cycle_errors}): {exc}. Retry next cycle.")
+                    try:
+                        self.adb.connect()
+                    except ADBError as reconnect_exc:
+                        self.log(f"[WARN] ADB reconnect failed: {reconnect_exc}")
+                    self._sleep(3)
+                except Exception as exc:
+                    cycle_errors += 1
+                    self.log(f"[WARN] Cycle error ({cycle_errors}): {exc}. Retry next cycle.")
+                    self._sleep(3)
                 self._sleep(self.config["timing"]["loop_sleep"])
         except ADBError as exc:
             self.log(f"[ERROR] {exc}")
@@ -102,7 +117,7 @@ class FarmBot:
         max_next = int(self.config["farm"]["max_next"])
         ocr_fail_started_at: float | None = None
         ocr_fail_restart_seconds = float(self.config["farm"].get("ocr_fail_restart_seconds", 30))
-        for index in range(max_next + 1):
+        for index in range(max_next):
             self._pause_gate()
             if self.stop_event.is_set():
                 return False
@@ -151,10 +166,11 @@ class FarmBot:
     def _attack_base(self) -> None:
         self._prepare_camera()
 
-        start = time.time()
+        attack_start = time.time()
         self._deploy_troops()
-        self._cast_spells(start)
-        self._monitor_battle(start)
+        deploy_finished = time.time()
+        self._cast_spells(deploy_finished)
+        self._monitor_battle(attack_start)
 
     def _prepare_camera(self) -> None:
         deploy = self.config["deploy"]
@@ -192,12 +208,12 @@ class FarmBot:
                 self.adb.tap(x, y)
                 self._sleep(float(step.get("delay", 0.2)))
 
-    def _cast_spells(self, attack_start: float) -> None:
+    def _cast_spells(self, deploy_finished: float) -> None:
         for spell in self.config["deploy"]["spells"]:
             if not spell.get("enabled", True):
                 continue
             delay = float(spell.get("delay_after_deploy", 0))
-            while time.time() - attack_start < delay and not self.stop_event.is_set():
+            while time.time() - deploy_finished < delay and not self.stop_event.is_set():
                 self._sleep(0.1)
             spell_name = spell.get("name", spell["slot"])
             self.log(f"[SPELL] Cast {spell_name} ({spell['slot']}).")
@@ -219,23 +235,31 @@ class FarmBot:
             int(surrender["destruction_max_percent"]),
         )
         max_seconds = int(surrender["max_battle_seconds"])
+        best_damage = -1
 
         self.log(f"[BATTLE] Monitor. time={target_time}s, damage={target_damage}%.")
         while not self.stop_event.is_set():
             self._pause_gate()
             elapsed = int(time.time() - attack_start)
             png = self.adb.screencap_png()
-            damage = self.vision.read_damage_percent(png)
+            raw_damage = self.vision.read_damage_percent(png)
+            if raw_damage >= 0:
+                if raw_damage >= best_damage:
+                    best_damage = raw_damage
+                else:
+                    self.log(f"[BATTLE] Ignore OCR damage drop {best_damage}% -> {raw_damage}%.")
+            damage = best_damage
             loot = self.vision.read_loot(png) if self.vision.available else {}
 
-            if not surrender["never_surrender"] and self._should_surrender(
+            surrender_reason = self._surrender_reason(
                 elapsed,
                 damage,
                 loot,
                 target_time,
                 target_damage,
-            ):
-                self.log("[BATTLE] Surrender condition matched.")
+            )
+            if not surrender["never_surrender"] and surrender_reason:
+                self.log(f"[BATTLE] Surrender condition matched: {surrender_reason}.")
                 self._tap_coord("end_battle")
                 self._sleep(1)
                 self._tap_coord("end_battle_okay")
@@ -269,9 +293,11 @@ class FarmBot:
         return self.vision.read_loot(png)
 
     def _loot_is_valid(self, loot: dict[str, int]) -> bool:
-        return loot["gold"] >= 0 or loot["elixir"] >= 0 or loot["dark"] >= 0
+        return loot["gold"] >= 0 and loot["elixir"] >= 0
 
     def _should_attack(self, loot: dict[str, int]) -> bool:
+        if not self._loot_is_valid(loot):
+            return False
         farm = self.config["farm"]
         gold_ok = loot["gold"] >= int(farm["gold_min"])
         elixir_ok = loot["elixir"] >= int(farm["elixir_min"])
@@ -284,24 +310,24 @@ class FarmBot:
             return total_ok or dark_ok
         return gold_ok or elixir_ok or dark_ok or total_ok
 
-    def _should_surrender(
+    def _surrender_reason(
         self,
         elapsed: int,
         damage: int,
         loot: dict[str, int],
         target_time: int,
         target_damage: int,
-    ) -> bool:
+    ) -> str:
         surrender = self.config["surrender"]
         if surrender["by_time"] and elapsed >= target_time:
-            return True
+            return f"time {elapsed}s >= {target_time}s"
         if surrender["by_destruction"] and damage >= target_damage:
-            return True
+            return f"damage {damage}% >= {target_damage}%"
         if surrender["when_low_loot"] and loot:
             total = max(loot.get("gold", -1), 0) + max(loot.get("elixir", -1), 0)
             if total < int(surrender["total_remaining_less_than"]):
-                return True
-        return False
+                return f"remaining loot {total:,} < {int(surrender['total_remaining_less_than']):,}"
+        return ""
 
     def _deploy_points(self) -> list[list[int]]:
         mode = self.config["farm"]["deploy_mode"]
