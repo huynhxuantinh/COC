@@ -7,3 +7,5 @@ screenshots/
 debug/
 stats/
 stats.json
+frontend/node_modules/
+frontend/dist/

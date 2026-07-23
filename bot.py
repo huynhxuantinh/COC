@@ -41,6 +41,7 @@ class FarmBot:
         self.auto_stop_at = 0.0
         self.active_combo = self._select_active_combo()
         self.active_deploy = self._active_deploy()
+        self.current_attack_view = ""
 
     def run(self) -> None:
         try:
@@ -277,6 +278,7 @@ class FarmBot:
         self._sleep(wait_seconds)
 
     def _attack_base(self) -> None:
+        self.current_attack_view = self._selected_attack_view()
         self._prepare_camera()
 
         attack_start = time.time()
@@ -294,9 +296,9 @@ class FarmBot:
                 self.adb.shell("input", "keyevent", "169", timeout=5)
                 self._sleep(0.2)
 
-        swipes = deploy.get("camera_swipes", [])
+        swipes = self._camera_swipes_for_current_view()
         if swipes:
-            self.log(f"[CAMERA] Move camera x{len(swipes)}.")
+            self.log(f"[CAMERA] Move camera {self.current_attack_view or 'default'} x{len(swipes)}.")
         for swipe in swipes:
             self.adb.swipe(*swipe)
             self._sleep(0.35)
@@ -311,17 +313,27 @@ class FarmBot:
         points = self._deploy_points()
         for step in self.active_deploy["sequence"]:
             slot = step["slot"]
-            count = int(step["count"])
+            count = self._tap_limit(step.get("count", 0), int(step.get("max_taps", 0)))
             if count <= 0:
                 continue
-            self.log(f"[ATTACK] Select {slot}, deploy {count}.")
+            label = "all" if self._is_all(step.get("count")) else str(count)
+            self.log(f"[ATTACK] Select {slot}, deploy {label} (max {count}).")
             self._tap_slot(slot)
+            delay = self._troop_delay_seconds(float(step.get("delay", 0.2)))
             for i in range(count):
+                if self._slot_check_due(step, i) and not self._slot_available(slot):
+                    self.log(f"[ATTACK] Slot {slot} looks empty, stop deploy.")
+                    break
                 x, y = points[i % len(points)]
                 self.adb.tap(x, y)
-                self._sleep(float(step.get("delay", 0.2)))
+                self._sleep(delay)
 
     def _cast_spells(self, deploy_finished: float) -> None:
+        spell_groups = self.active_deploy.get("spell_groups", [])
+        if spell_groups:
+            self._cast_spell_groups(spell_groups, deploy_finished)
+            return
+
         for spell in self.active_deploy["spells"]:
             if not spell.get("enabled", True):
                 continue
@@ -334,8 +346,36 @@ class FarmBot:
             points = spell.get("points", [])
             max_casts = int(spell.get("max_casts", len(points)))
             for x, y in points[:max_casts]:
+                self._spell_random_delay(spell["slot"])
                 self.adb.tap(int(x), int(y))
                 self._sleep(0.18)
+
+    def _cast_spell_groups(self, spell_groups: list[dict[str, Any]], deploy_finished: float) -> None:
+        for group in spell_groups:
+            if not group.get("enabled", True):
+                continue
+            points = group.get("points", [])
+            slots = group.get("slots", [])
+            if not points or not slots:
+                continue
+            delay = float(group.get("delay_after_deploy", 0))
+            while time.time() - deploy_finished < delay and not self.stop_event.is_set():
+                self._sleep(0.1)
+
+            max_casts = self._tap_limit(group.get("max_casts", len(points)), len(points))
+            delay_between = float(group.get("delay_between_casts", 0.18))
+            self.log(f"[SPELL] Group {group.get('name', 'spell')} max {max_casts}.")
+            for i in range(max_casts):
+                slot = self._first_available_slot(slots)
+                if not slot:
+                    self.log(f"[SPELL] No available slot in {slots}, skip group.")
+                    break
+                x, y = points[i % len(points)]
+                self.log(f"[SPELL] Cast {slot} at {int(x)},{int(y)}.")
+                self._tap_slot(slot)
+                self._spell_random_delay(slot)
+                self.adb.tap(int(x), int(y))
+                self._sleep(delay_between)
 
     def _monitor_battle(self, attack_start: float) -> None:
         surrender = self.config["surrender"]
@@ -424,6 +464,7 @@ class FarmBot:
         self.log("[RESULT] Tap Return Home.")
         self._tap_coord("return_home")
         self._sleep(self.config["timing"]["after_return_home"])
+        self._next_battle_random_delay()
 
     def _read_loot(self) -> dict[str, int]:
         return self._read_loot_frame()[1]
@@ -477,6 +518,16 @@ class FarmBot:
         mode = self.config["farm"]["deploy_mode"]
         deploy = self.active_deploy
         if mode == "one_edge":
+            view = self.current_attack_view or self._selected_attack_view()
+            view_points = deploy.get("view_points", {})
+            if view in view_points and view_points[view]:
+                self.log(f"[VIEW] Deploy view: {view}.")
+                return view_points[view]
+            edge = self._selected_attack_edge()
+            edge_points = deploy.get("edge_points", {})
+            if edge in edge_points:
+                self.log(f"[EDGE] Deploy edge: {edge}.")
+                return edge_points[edge]
             return deploy["one_edge_points"]
         if mode == "four_corner":
             return deploy["four_corner_points"]
@@ -485,15 +536,139 @@ class FarmBot:
             return [[random.randint(x1, x2), random.randint(y1, y2)] for _ in range(12)]
         return deploy["line_points"]
 
+    def _selected_attack_edge(self) -> str:
+        edge = self.config["farm"].get("attack_edge", "top")
+        valid_edges = ("top", "bottom", "left", "right")
+        if edge == "random":
+            chosen = random.choice(valid_edges)
+            self.log(f"[EDGE] Random edge: {chosen}.")
+            return chosen
+        if edge == "auto":
+            fallback = self.active_deploy.get("auto_edge_fallback", "top")
+            self.log(f"[EDGE] Auto edge chua bat vision kho, fallback {fallback}.")
+            return fallback
+        if edge in valid_edges:
+            return edge
+        return "top"
+
+    def _selected_attack_view(self) -> str:
+        deploy = self.active_deploy
+        view_points = deploy.get("view_points", {})
+        valid_views = tuple(
+            view
+            for view in ("trenbenphai", "trenbentrai", "duoibenphai", "duoibentrai")
+            if view_points.get(view)
+        )
+        if not valid_views:
+            return ""
+        configured = self.config["farm"].get("attack_view", "random")
+        if configured == "random":
+            chosen = random.choice(valid_views)
+            self.log(f"[VIEW] Random view: {chosen}.")
+            return chosen
+        if configured == "auto":
+            fallback = valid_views[0]
+            self.log(f"[VIEW] Auto view chua bat vision, fallback {fallback}.")
+            return fallback
+        if configured in valid_views:
+            self.log(f"[VIEW] Selected view: {configured}.")
+            return configured
+        fallback = valid_views[0]
+        self.log(f"[VIEW] Invalid view {configured}, fallback {fallback}.")
+        return fallback
+
+    def _camera_swipes_for_current_view(self) -> list[list[int]]:
+        deploy = self.active_deploy
+        view_swipes = deploy.get("view_camera_swipes", {})
+        if self.current_attack_view and self.current_attack_view in view_swipes:
+            return view_swipes[self.current_attack_view]
+        return deploy.get("camera_swipes", [])
+
     def _tap_coord(self, name: str) -> None:
         x, y = self.config["coords"][name]
         self.adb.tap(int(x), int(y))
-        self._sleep(self.config["timing"]["after_click"])
+        self._sleep(self._after_click_seconds())
 
     def _tap_slot(self, name: str) -> None:
         x, y = self.config["coords"]["slots"][name]
         self.adb.tap(int(x), int(y))
         self._sleep(0.18)
+
+    def _tap_limit(self, value: Any, fallback: int) -> int:
+        if self._is_all(value):
+            return max(0, int(fallback))
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return max(0, int(fallback))
+
+    def _is_all(self, value: Any) -> bool:
+        return isinstance(value, str) and value.strip().lower() == "all"
+
+    def _slot_check_due(self, step: dict[str, Any], index: int) -> bool:
+        every = int(step.get("slot_check_every", self.active_deploy.get("slot_check_every", 2)))
+        return every > 0 and index % every == 0
+
+    def _slot_available(self, slot: str) -> bool:
+        coords = self.config["coords"]["slots"].get(slot)
+        if not coords:
+            return False
+        try:
+            png = self.adb.screencap_png()
+        except ADBError as exc:
+            self.log(f"[WARN] Slot check failed: {exc}")
+            return True
+        return self.vision.slot_looks_available(png, coords)
+
+    def _first_available_slot(self, slots: list[str]) -> str:
+        for slot in slots:
+            if self._slot_available(slot):
+                return slot
+        return ""
+
+    def _attack_timing(self) -> dict[str, Any]:
+        return self.config.get("attack_timing", {})
+
+    def _custom_attack_timing_enabled(self) -> bool:
+        return not bool(self._attack_timing().get("use_default", True))
+
+    def _troop_delay_seconds(self, fallback: float) -> float:
+        if not self._custom_attack_timing_enabled():
+            return fallback
+        timing = self._attack_timing()
+        return max(0.0, float(timing.get("troop_delay_ms", int(fallback * 1000))) / 1000.0)
+
+    def _spell_random_delay(self, slot: str) -> None:
+        if not self._custom_attack_timing_enabled():
+            return
+        timing = self._attack_timing()
+        if slot == "freeze":
+            minimum = int(timing.get("freeze_random_min_ms", 0))
+            maximum = int(timing.get("freeze_random_max_ms", minimum))
+        elif slot == "rage":
+            minimum = int(timing.get("rage_random_min_ms", 0))
+            maximum = int(timing.get("rage_random_max_ms", minimum))
+        else:
+            return
+        if maximum < minimum:
+            maximum = minimum
+        self._sleep(random.randint(minimum, maximum) / 1000.0)
+
+    def _next_battle_random_delay(self) -> None:
+        if not self._custom_attack_timing_enabled():
+            return
+        timing = self._attack_timing()
+        minimum = int(timing.get("next_battle_min_ms", 0))
+        maximum = int(timing.get("next_battle_max_ms", minimum))
+        if maximum < minimum:
+            maximum = minimum
+        self._sleep(random.randint(minimum, maximum) / 1000.0)
+
+    def _after_click_seconds(self) -> float:
+        if not self._custom_attack_timing_enabled():
+            return float(self.config["timing"]["after_click"])
+        timing = self._attack_timing()
+        return max(0.0, float(timing.get("adb_delay_seconds", self.config["timing"]["after_click"])))
 
     def _sleep(self, seconds: float) -> None:
         end = time.time() + self._jittered_sleep_seconds(seconds)

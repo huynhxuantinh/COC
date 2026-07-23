@@ -14,6 +14,7 @@ class Vision:
         self.enabled = bool(config["ocr"]["enabled"])
         self.available = False
         self.Image = None
+        self.ImageEnhance = None
         self.ImageOps = None
         self.pytesseract = None
         self._init_ocr()
@@ -24,7 +25,7 @@ class Vision:
             return
 
         try:
-            from PIL import Image, ImageOps
+            from PIL import Image, ImageEnhance, ImageOps
             import pytesseract
         except ImportError:
             self.log("[OCR] Thieu Pillow/pytesseract. Chay: python -m pip install -r requirements.txt")
@@ -39,6 +40,7 @@ class Vision:
             pytesseract.pytesseract.tesseract_cmd = tess_path
             self.available = True
             self.Image = Image
+            self.ImageEnhance = ImageEnhance
             self.ImageOps = ImageOps
             self.pytesseract = pytesseract
             self.log("[OCR] San sang.")
@@ -56,16 +58,32 @@ class Vision:
 
         x, y, w, h = region
         crop = image.crop((x, y, x + w, y + h))
-        crop = crop.resize((w * 3, h * 3))
+        scale = 3 if allow_percent else 4
+        crop = crop.resize((w * scale, h * scale))
         gray = self.ImageOps.grayscale(crop)
-        gray = gray.point(lambda p: 255 if p > 145 else 0)
         whitelist = "0123456789%" if allow_percent else "0123456789"
-        config = f"--psm 7 -c tessedit_char_whitelist={whitelist}"
-        text = self.pytesseract.image_to_string(gray, config=config)
+        if allow_percent:
+            gray = gray.point(lambda p: 255 if p > 145 else 0)
+            return self._ocr_digits(gray, whitelist, psm=7)
+
+        candidates = [
+            (gray, 8),
+            (gray, 13),
+            (gray, 7),
+            (self.ImageEnhance.Contrast(gray).enhance(2.2), 8),
+            (gray.point(lambda p: 255 if p > 120 else 0), 8),
+        ]
+        for candidate, psm in candidates:
+            value = self._ocr_digits(candidate, whitelist, psm)
+            if value >= 0:
+                return value
+        return -1
+
+    def _ocr_digits(self, image, whitelist: str, psm: int) -> int:
+        config = f"--psm {psm} -c tessedit_char_whitelist={whitelist}"
+        text = self.pytesseract.image_to_string(image, config=config)
         digits = re.sub(r"\D", "", text)
-        if not digits:
-            return -1
-        return int(digits)
+        return int(digits) if digits else -1
 
     def read_text(self, image, region: list[int]) -> str:
         if not self.available or image is None:
@@ -104,6 +122,38 @@ class Vision:
         next_region = self.config["ocr"]["regions"].get("next_button", [1325, 575, 250, 130])
         damage_region = self.config["ocr"]["regions"].get("damage_panel", [1320, 615, 260, 120])
         return self._has_dark_damage_panel(image, damage_region) and not self._has_orange_button(image, next_region)
+
+    def slot_looks_available(self, png: bytes, center: list[int], size: list[int] | None = None) -> bool:
+        if not self.available:
+            return True
+        image = self.image_from_png(png)
+        if image is None:
+            return True
+
+        width, height = size or [86, 104]
+        cx, cy = center
+        x1 = max(0, int(cx - width / 2))
+        y1 = max(0, int(cy - height / 2))
+        x2 = min(image.width, int(cx + width / 2))
+        y2 = min(image.height, int(cy + height / 2))
+        crop = image.crop((x1, y1, x2, y2)).convert("RGB")
+        pixels = list(crop.getdata())
+        if not pixels:
+            return True
+
+        colorful = 0
+        visible = 0
+        for r, g, b in pixels:
+            brightness = max(r, g, b)
+            if brightness < 35:
+                continue
+            visible += 1
+            saturation = brightness - min(r, g, b)
+            if saturation >= 45:
+                colorful += 1
+        if visible == 0:
+            return True
+        return colorful / visible >= 0.14
 
     def _has_attack_button_color(self, image, region: list[int]) -> bool:
         if image is None:

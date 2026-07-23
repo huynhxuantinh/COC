@@ -39,8 +39,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "farm": {
         "village": "main",
-        "combo": "Rong Dien",
+        "combo": "Rồng Điện",
         "deploy_mode": "one_edge",
+        "attack_edge": "top",
+        "attack_view": "random",
         "threshold_mode": "any",
         "gold_min": 900000,
         "elixir_min": 900000,
@@ -101,6 +103,24 @@ DEFAULT_CONFIG: dict[str, Any] = {
             [800, 250, 800, 560, 450],
             [800, 250, 800, 560, 450],
         ],
+        "view_camera_swipes": {
+            "trenbenphai": [
+                [1050, 260, 650, 620, 500],
+                [1050, 260, 650, 620, 500],
+            ],
+            "trenbentrai": [
+                [550, 260, 950, 620, 500],
+                [550, 260, 950, 620, 500],
+            ],
+            "duoibenphai": [
+                [1050, 640, 650, 280, 500],
+                [1050, 640, 650, 280, 500],
+            ],
+            "duoibentrai": [
+                [550, 640, 950, 280, 500],
+                [550, 640, 950, 280, 500],
+            ],
+        },
         "camera_settle_seconds": 0.8,
         "pre_attack_swipes": [],
         "one_edge_points": [
@@ -113,6 +133,54 @@ DEFAULT_CONFIG: dict[str, Any] = {
             [1180, 375],
             [1240, 425],
         ],
+        "edge_points": {
+            "top": [
+                [820, 135],
+                [880, 165],
+                [940, 200],
+                [1000, 240],
+                [1060, 285],
+                [1120, 330],
+                [1180, 375],
+                [1240, 425],
+            ],
+            "bottom": [
+                [760, 670],
+                [820, 640],
+                [880, 610],
+                [940, 580],
+                [1000, 545],
+                [1060, 510],
+                [1120, 475],
+                [1180, 440],
+            ],
+            "left": [
+                [315, 330],
+                [380, 365],
+                [445, 400],
+                [510, 435],
+                [575, 470],
+                [640, 505],
+                [705, 540],
+                [770, 575],
+            ],
+            "right": [
+                [1245, 330],
+                [1180, 365],
+                [1115, 400],
+                [1050, 435],
+                [985, 470],
+                [920, 505],
+                [855, 540],
+                [790, 575],
+            ],
+        },
+        "view_points": {
+            "trenbenphai": [],
+            "trenbentrai": [],
+            "duoibenphai": [],
+            "duoibentrai": [],
+        },
         "line_points": [
             [560, 610],
             [650, 640],
@@ -129,11 +197,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
             [1080, 610],
         ],
         "random_area": [260, 170, 1250, 700],
+        "slot_check_every": 2,
         "sequence": [
             {"slot": "siege", "count": 1, "delay": 0.35},
-            {"slot": "dragon", "count": 8, "delay": 0.18},
-            {"slot": "balloon", "count": 9, "delay": 0.16},
-            {"slot": "titan", "count": 1, "delay": 0.25},
+            {"slot": "dragon", "count": "all", "max_taps": 16, "delay": 0.18},
+            {"slot": "balloon", "count": "all", "max_taps": 24, "delay": 0.16},
+            {"slot": "titan", "count": "all", "max_taps": 4, "delay": 0.25},
             {"slot": "hero", "count": 1, "delay": 0.25},
         ],
         "spells": [
@@ -162,6 +231,24 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "points": [[742, 405], [952, 555]],
             },
         ],
+        "spell_groups": [
+            {
+                "name": "No/Bang linh hoat",
+                "enabled": True,
+                "slots": ["rage", "freeze"],
+                "max_casts": 6,
+                "delay_after_deploy": 4,
+                "delay_between_casts": 0.22,
+                "points": [
+                    [807, 281],
+                    [958, 371],
+                    [1083, 466],
+                    [781, 352],
+                    [912, 436],
+                    [952, 555],
+                ],
+            },
+        ],
     },
     "timing": {
         "after_click": 0.25,
@@ -174,11 +261,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "sleep_jitter_percent": 0.15,
         "sleep_jitter_min_seconds": 0.25,
     },
+    "attack_timing": {
+        "use_default": True,
+        "troop_delay_ms": 150,
+        "freeze_random_min_ms": 0,
+        "freeze_random_max_ms": 1000,
+        "rage_random_min_ms": 2000,
+        "rage_random_max_ms": 4000,
+        "siege_activation_min_ms": 5000,
+        "siege_activation_max_ms": 7000,
+        "hero_skill_min_ms": 2000,
+        "hero_skill_max_ms": 4000,
+        "next_battle_min_ms": 2000,
+        "next_battle_max_ms": 5000,
+        "adb_delay_seconds": 0.3,
+        "hero_search_delay_seconds": 1.5,
+        "optimized_mode": False,
+    },
 }
 
 
 DEFAULT_CONFIG["combos"] = {
-    "Rong Dien": {
+    "Rồng Điện": {
         "deploy": copy.deepcopy(DEFAULT_CONFIG["deploy"]),
     },
 }
@@ -204,7 +308,7 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     merged = deep_merge(DEFAULT_CONFIG, data)
     if "combos" not in data:
         merged["combos"] = {
-            "Rong Dien": {
+            "Rồng Điện": {
                 "deploy": copy.deepcopy(merged["deploy"]),
             },
         }

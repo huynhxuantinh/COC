@@ -173,7 +173,7 @@ class COCFarmApp(tk.Tk):
         ).pack(anchor="w")
         tk.Label(
             title_box,
-            text="LDPlayer 1600x900 - farm lang chinh qua ADB",
+            text="LDPlayer 1600x900 - farm làng chính qua ADB",
             bg=c["panel"],
             fg=c["muted"],
             font=("Segoe UI", 9),
@@ -183,13 +183,13 @@ class COCFarmApp(tk.Tk):
         actions.grid(row=0, column=1, sticky="e")
         self.actions_frame = actions
 
-        self._button(actions, "Scan ADB", self.scan_adb, c["blue"], width=11).pack(side="left", padx=4)
-        self._button(actions, "Start", self.start_bot, c["green"], width=9).pack(side="left", padx=4)
-        self._button(actions, "Pause", self.toggle_pause, c["slate"], width=9).pack(side="left", padx=4)
-        self._button(actions, "Stop", self.stop_bot, c["red"], width=9).pack(side="left", padx=4)
-        self._button(actions, "Cai dat", self.open_settings_hint, "#4b5563", width=9).pack(side="left", padx=4)
+        self._button(actions, "Quét ADB", self.scan_adb, c["blue"], width=11).pack(side="left", padx=4)
+        self._button(actions, "Bắt đầu", self.start_bot, c["green"], width=9).pack(side="left", padx=4)
+        self._button(actions, "Tạm dừng", self.toggle_pause, c["slate"], width=9).pack(side="left", padx=4)
+        self._button(actions, "Dừng", self.stop_bot, c["red"], width=9).pack(side="left", padx=4)
+        self._button(actions, "Cài đặt", self.open_settings_hint, "#4b5563", width=9).pack(side="left", padx=4)
 
-        self.status_var = tk.StringVar(value="Chua scan ADB.")
+        self.status_var = tk.StringVar(value="Chưa quét ADB.")
         status = tk.Label(
             parent,
             textvariable=self.status_var,
@@ -210,18 +210,18 @@ class COCFarmApp(tk.Tk):
 
         tk.Label(
             card,
-            text="Thong ke phien",
+            text="Thống kê phiên",
             bg=c["panel"],
             fg=c["text"],
             font=("Segoe UI", 12, "bold"),
         ).pack(anchor="w")
 
         items = [
-            ("attacks", "Tran"),
+            ("attacks", "Trận"),
             ("next", "Next"),
-            ("gold_seen", "Vang"),
-            ("elixir_seen", "Dau"),
-            ("dark_seen", "Dau den"),
+            ("gold_seen", "Vàng"),
+            ("elixir_seen", "Dầu"),
+            ("dark_seen", "Dầu đen"),
         ]
         row = tk.Frame(card, bg=c["panel"])
         row.pack(fill="x", pady=(10, 0))
@@ -279,7 +279,7 @@ class COCFarmApp(tk.Tk):
         combos = self.config_data.get("combos", {})
         if combos:
             return list(combos.keys())
-        combo = self.config_data.get("farm", {}).get("combo", "Rong Dien")
+        combo = self.config_data.get("farm", {}).get("combo", "Rồng Điện")
         return [combo]
 
     def _build_tabs(self, parent: tk.Frame) -> None:
@@ -289,7 +289,7 @@ class COCFarmApp(tk.Tk):
         farm_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=14)
         surrender_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=14)
         notebook.add(farm_tab, text="Farm")
-        notebook.add(surrender_tab, text="Dau hang")
+        notebook.add(surrender_tab, text="Đầu hàng")
 
         self._build_farm_tab(farm_tab)
         self._build_surrender_tab(surrender_tab)
@@ -312,6 +312,7 @@ class COCFarmApp(tk.Tk):
         selected_combo = farm.get("combo") if farm.get("combo") in combo_names else combo_names[0]
         self.vars["combo"] = tk.StringVar(value=selected_combo)
         self.vars["deploy_mode"] = tk.StringVar(value=self._deploy_label(farm["deploy_mode"]))
+        self.vars["attack_edge"] = tk.StringVar(value=self._edge_label(farm.get("attack_edge", "top")))
         self.vars["gold_min"] = tk.StringVar(value=f"{farm['gold_min']:,}")
         self.vars["elixir_min"] = tk.StringVar(value=f"{farm['elixir_min']:,}")
         self.vars["dark_min"] = tk.StringVar(value=f"{farm['dark_min']:,}")
@@ -323,44 +324,51 @@ class COCFarmApp(tk.Tk):
         right.grid(row=1, column=0, sticky="ew", pady=(18, 0))
         parent.columnconfigure(0, weight=1)
 
-        ttk.Label(left, text="Cai dat chay", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(left, text="Cài đặt chạy", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
         checks = [
-            ("Bo qua khoi dong lai game", "skip_restart_game"),
-            ("Bat tu dong dung", "auto_stop"),
-            ("Bat cho linh khi farm", "donate_when_farming"),
-            ("Tu dong doi combo khi bat dau", "change_combo_on_start"),
-            ("Thong ke tai nguyen", "resource_stats"),
-            ("Khong thay Attack thi mo lai game", "restart_if_attack_missing"),
-            ("Restart game dinh ky", "periodic_restart_game"),
+            ("Bỏ qua khởi động lại game", "skip_restart_game"),
+            ("Bật tự động dừng", "auto_stop"),
+            ("Bật chờ lính khi farm", "donate_when_farming"),
+            ("Tự động đổi combo khi bắt đầu", "change_combo_on_start"),
+            ("Thống kê tài nguyên", "resource_stats"),
+            ("Không thấy Attack thì mở lại game", "restart_if_attack_missing"),
+            ("Restart game định kỳ", "periodic_restart_game"),
         ]
         for i, (text, key) in enumerate(checks, start=1):
             ttk.Checkbutton(left, text=text, variable=self.vars[key]).grid(
                 row=i, column=0, columnspan=2, sticky="w", pady=5
             )
 
-        ttk.Label(left, text="Tu dong dung sau", style="Panel.TLabel").grid(row=8, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(left, text="Tự động dừng sau", style="Panel.TLabel").grid(row=8, column=0, sticky="w", pady=(10, 0))
         ttk.Entry(left, textvariable=self.vars["auto_restart_after_seconds"], width=8).grid(
             row=8, column=1, sticky="w", pady=(10, 0)
         )
         self._range(
             left,
             9,
-            "Restart game tu",
+            "Restart game từ",
             self.vars["periodic_restart_min_seconds"],
             self.vars["periodic_restart_max_seconds"],
             "s",
         )
 
-        ttk.Label(right, text="Nguong farm", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(right, text="Ngưỡng farm", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
         self._field(right, 1, "Combo", self.vars["combo"], values=self._combo_names())
-        self._field(right, 2, "Vang toi thieu", self.vars["gold_min"])
-        self._field(right, 3, "Dau toi thieu", self.vars["elixir_min"])
-        self._field(right, 4, "Dau den (chi thong ke)", self.vars["dark_min"])
-        self._field(right, 5, "Tong vang + dau", self.vars["total_min"])
+        self._field(
+            right,
+            2,
+            "Cạnh đánh",
+            self.vars["attack_edge"],
+            values=["Trên", "Dưới", "Trái", "Phải", "Ngẫu nhiên", "Tự động"],
+        )
+        self._field(right, 3, "Vàng tối thiểu", self.vars["gold_min"])
+        self._field(right, 4, "Dầu tối thiểu", self.vars["elixir_min"])
+        self._field(right, 5, "Dầu đen (chỉ thống kê)", self.vars["dark_min"])
+        self._field(right, 6, "Tổng vàng + dầu", self.vars["total_min"])
 
-        ttk.Label(right, text="Che do tha", style="Panel.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 6))
-        modes = ["Tha 1 canh", "Tha theo hang", "Tha 4 goc map", "Ngau nhien"]
-        for i, label in enumerate(modes, start=7):
+        ttk.Label(right, text="Chế độ thả", style="Panel.TLabel").grid(row=7, column=0, sticky="w", pady=(12, 6))
+        modes = ["Thả 1 cạnh", "Thả theo hàng", "Thả 4 góc map", "Ngẫu nhiên"]
+        for i, label in enumerate(modes, start=8):
             ttk.Radiobutton(right, text=label, variable=self.vars["deploy_mode"], value=label).grid(
                 row=i, column=0, columnspan=2, sticky="w", pady=3
             )
@@ -377,24 +385,24 @@ class COCFarmApp(tk.Tk):
         self.vars["total_remaining_less_than"] = tk.StringVar(value=f"{surrender['total_remaining_less_than']:,}")
         self.vars["never_surrender"] = tk.BooleanVar(value=surrender["never_surrender"])
 
-        ttk.Label(parent, text="Dieu kien dau hang", style="Title.TLabel").grid(
+        ttk.Label(parent, text="Điều kiện đầu hàng", style="Title.TLabel").grid(
             row=0, column=0, columnspan=4, sticky="w", pady=(0, 10)
         )
-        ttk.Checkbutton(parent, text="Dau hang theo thoi gian", variable=self.vars["by_time"]).grid(
+        ttk.Checkbutton(parent, text="Đầu hàng theo thời gian", variable=self.vars["by_time"]).grid(
             row=1, column=0, columnspan=4, sticky="w", pady=5
         )
         self._range(parent, 2, "Tu", self.vars["time_min_seconds"], self.vars["time_max_seconds"], "s")
 
-        ttk.Checkbutton(parent, text="Dau hang theo % pha huy", variable=self.vars["by_destruction"]).grid(
+        ttk.Checkbutton(parent, text="Đầu hàng theo % phá hủy", variable=self.vars["by_destruction"]).grid(
             row=3, column=0, columnspan=4, sticky="w", pady=(14, 5)
         )
         self._range(parent, 4, "Tu", self.vars["destruction_min_percent"], self.vars["destruction_max_percent"], "%")
 
-        ttk.Checkbutton(parent, text="Dau hang khi con it tai nguyen", variable=self.vars["when_low_loot"]).grid(
+        ttk.Checkbutton(parent, text="Đầu hàng khi còn ít tài nguyên", variable=self.vars["when_low_loot"]).grid(
             row=5, column=0, columnspan=4, sticky="w", pady=(14, 5)
         )
-        self._field(parent, 6, "Tong vang + dau <", self.vars["total_remaining_less_than"])
-        ttk.Checkbutton(parent, text="Khong dau hang (danh het)", variable=self.vars["never_surrender"]).grid(
+        self._field(parent, 6, "Tổng vàng + dầu <", self.vars["total_remaining_less_than"])
+        ttk.Checkbutton(parent, text="Không đầu hàng (đánh hết)", variable=self.vars["never_surrender"]).grid(
             row=7, column=0, columnspan=4, sticky="w", pady=(14, 5)
         )
 
@@ -408,12 +416,12 @@ class COCFarmApp(tk.Tk):
         tk.Label(top, text="Logs", bg=c["panel"], fg=c["text"], font=("Segoe UI", 12, "bold")).pack(side="left")
         tk.Label(
             top,
-            text="Theo doi scan, search, attack va loi ADB/OCR",
+            text="Theo dõi quét, tìm trận, tấn công và lỗi ADB/OCR",
             bg=c["panel"],
             fg=c["muted"],
             font=("Segoe UI", 9),
         ).pack(side="left", padx=(10, 0))
-        self._button(top, "Clear", self.clear_logs, "#374151", width=9).pack(side="right")
+        self._button(top, "Xóa", self.clear_logs, "#374151", width=9).pack(side="right")
 
         body = tk.Frame(log_card, bg=c["panel_3"])
         body.pack(fill="both", expand=True)
@@ -489,11 +497,11 @@ class COCFarmApp(tk.Tk):
 
     def start_bot(self) -> None:
         if self._bot_running():
-            self._log("[INFO] Bot dang chay roi.")
+            self._log("[INFO] Bot đang chạy rồi.")
             return
         if not self.adb_ready:
-            self._log("[ADB] Bam Scan ADB truoc. Ket noi OK roi moi Start.")
-            self.status_var.set("Chua scan ADB.")
+            self._log("[ADB] Bấm Quét ADB trước. Kết nối OK rồi mới Bắt đầu.")
+            self.status_var.set("Chưa quét ADB.")
             return
         try:
             self._sync_config_from_ui()
@@ -504,7 +512,7 @@ class COCFarmApp(tk.Tk):
 
         self.stop_event.clear()
         self.pause_event.clear()
-        self.status_var.set("Dang khoi dong...")
+        self.status_var.set("Đang khởi động...")
         devices = self._configured_devices()
         self.bot_threads = []
         self.active_devices = devices
@@ -544,18 +552,18 @@ class COCFarmApp(tk.Tk):
 
     def scan_adb(self) -> None:
         if self._bot_running():
-            self._log("[ADB] Dung bot truoc khi scan.")
+            self._log("[ADB] Dừng bot trước khi quét.")
             return
         self.adb_ready = False
-        self.status_var.set("Dang scan ADB...")
+        self.status_var.set("Đang quét ADB...")
         threading.Thread(target=self._scan_adb_worker, daemon=True).start()
 
     def _scan_adb_worker(self) -> None:
-        self._log_threadsafe("[ADB] Dang quet adb.exe...")
+        self._log_threadsafe("[ADB] Đang quét adb.exe...")
         paths = discover_adb_paths(self.config_data["adb"].get("path", ""))
         if not paths:
-            self._log_threadsafe("[ADB] Khong tim thay adb.exe. Bam Cai dat de chon file.")
-            self.after(0, lambda: self.status_var.set("Khong thay ADB."))
+            self._log_threadsafe("[ADB] Không tìm thấy adb.exe. Bấm Cài đặt để chọn file.")
+            self.after(0, lambda: self.status_var.set("Không thấy ADB."))
             return
 
         devices = []
@@ -570,9 +578,9 @@ class COCFarmApp(tk.Tk):
             if device not in devices:
                 devices.append(device)
 
-        self._log_threadsafe(f"[ADB] Tim thay {len(paths)} path. Dang thu ket noi...")
+        self._log_threadsafe(f"[ADB] Tìm thấy {len(paths)} path. Đang thử kết nối...")
         for path in paths:
-            self._log_threadsafe(f"[ADB] Thu path: {path}")
+            self._log_threadsafe(f"[ADB] Thử path: {path}")
             for device in devices:
                 try:
                     client = ADBClient(path, device, log=self._log_threadsafe)
@@ -588,27 +596,27 @@ class COCFarmApp(tk.Tk):
                 save_config(self.config_data)
                 self.adb_ready = True
                 self._log_threadsafe(f"[ADB] OK: {path} | {device}")
-                self.after(0, lambda: self.status_var.set("ADB da ket noi 1 device. Co the Start."))
+                self.after(0, lambda: self.status_var.set("ADB đã kết nối 1 device. Có thể Bắt đầu."))
                 return
 
-        self._log_threadsafe("[ADB] Co adb.exe nhung khong connect duoc LDPlayer.")
-        self.after(0, lambda: self.status_var.set("ADB connect fail."))
+        self._log_threadsafe("[ADB] Có adb.exe nhưng không kết nối được LDPlayer.")
+        self.after(0, lambda: self.status_var.set("Kết nối ADB thất bại."))
 
     def toggle_pause(self) -> None:
         if self.pause_event.is_set():
             self.pause_event.clear()
-            self.status_var.set("Dang chay...")
-            self._log("[INFO] Tiep tuc.")
+            self.status_var.set("Đang chạy...")
+            self._log("[INFO] Tiếp tục.")
         else:
             self.pause_event.set()
-            self.status_var.set("Da tam dung.")
-            self._log("[INFO] Da tam dung.")
+            self.status_var.set("Đã tạm dừng.")
+            self._log("[INFO] Đã tạm dừng.")
 
     def stop_bot(self) -> None:
         self.stop_event.set()
         self.pause_event.clear()
-        self.status_var.set("Dang dung...")
-        self._log("[INFO] Yeu cau dung.")
+        self.status_var.set("Đang dừng...")
+        self._log("[INFO] Yêu cầu dừng.")
 
     def clear_logs(self) -> None:
         self.log_text.delete("1.0", "end")
@@ -616,7 +624,7 @@ class COCFarmApp(tk.Tk):
     def open_settings_hint(self) -> None:
         c = self.colors
         win = tk.Toplevel(self)
-        win.title("Cai dat")
+        win.title("Cài đặt")
         win.geometry("650x270")
         win.configure(bg=c["bg"])
         win.transient(self)
@@ -645,25 +653,25 @@ class COCFarmApp(tk.Tk):
                 self.config_data["farm"]["max_next"] = int(max_next.get().replace(",", "").strip())
                 save_config(self.config_data)
             except ValueError:
-                self._log("[CONFIG] Max Next phai la so.")
+                self._log("[CONFIG] Max Next phải là số.")
                 return
             self.adb_ready = False
-            self.status_var.set("Da luu. Scan ADB lai.")
-            self._log("[INFO] Da luu cai dat.")
+            self.status_var.set("Đã lưu. Quét ADB lại.")
+            self._log("[INFO] Đã lưu cài đặt.")
             win.destroy()
 
-        self._button(frame, "Luu", save, c["green"]).grid(row=4, column=1, sticky="e", pady=18)
+        self._button(frame, "Lưu", save, c["green"]).grid(row=4, column=1, sticky="e", pady=18)
 
     def _settings_row(self, parent: ttk.Frame, row: int, label: str, var: tk.StringVar, browse: bool = False) -> None:
         ttk.Label(parent, text=label, style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=8)
         ttk.Entry(parent, textvariable=var, width=52).grid(row=row, column=1, sticky="ew", pady=8, padx=8)
         if browse:
-            self._button(parent, "Chon", lambda: self._pick_file(var), self.colors["slate"], width=8).grid(row=row, column=2)
+            self._button(parent, "Chọn", lambda: self._pick_file(var), self.colors["slate"], width=8).grid(row=row, column=2)
 
     def _pick_file(self, target_var: tk.StringVar) -> None:
         path = filedialog.askopenfilename(
             parent=self,
-            title="Chon file",
+            title="Chọn file",
             filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
         )
         if path:
@@ -681,7 +689,7 @@ class COCFarmApp(tk.Tk):
         game["periodic_restart_min_seconds"] = self._int_var("periodic_restart_min_seconds")
         game["periodic_restart_max_seconds"] = self._int_var("periodic_restart_max_seconds")
         if game["periodic_restart_min_seconds"] > game["periodic_restart_max_seconds"]:
-            raise ValueError("periodic_restart_min_seconds phai <= periodic_restart_max_seconds.")
+            raise ValueError("Thời gian restart tối thiểu phải <= tối đa.")
         game["donate_when_farming"] = bool(self.vars["donate_when_farming"].get())
         game["change_combo_on_start"] = bool(self.vars["change_combo_on_start"].get())
         game["resource_stats"] = bool(self.vars["resource_stats"].get())
@@ -689,6 +697,7 @@ class COCFarmApp(tk.Tk):
 
         farm["combo"] = str(self.vars["combo"].get())
         farm["deploy_mode"] = self._deploy_value(str(self.vars["deploy_mode"].get()))
+        farm["attack_edge"] = self._edge_value(str(self.vars["attack_edge"].get()))
         farm["gold_min"] = self._money_var("gold_min")
         farm["elixir_min"] = self._money_var("elixir_min")
         farm["dark_min"] = self._money_var("dark_min")
@@ -707,7 +716,7 @@ class COCFarmApp(tk.Tk):
     def _money_var(self, key: str) -> int:
         raw = str(self.vars[key].get()).replace(",", "").replace(" ", "")
         if not raw.isdigit():
-            raise ValueError(f"{key} phai la so.")
+            raise ValueError(f"{key} phải là số.")
         return int(raw)
 
     def _int_var(self, key: str) -> int:
@@ -715,19 +724,39 @@ class COCFarmApp(tk.Tk):
 
     def _deploy_value(self, label: str) -> str:
         return {
-            "Tha 1 canh": "one_edge",
-            "Tha theo hang": "line",
-            "Tha 4 goc map": "four_corner",
-            "Ngau nhien": "random",
+            "Thả 1 cạnh": "one_edge",
+            "Thả theo hàng": "line",
+            "Thả 4 góc map": "four_corner",
+            "Ngẫu nhiên": "random",
         }.get(label, "one_edge")
 
     def _deploy_label(self, value: str) -> str:
         return {
-            "one_edge": "Tha 1 canh",
-            "line": "Tha theo hang",
-            "four_corner": "Tha 4 goc map",
-            "random": "Ngau nhien",
-        }.get(value, "Tha 1 canh")
+            "one_edge": "Thả 1 cạnh",
+            "line": "Thả theo hàng",
+            "four_corner": "Thả 4 góc map",
+            "random": "Ngẫu nhiên",
+        }.get(value, "Thả 1 cạnh")
+
+    def _edge_value(self, label: str) -> str:
+        return {
+            "Trên": "top",
+            "Dưới": "bottom",
+            "Trái": "left",
+            "Phải": "right",
+            "Ngẫu nhiên": "random",
+            "Tự động": "auto",
+        }.get(label, "top")
+
+    def _edge_label(self, value: str) -> str:
+        return {
+            "top": "Trên",
+            "bottom": "Dưới",
+            "left": "Trái",
+            "right": "Phải",
+            "random": "Ngẫu nhiên",
+            "auto": "Tự động",
+        }.get(value, "Trên")
 
     def _log_threadsafe(self, message: str) -> None:
         self.log_queue.put(message)
@@ -748,11 +777,11 @@ class COCFarmApp(tk.Tk):
                 break
             self._log(message)
             if "Bot started" in message:
-                self.status_var.set("Dang chay...")
+                self.status_var.set("Đang chạy...")
             if "Bot stopped" in message and not self._bot_running():
-                self.status_var.set("Da dung.")
+                self.status_var.set("Đã dừng.")
             if "[ERROR]" in message and not self._bot_running():
-                self.status_var.set("Da dung.")
+                self.status_var.set("Đã dừng.")
         self.after(120, self._drain_logs)
 
     def _drain_stats(self) -> None:
@@ -780,11 +809,11 @@ class COCFarmApp(tk.Tk):
     def _update_stats_display(self, stats: dict) -> None:
         session = stats.get("current_session", stats)
         labels = {
-            "attacks": "Tran",
+            "attacks": "Trận",
             "next": "Next",
-            "gold_seen": "Vang",
-            "elixir_seen": "Dau",
-            "dark_seen": "Dau den",
+            "gold_seen": "Vàng",
+            "elixir_seen": "Dầu",
+            "dark_seen": "Dầu đen",
         }
         for key, label in labels.items():
             value = int(session.get(key, 0))
