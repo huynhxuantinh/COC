@@ -1060,7 +1060,7 @@
     "sleep_jitter_min_seconds": 0.25
   },
   "attack_timing": {
-    "use_default": false,
+    "use_default": true,
     "troop_delay_ms": 30,
     "freeze_random_min_ms": 30,
     "freeze_random_max_ms": 250,
