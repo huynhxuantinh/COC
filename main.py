@@ -365,11 +365,11 @@ class COCFarmApp(tk.Tk):
         self._field(right, 6, "Tổng vàng + dầu", self.vars["total_min"])
 
         ttk.Label(right, text="Chế độ thả", style="Panel.TLabel").grid(row=7, column=0, sticky="w", pady=(12, 6))
-        modes = ["Thả 1 cạnh", "Thả theo hàng", "Thả 4 góc map", "Ngẫu nhiên"]
-        for i, label in enumerate(modes, start=8):
-            ttk.Radiobutton(right, text=label, variable=self.vars["deploy_mode"], value=label).grid(
-                row=i, column=0, columnspan=2, sticky="w", pady=3
-            )
+        ttk.Label(
+            right,
+            text="Thả theo vùng polygon đã vẽ trong trang tọa độ.",
+            style="Subtle.TLabel",
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=3)
 
     def _build_surrender_tab(self, parent: ttk.Frame) -> None:
         surrender = self.config_data["surrender"]
@@ -647,7 +647,7 @@ class COCFarmApp(tk.Tk):
         game["restart_if_attack_missing"] = bool(self.vars["restart_if_attack_missing"].get())
 
         farm["combo"] = str(self.vars["combo"].get())
-        farm["deploy_mode"] = self._deploy_value(str(self.vars["deploy_mode"].get()))
+        farm["deploy_mode"] = "polygon"
         farm["attack_edge"] = self._edge_value(str(self.vars["attack_edge"].get()))
         farm["gold_min"] = self._money_var("gold_min")
         farm["elixir_min"] = self._money_var("elixir_min")
@@ -675,19 +675,21 @@ class COCFarmApp(tk.Tk):
 
     def _deploy_value(self, label: str) -> str:
         return {
+            "Thả theo vùng polygon": "polygon",
             "Thả 1 cạnh": "one_edge",
             "Thả theo hàng": "line",
             "Thả 4 góc map": "four_corner",
             "Ngẫu nhiên": "random",
-        }.get(label, "one_edge")
+        }.get(label, "polygon")
 
     def _deploy_label(self, value: str) -> str:
         return {
+            "polygon": "Thả theo vùng polygon",
             "one_edge": "Thả 1 cạnh",
             "line": "Thả theo hàng",
             "four_corner": "Thả 4 góc map",
             "random": "Ngẫu nhiên",
-        }.get(value, "Thả 1 cạnh")
+        }.get(value, "Thả theo vùng polygon")
 
     def _edge_value(self, label: str) -> str:
         return {

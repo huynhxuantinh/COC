@@ -31,6 +31,7 @@ class FarmBot:
         resolution = tuple(config["game"].get("resolution", [1600, 900]))
         self.adb = ADBClient(config["adb"]["path"], config["adb"]["device"], log=log, resolution=resolution)
         self.vision = Vision(config, log=log)
+        self.slot_detector = SlotDetector(config, log)
         self.stats = {key: 0 for key in self.STAT_KEYS}
         self.stats_callback = stats_callback or (lambda stats: None)
         self.stats_path = Path(config.get("runtime", {}).get("stats_path", "stats.json"))
@@ -349,7 +350,7 @@ class FarmBot:
         if not slot_detection.get("enabled", False):
             return
 
-        detector = SlotDetector(self.config, self.log)
+        detector = self.slot_detector
         active_kinds = self._active_slot_detection_kinds(detector.kinds)
         if not active_kinds:
             self.log("[SLOT] Combo hien tai khong co kind slot nao can detect.")
@@ -437,29 +438,32 @@ class FarmBot:
         return deployed_any
 
     def _read_deploy_slot_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        detected_kinds: set[str] = set()
+
         if self.runtime_slots:
-            counts: dict[str, int] = {}
             for kind, items in self.runtime_slots.items():
                 counts[kind] = sum(max(0, int(item.get("count", -1))) for item in items)
-            return counts
+                detected_kinds.add(kind)
 
         deploy = self.active_deploy
-        if not deploy.get("scan_slot_counts", True):
-            return {}
-
-        try:
-            png = self.adb.screencap_png()
-        except ADBError as exc:
-            self.log(f"[ATTACK] Slot count scan failed: {exc}")
-            return {}
-
-        counts: dict[str, int] = {}
+        fallback_slots: list[str] = []
         for step in deploy.get("sequence", []):
             slot = step.get("slot", "")
-            coords = self.config["coords"]["slots"].get(slot)
-            if not slot or not coords:
-                continue
-            counts[slot] = self.vision.read_slot_count(png, coords, slot)
+            if slot and slot not in detected_kinds and slot not in fallback_slots:
+                fallback_slots.append(slot)
+
+        if fallback_slots and deploy.get("scan_slot_counts", True):
+            try:
+                png = self.adb.screencap_png()
+            except ADBError as exc:
+                self.log(f"[ATTACK] Slot count scan failed: {exc}")
+                png = None
+            if png:
+                for slot in fallback_slots:
+                    coords = self.config["coords"]["slots"].get(slot)
+                    if coords:
+                        counts[slot] = self.vision.read_slot_count(png, coords, slot)
 
         if counts:
             details = " | ".join(f"{slot}={count if count >= 0 else '?'}" for slot, count in counts.items())
@@ -469,19 +473,8 @@ class FarmBot:
     def _deploy_count_for_step(self, step: dict[str, Any], slot_counts: dict[str, int]) -> int:
         slot = step.get("slot", "")
         fallback = self._tap_limit(step.get("count", 0), int(step.get("max_taps", 0)))
-        if self.runtime_slots:
-            detected = slot_counts.get(slot, -1)
-            if detected > 0:
-                if self._is_all(step.get("count")):
-                    max_taps = int(step.get("max_taps", detected))
-                    return min(detected, max_taps) if max_taps > 0 else detected
-                return min(fallback, detected)
-            return 0
-
-        if not self.active_deploy.get("scan_slot_counts", True):
-            return fallback
-
         detected = slot_counts.get(slot, -1)
+
         if detected == 0:
             return 0
         if detected > 0:
@@ -756,16 +749,35 @@ class FarmBot:
     def _deploy_points(self) -> list[list[int]]:
         deploy = self.active_deploy
         view = self.current_attack_view or self._selected_attack_view()
-        deploy_zones = deploy.get("deploy_zones", {})
-        zone = deploy_zones.get(view, [])
+        zone, source = self._deploy_zone_for_view(view)
         if len(zone) >= 3:
-            self.log(f"[ZONE] Deploy random in zone: {view}.")
+            suffix = "default deploy" if source == "default" else "combo deploy"
+            self.log(f"[ZONE] Deploy random in zone: {view} ({suffix}).")
             return self._random_points_in_polygon(
                 zone,
                 int(deploy.get("zone_random_points", 48)),
             )
-        self.log(f"[ZONE] Missing deploy zone for {view or 'unknown view'}, no fixed-point fallback.")
+        self.log(f"[ZONE] Missing deploy zone for {view or 'unknown view'} in combo/default deploy.")
         return []
+
+    def _deploy_zone_for_view(self, view: str) -> tuple[list[list[int]], str]:
+        zone = self._valid_polygon(self.active_deploy.get("deploy_zones", {}).get(view, []))
+        if zone:
+            return zone, "combo"
+
+        base_deploy = self.config.get("deploy", {})
+        if base_deploy is not self.active_deploy:
+            zone = self._valid_polygon(base_deploy.get("deploy_zones", {}).get(view, []))
+            if zone:
+                return zone, "default"
+
+        return [], ""
+
+    def _valid_polygon(self, points: Any) -> list[list[int]]:
+        if not isinstance(points, list):
+            return []
+        normalized = [[int(point[0]), int(point[1])] for point in points if isinstance(point, list) and len(point) >= 2]
+        return normalized if len(normalized) >= 3 else []
 
     def _random_points_in_polygon(self, polygon: list[list[int]], count: int) -> list[list[int]]:
         normalized = [[int(point[0]), int(point[1])] for point in polygon if len(point) >= 2]
@@ -817,12 +829,10 @@ class FarmBot:
         return "top"
 
     def _selected_attack_view(self) -> str:
-        deploy = self.active_deploy
-        deploy_zones = deploy.get("deploy_zones", {})
         valid_views = tuple(
             view
             for view in ("trenbenphai", "trenbentrai", "duoibenphai", "duoibentrai")
-            if len(deploy_zones.get(view, [])) >= 3
+            if len(self._deploy_zone_for_view(view)[0]) >= 3
         )
         if not valid_views:
             return ""
@@ -882,8 +892,10 @@ class FarmBot:
 
     def _slot_available(self, slot: str) -> bool:
         runtime_slot = self._runtime_slot(slot)
-        if self.runtime_slots:
-            return runtime_slot is not None
+        if runtime_slot is not None:
+            return True
+        if slot in self.runtime_slots:
+            return False
 
         coords = self.config["coords"]["slots"].get(slot)
         if not coords:

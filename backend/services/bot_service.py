@@ -53,7 +53,7 @@ class BotService:
         return {
             "combos": combo_names,
             "deploy_modes": [
-                {"label": "Thả theo vùng polygon", "value": "one_edge"},
+                {"label": "Thả theo vùng polygon", "value": "polygon"},
             ],
             "attack_edges": [
                 {"label": "Trên", "value": "top"},

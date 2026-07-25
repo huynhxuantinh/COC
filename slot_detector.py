@@ -29,6 +29,8 @@ class SlotDetection:
 
 
 class SlotDetector:
+    _template_cache: dict[str, Any] = {}
+
     def __init__(self, config: dict[str, Any], log=None) -> None:
         self.config = config
         self.log = log or (lambda message: None)
@@ -70,6 +72,17 @@ class SlotDetector:
             }
             for kind in self.kinds
         ]
+
+    def _load_template(self, path: Path):
+        import cv2
+
+        key = str(path.resolve())
+        cached = self._template_cache.get(key)
+        if cached is None:
+            cached = cv2.imread(key, cv2.IMREAD_GRAYSCALE)
+            if cached is not None:
+                self._template_cache[key] = cached
+        return cached
 
     def save_template_from_base64(
         self,
@@ -140,7 +153,7 @@ class SlotDetector:
         active_kinds = [kind for kind in (kinds or self.kinds) if kind in self.kinds]
         for kind in active_kinds:
             for template_path in self.templates_for(kind):
-                template = cv2.imread(str(template_path), cv2.IMREAD_GRAYSCALE)
+                template = self._load_template(template_path)
                 if template is None:
                     continue
                 if template.shape[0] > gray_search.shape[0] or template.shape[1] > gray_search.shape[1]:

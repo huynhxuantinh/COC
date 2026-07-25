@@ -69,7 +69,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "farm": {
         "village": "main",
         "combo": "Rồng Điện",
-        "deploy_mode": "one_edge",
+        "deploy_mode": "polygon",
         "attack_edge": "top",
         "attack_view": "random",
         "threshold_mode": "any",
