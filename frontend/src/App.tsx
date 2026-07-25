@@ -3,10 +3,11 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { ConfigEditorProvider } from "./hooks/useConfigEditor";
 import { usePolling } from "./hooks/usePolling";
-import { CoordinatesPage } from "./pages/CoordinatesPage";
+import { SpellCoordinatesPage, TroopCoordinatesPage } from "./pages/CoordinatesPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { FarmPage } from "./pages/FarmPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SlotDetectionPage } from "./pages/SlotDetectionPage";
 import { SurrenderPage } from "./pages/SurrenderPage";
 import { getBotStatus } from "./services/botApi";
 import { apiErrorMessage } from "./services/http";
@@ -46,7 +47,10 @@ export function App() {
               }
             />
             <Route path="/farm" element={<FarmPage />} />
-            <Route path="/coordinates" element={<CoordinatesPage />} />
+            <Route path="/coordinates" element={<TroopCoordinatesPage />} />
+            <Route path="/coordinates/troops" element={<TroopCoordinatesPage />} />
+            <Route path="/coordinates/spells" element={<SpellCoordinatesPage />} />
+            <Route path="/slots" element={<SlotDetectionPage />} />
             <Route path="/surrender" element={<SurrenderPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

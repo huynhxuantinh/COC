@@ -12,6 +12,8 @@ from typing import Any
 from adb_client import ADBClient
 from bot_runtime import STAT_KEYS, scan_adb_connection, start_farm_threads
 from config_manager import load_config, save_config
+from slot_detector import SlotDetector
+from vision import Vision
 
 
 class BotService:
@@ -51,10 +53,7 @@ class BotService:
         return {
             "combos": combo_names,
             "deploy_modes": [
-                {"label": "Thả 1 cạnh", "value": "one_edge"},
-                {"label": "Thả theo hàng", "value": "line"},
-                {"label": "Thả 4 góc map", "value": "four_corner"},
-                {"label": "Ngẫu nhiên", "value": "random"},
+                {"label": "Thả theo vùng polygon", "value": "one_edge"},
             ],
             "attack_edges": [
                 {"label": "Trên", "value": "top"},
@@ -227,18 +226,20 @@ class BotService:
 
     def save_points(self, target: str, points: list[list[int]], combo_name: str = "") -> dict[str, Any]:
         allowed = {
-            "edge_top": ["deploy", "edge_points", "top"],
-            "edge_bottom": ["deploy", "edge_points", "bottom"],
-            "edge_left": ["deploy", "edge_points", "left"],
-            "edge_right": ["deploy", "edge_points", "right"],
-            "view_trenbenphai": ["deploy", "view_points", "trenbenphai"],
-            "view_trenbentrai": ["deploy", "view_points", "trenbentrai"],
-            "view_duoibenphai": ["deploy", "view_points", "duoibenphai"],
-            "view_duoibentrai": ["deploy", "view_points", "duoibentrai"],
-            "line_points": ["deploy", "line_points"],
-            "four_corner_points": ["deploy", "four_corner_points"],
-            "spell_group_points": ["deploy", "spell_groups", "0", "points"],
+            "zone_trenbenphai": ["deploy", "deploy_zones", "trenbenphai"],
+            "zone_trenbentrai": ["deploy", "deploy_zones", "trenbentrai"],
+            "zone_duoibenphai": ["deploy", "deploy_zones", "duoibenphai"],
+            "zone_duoibentrai": ["deploy", "deploy_zones", "duoibentrai"],
         }
+        spell_targets = {
+            "spell_no1": ["deploy", "spells", "0", "zones"],
+            "spell_bang": ["deploy", "spells", "1", "zones"],
+            "spell_no2": ["deploy", "spells", "2", "zones"],
+            "spell_group": ["deploy", "spell_groups", "0", "zones"],
+        }
+        for prefix, base_path in spell_targets.items():
+            for view in ("trenbenphai", "trenbentrai", "duoibenphai", "duoibentrai"):
+                allowed[f"{prefix}_zone_{view}"] = [*base_path, view]
         if target not in allowed:
             raise ValueError("Target toa do khong hop le.")
         normalized = [[int(point[0]), int(point[1])] for point in points]
@@ -266,6 +267,42 @@ class BotService:
         combo_label = ", ".join(updated_combos) if updated_combos else "global deploy"
         self._log(f"[COORD] Saved {len(normalized)} point(s) to {target} | {combo_label}.")
         return self.get_config()
+
+    def slot_templates(self) -> dict[str, Any]:
+        detector = SlotDetector(self.get_config(), self._log)
+        return {"kinds": detector.kinds, "items": detector.template_summary()}
+
+    def save_slot_template(
+        self,
+        kind: str,
+        image_base64: str,
+        x: int,
+        y: int,
+        size: int = 76,
+        crop_region: list[int] | None = None,
+    ) -> dict[str, Any]:
+        detector = SlotDetector(self.get_config(), self._log)
+        path = detector.save_template_from_base64(kind, image_base64, x, y, size, crop_region)
+        self._log(f"[SLOT] Saved template {kind}: {path}.")
+        return self.slot_templates()
+
+    def detect_slots(self, image_base64: str = "") -> dict[str, Any]:
+        config = self.get_config()
+        if image_base64:
+            png = base64.b64decode(image_base64)
+        else:
+            resolution = tuple(config["game"].get("resolution", [1600, 900]))
+            client = ADBClient(config["adb"].get("path", ""), config["adb"].get("device", ""), log=self._log, resolution=resolution)
+            if config["adb"].get("connect_on_start", True):
+                client.connect()
+            png = client.screencap_png()
+
+        detector = SlotDetector(config, self._log)
+        vision = Vision(config, self._log)
+        detections = detector.detect(png)
+        for detection in detections:
+            detection.count = vision.read_slot_count(png, detection.center, detection.kind)
+        return {"items": [detection.as_dict() for detection in detections]}
 
     def _bot_running_locked(self) -> bool:
         return any(thread.is_alive() for thread in self.bot_threads)

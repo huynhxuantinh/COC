@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.models.schemas import ApiMessage
-from backend.routers import bot, config, coordinates, logs, stats
+from backend.routers import bot, config, coordinates, logs, slots, stats
 
 
 app = FastAPI(title="COC Auto Farm API", version="1.0.0")
@@ -30,6 +30,7 @@ app.include_router(bot.router)
 app.include_router(config.router)
 app.include_router(coordinates.router)
 app.include_router(logs.router)
+app.include_router(slots.router)
 app.include_router(stats.router)
 
 

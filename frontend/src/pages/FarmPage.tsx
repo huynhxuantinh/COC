@@ -21,7 +21,7 @@ export function FarmPage() {
     <div className="space-y-5">
       <Card
         title="Chiến dịch farm"
-        subtitle="Thiết lập combo, góc nhìn, cạnh đánh, ngưỡng tài nguyên và chế độ vận hành."
+        subtitle="Thiết lập combo, góc nhìn camera, ngưỡng tài nguyên và chế độ vận hành."
         action={
           <Button variant="success" disabled={saving} onClick={save}>
             {saving ? "Đang lưu..." : "Lưu cấu hình"}
@@ -36,8 +36,6 @@ export function FarmPage() {
         <div className="grid gap-4 lg:grid-cols-2">
           <SelectInput label="Combo lính" value={farm.combo} options={comboOptions} onChange={(event) => updatePath(["farm", "combo"], event.target.value)} />
           <SelectInput label="Góc nhìn / camera" value={farm.attack_view ?? "random"} options={options?.attack_views ?? []} onChange={(event) => updatePath(["farm", "attack_view"], event.target.value)} />
-          <SelectInput label="Cạnh đánh cũ" value={farm.attack_edge} options={options?.attack_edges ?? []} onChange={(event) => updatePath(["farm", "attack_edge"], event.target.value)} />
-          <SelectInput label="Chế độ thả" value={farm.deploy_mode} options={options?.deploy_modes ?? []} onChange={(event) => updatePath(["farm", "deploy_mode"], event.target.value)} />
           <SelectInput
             label="Kiểu xét ngưỡng"
             value={farm.threshold_mode ?? "any"}

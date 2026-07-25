@@ -2,3 +2,5 @@ Pillow
 pytesseract
 fastapi
 uvicorn
+opencv-python
+numpy

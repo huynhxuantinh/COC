@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from adb_client import ADBClient, ADBError
+from slot_detector import SlotDetector
 from vision import Vision
 
 
@@ -43,6 +44,7 @@ class FarmBot:
         self.active_deploy = self._active_deploy()
         self.current_attack_view = ""
         self.home_restart_failures = 0
+        self.runtime_slots: dict[str, list[dict[str, Any]]] = {}
 
     def run(self) -> None:
         try:
@@ -249,9 +251,10 @@ class FarmBot:
             png, loot = self._read_loot_frame()
             if self._loot_is_valid(loot):
                 ocr_fail_started_at = None
+                dark_label = f"{loot['dark']:,}" if loot.get("dark", -1) >= 0 else "skip"
                 self.log(
                     f"[SEARCH] Loot: gold={loot['gold']:,} | elixir={loot['elixir']:,} | "
-                    f"dark={loot['dark']:,}"
+                    f"dark={dark_label}"
                 )
                 if self._should_attack(loot):
                     self.stats["attacks"] += 1
@@ -304,9 +307,15 @@ class FarmBot:
     def _attack_base(self) -> None:
         self.current_attack_view = self._selected_attack_view()
         self._prepare_camera()
+        self._scan_runtime_slots()
 
         attack_start = time.time()
-        self._deploy_troops()
+        if not self._deploy_troops():
+            self.log("[ATTACK] Khong tha duoc linh vi thieu vung polygon. End battle.")
+            self._tap_coord("end_battle")
+            self._sleep(1)
+            self._tap_coord("end_battle_okay")
+            return
         deploy_finished = time.time()
         self._cast_spells(deploy_finished)
         self._activate_post_deploy_slots(deploy_finished)
@@ -334,25 +343,161 @@ class FarmBot:
 
         self._sleep(float(deploy.get("camera_settle_seconds", 0.5)))
 
-    def _deploy_troops(self) -> None:
+    def _scan_runtime_slots(self) -> None:
+        self.runtime_slots = {}
+        slot_detection = self.config.get("slot_detection", {})
+        if not slot_detection.get("enabled", False):
+            return
+
+        detector = SlotDetector(self.config, self.log)
+        active_kinds = self._active_slot_detection_kinds(detector.kinds)
+        if not active_kinds:
+            self.log("[SLOT] Combo hien tai khong co kind slot nao can detect.")
+            return
+        if not detector.has_templates(active_kinds):
+            self.log(f"[SLOT] Chua co mau icon cho combo {self.active_combo}: {', '.join(active_kinds)}.")
+            return
+
+        try:
+            png = self.adb.screencap_png()
+        except ADBError as exc:
+            self.log(f"[SLOT] Khong chup duoc thanh quan de nhan dien: {exc}")
+            return
+
+        self.log(f"[SLOT] Detect theo combo {self.active_combo}: {', '.join(active_kinds)}.")
+        detections = detector.detect(png, active_kinds)
+        for detection in detections:
+            detection.count = self.vision.read_slot_count(png, detection.center, detection.kind)
+            self.runtime_slots.setdefault(detection.kind, []).append(detection.as_dict())
+
+        if not self.runtime_slots:
+            self.log("[SLOT] Khong nhan dien duoc slot nao, dung toa do slot cu.")
+            return
+
+        details: list[str] = []
+        for kind, items in self.runtime_slots.items():
+            for item in items:
+                count = item.get("count", -1)
+                label = count if int(count) >= 0 else "?"
+                x, y = item.get("center", [0, 0])
+                details.append(f"{kind}=x{label}@{x},{y}")
+        self.log("[SLOT] Detected " + " | ".join(details) + ".")
+
+    def _active_slot_detection_kinds(self, supported_kinds: list[str]) -> list[str]:
+        supported = set(supported_kinds)
+        wanted: list[str] = []
+
+        def add(slot: str) -> None:
+            if slot in supported and slot not in wanted:
+                wanted.append(slot)
+
+        for step in self.active_deploy.get("sequence", []):
+            add(str(step.get("slot", "")))
+        for spell in self.active_deploy.get("spells", []):
+            if spell.get("enabled", True):
+                add(str(spell.get("slot", "")))
+        for group in self.active_deploy.get("spell_groups", []):
+            if not group.get("enabled", True):
+                continue
+            for slot in group.get("slots", []):
+                add(str(slot))
+        return wanted
+
+    def _deploy_troops(self) -> bool:
         points = self._deploy_points()
+        if not points:
+            self.log("[ATTACK] Chua co vung tha linh hop le, skip tha linh.")
+            return False
+        slot_counts = self._read_deploy_slot_counts()
+        deployed_any = False
         for step in self.active_deploy["sequence"]:
             slot = step["slot"]
-            count = self._tap_limit(step.get("count", 0), int(step.get("max_taps", 0)))
+            count = self._deploy_count_for_step(step, slot_counts)
             if count <= 0:
+                self.log(f"[ATTACK] Skip {slot}, slot empty or count unknown.")
                 continue
             label = "all" if self._is_all(step.get("count")) else str(count)
             self.log(f"[ATTACK] Select {slot}, deploy {label} (max {count}).")
-            self._tap_slot(slot)
+            select_each_tap = self._select_slot_before_each_tap(slot)
+            if not select_each_tap:
+                self._tap_slot(slot)
             delay = self._troop_delay_seconds(float(step.get("delay", 0.2)))
             for i in range(count):
                 if self._slot_check_due(step, i) and not self._slot_available(slot):
                     self.log(f"[ATTACK] Slot {slot} looks empty, stop deploy.")
                     break
+                if select_each_tap:
+                    self._tap_slot(slot)
                 x, y = points[i % len(points)]
                 self.adb.tap(x, y)
+                self._consume_runtime_slot(slot)
+                deployed_any = True
                 self._optimized_action_pause()
                 self._sleep(delay)
+        return deployed_any
+
+    def _read_deploy_slot_counts(self) -> dict[str, int]:
+        if self.runtime_slots:
+            counts: dict[str, int] = {}
+            for kind, items in self.runtime_slots.items():
+                counts[kind] = sum(max(0, int(item.get("count", -1))) for item in items)
+            return counts
+
+        deploy = self.active_deploy
+        if not deploy.get("scan_slot_counts", True):
+            return {}
+
+        try:
+            png = self.adb.screencap_png()
+        except ADBError as exc:
+            self.log(f"[ATTACK] Slot count scan failed: {exc}")
+            return {}
+
+        counts: dict[str, int] = {}
+        for step in deploy.get("sequence", []):
+            slot = step.get("slot", "")
+            coords = self.config["coords"]["slots"].get(slot)
+            if not slot or not coords:
+                continue
+            counts[slot] = self.vision.read_slot_count(png, coords, slot)
+
+        if counts:
+            details = " | ".join(f"{slot}={count if count >= 0 else '?'}" for slot, count in counts.items())
+            self.log(f"[ATTACK] Slot counts: {details}.")
+        return counts
+
+    def _deploy_count_for_step(self, step: dict[str, Any], slot_counts: dict[str, int]) -> int:
+        slot = step.get("slot", "")
+        fallback = self._tap_limit(step.get("count", 0), int(step.get("max_taps", 0)))
+        if self.runtime_slots:
+            detected = slot_counts.get(slot, -1)
+            if detected > 0:
+                if self._is_all(step.get("count")):
+                    max_taps = int(step.get("max_taps", detected))
+                    return min(detected, max_taps) if max_taps > 0 else detected
+                return min(fallback, detected)
+            return 0
+
+        if not self.active_deploy.get("scan_slot_counts", True):
+            return fallback
+
+        detected = slot_counts.get(slot, -1)
+        if detected == 0:
+            return 0
+        if detected > 0:
+            if self._is_all(step.get("count")):
+                max_taps = int(step.get("max_taps", detected))
+                return min(detected, max_taps) if max_taps > 0 else detected
+            return min(fallback, detected)
+
+        if self.active_deploy.get("strict_slot_counts", True):
+            return 0
+        return fallback
+
+    def _select_slot_before_each_tap(self, slot: str) -> bool:
+        if not self.runtime_slots:
+            return False
+        return len(self.runtime_slots.get(slot, [])) > 1
 
     def _cast_spells(self, deploy_finished: float) -> None:
         spell_groups = self.active_deploy.get("spell_groups", [])
@@ -367,13 +512,17 @@ class FarmBot:
             while time.time() - deploy_finished < delay and not self.stop_event.is_set():
                 self._sleep(0.1)
             spell_name = spell.get("name", spell["slot"])
-            self.log(f"[SPELL] Cast {spell_name} ({spell['slot']}).")
+            max_casts = int(spell.get("max_casts", 0))
+            points = self._spell_zone_points(spell, max_casts)
+            if not points:
+                self.log(f"[SPELL] Skip {spell_name}, chua co vung tha spell.")
+                continue
+            self.log(f"[SPELL] Cast {spell_name} ({spell['slot']}) in zone.")
             self._tap_slot(spell["slot"])
-            points = spell.get("points", [])
-            max_casts = int(spell.get("max_casts", len(points)))
-            for x, y in points[:max_casts]:
+            for x, y in points:
                 self._spell_random_delay(spell["slot"])
                 self.adb.tap(int(x), int(y))
+                self._consume_runtime_slot(spell["slot"])
                 self._optimized_action_pause()
                 self._sleep(0.18)
 
@@ -381,15 +530,18 @@ class FarmBot:
         for group in spell_groups:
             if not group.get("enabled", True):
                 continue
-            points = group.get("points", [])
             slots = group.get("slots", [])
-            if not points or not slots:
+            if not slots:
                 continue
             delay = float(group.get("delay_after_deploy", 0))
             while time.time() - deploy_finished < delay and not self.stop_event.is_set():
                 self._sleep(0.1)
 
-            max_casts = self._tap_limit(group.get("max_casts", len(points)), len(points))
+            max_casts = self._tap_limit(group.get("max_casts", 0), 0)
+            points = self._spell_zone_points(group, max_casts)
+            if not points:
+                self.log(f"[SPELL] Skip group {group.get('name', 'spell')}, chua co vung tha spell.")
+                continue
             delay_between = float(group.get("delay_between_casts", 0.18))
             self.log(f"[SPELL] Group {group.get('name', 'spell')} max {max_casts}.")
             for i in range(max_casts):
@@ -402,8 +554,17 @@ class FarmBot:
                 self._tap_slot(slot)
                 self._spell_random_delay(slot)
                 self.adb.tap(int(x), int(y))
+                self._consume_runtime_slot(slot)
                 self._optimized_action_pause()
                 self._sleep(delay_between)
+
+    def _spell_zone_points(self, item: dict[str, Any], count: int) -> list[list[int]]:
+        view = self.current_attack_view or self._selected_attack_view()
+        zones = item.get("zones", {})
+        zone = zones.get(view, []) if isinstance(zones, dict) else []
+        if len(zone) < 3:
+            return []
+        return self._random_points_in_polygon(zone, max(1, int(count)))
 
     def _activate_post_deploy_slots(self, deploy_finished: float) -> None:
         if not self._custom_attack_timing_enabled():
@@ -429,6 +590,14 @@ class FarmBot:
                 hero_search_delay = float(self._attack_timing().get("hero_search_delay_seconds", 0))
                 if hero_search_delay > 0:
                     self._sleep(hero_search_delay)
+                if self.runtime_slots.get("hero"):
+                    self.log("[SKILL] Activate all detected heroes.")
+                    for item in self.runtime_slots.get("hero", []):
+                        x, y = item.get("center", [0, 0])
+                        self.adb.tap(int(x), int(y))
+                        self._optimized_action_pause()
+                        self._sleep(0.18)
+                    continue
             self.log(f"[SKILL] Activate {label} ({slot}).")
             self._tap_slot(slot)
 
@@ -585,26 +754,52 @@ class FarmBot:
         return max(loot.get("gold", -1), 0) + max(loot.get("elixir", -1), 0)
 
     def _deploy_points(self) -> list[list[int]]:
-        mode = self.config["farm"]["deploy_mode"]
         deploy = self.active_deploy
-        if mode == "one_edge":
-            view = self.current_attack_view or self._selected_attack_view()
-            view_points = deploy.get("view_points", {})
-            if view in view_points and view_points[view]:
-                self.log(f"[VIEW] Deploy view: {view}.")
-                return view_points[view]
-            edge = self._selected_attack_edge()
-            edge_points = deploy.get("edge_points", {})
-            if edge in edge_points:
-                self.log(f"[EDGE] Deploy edge: {edge}.")
-                return edge_points[edge]
-            return deploy["one_edge_points"]
-        if mode == "four_corner":
-            return deploy["four_corner_points"]
-        if mode == "random":
-            x1, y1, x2, y2 = deploy["random_area"]
-            return [[random.randint(x1, x2), random.randint(y1, y2)] for _ in range(12)]
-        return deploy["line_points"]
+        view = self.current_attack_view or self._selected_attack_view()
+        deploy_zones = deploy.get("deploy_zones", {})
+        zone = deploy_zones.get(view, [])
+        if len(zone) >= 3:
+            self.log(f"[ZONE] Deploy random in zone: {view}.")
+            return self._random_points_in_polygon(
+                zone,
+                int(deploy.get("zone_random_points", 48)),
+            )
+        self.log(f"[ZONE] Missing deploy zone for {view or 'unknown view'}, no fixed-point fallback.")
+        return []
+
+    def _random_points_in_polygon(self, polygon: list[list[int]], count: int) -> list[list[int]]:
+        normalized = [[int(point[0]), int(point[1])] for point in polygon if len(point) >= 2]
+        if len(normalized) < 3:
+            return normalized
+
+        min_x = min(point[0] for point in normalized)
+        max_x = max(point[0] for point in normalized)
+        min_y = min(point[1] for point in normalized)
+        max_y = max(point[1] for point in normalized)
+        points: list[list[int]] = []
+        attempts = 0
+        target_count = max(1, int(count))
+        while len(points) < target_count and attempts < target_count * 80:
+            attempts += 1
+            candidate = [random.randint(min_x, max_x), random.randint(min_y, max_y)]
+            if self._point_in_polygon(candidate, normalized):
+                points.append(candidate)
+        return points or normalized
+
+    def _point_in_polygon(self, point: list[int], polygon: list[list[int]]) -> bool:
+        x, y = point
+        inside = False
+        j = len(polygon) - 1
+        for i in range(len(polygon)):
+            xi, yi = polygon[i]
+            xj, yj = polygon[j]
+            intersects = ((yi > y) != (yj > y)) and (
+                x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-9) + xi
+            )
+            if intersects:
+                inside = not inside
+            j = i
+        return inside
 
     def _selected_attack_edge(self) -> str:
         edge = self.config["farm"].get("attack_edge", "top")
@@ -623,11 +818,11 @@ class FarmBot:
 
     def _selected_attack_view(self) -> str:
         deploy = self.active_deploy
-        view_points = deploy.get("view_points", {})
+        deploy_zones = deploy.get("deploy_zones", {})
         valid_views = tuple(
             view
             for view in ("trenbenphai", "trenbentrai", "duoibenphai", "duoibentrai")
-            if view_points.get(view)
+            if len(deploy_zones.get(view, [])) >= 3
         )
         if not valid_views:
             return ""
@@ -661,7 +856,11 @@ class FarmBot:
         self._sleep(self._after_click_seconds())
 
     def _tap_slot(self, name: str) -> None:
-        x, y = self.config["coords"]["slots"][name]
+        runtime_slot = self._runtime_slot(name)
+        if runtime_slot:
+            x, y = runtime_slot["center"]
+        else:
+            x, y = self.config["coords"]["slots"][name]
         self.adb.tap(int(x), int(y))
         self._optimized_action_pause()
         self._sleep(0.18)
@@ -682,6 +881,10 @@ class FarmBot:
         return every > 0 and index % every == 0
 
     def _slot_available(self, slot: str) -> bool:
+        runtime_slot = self._runtime_slot(slot)
+        if self.runtime_slots:
+            return runtime_slot is not None
+
         coords = self.config["coords"]["slots"].get(slot)
         if not coords:
             return False
@@ -697,6 +900,20 @@ class FarmBot:
             if self._slot_available(slot):
                 return slot
         return ""
+
+    def _runtime_slot(self, kind: str) -> dict[str, Any] | None:
+        for item in self.runtime_slots.get(kind, []):
+            if int(item.get("count", -1)) != 0:
+                return item
+        return None
+
+    def _consume_runtime_slot(self, kind: str) -> None:
+        item = self._runtime_slot(kind)
+        if not item:
+            return
+        count = int(item.get("count", -1))
+        if count > 0:
+            item["count"] = count - 1
 
     def _sequence_uses_slot(self, slot: str) -> bool:
         for step in self.active_deploy.get("sequence", []):

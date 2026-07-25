@@ -6,7 +6,9 @@ import { StatusBadge } from "./StatusBadge";
 const navItems = [
   { to: "/", label: "Tổng quan" },
   { to: "/farm", label: "Farm" },
-  { to: "/coordinates", label: "Tọa độ" },
+  { to: "/slots", label: "Nhận diện slot" },
+  { to: "/coordinates/troops", label: "Tọa độ lính" },
+  { to: "/coordinates/spells", label: "Tọa độ thuốc" },
   { to: "/surrender", label: "Đầu hàng" },
   { to: "/settings", label: "Cài đặt" },
 ];
@@ -32,6 +34,7 @@ export function AppShell({ status }: { status: BotStatus | null }) {
               <NavLink
                 key={item.to}
                 to={item.to}
+                end={item.to === "/"}
                 className={({ isActive }) =>
                   `rounded-xl px-4 py-3 text-sm font-semibold transition ${
                     isActive ? "bg-sky-400 text-slate-950" : "bg-ink-900 text-slate-300 hover:bg-ink-700"

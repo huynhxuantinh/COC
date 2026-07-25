@@ -9,6 +9,14 @@ from typing import Any
 CONFIG_PATH = Path("config.json")
 
 
+EMPTY_VIEW_ZONES = {
+    "trenbenphai": [],
+    "trenbentrai": [],
+    "duoibenphai": [],
+    "duoibentrai": [],
+}
+
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "adb": {
         "path": "",
@@ -20,6 +28,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "runtime": {
         "stats_path": "stats.json",
+    },
+    "slot_detection": {
+        "enabled": True,
+        "template_dir": "img/slots",
+        "threshold": 0.72,
+        "bar_region": [80, 720, 1220, 180],
+        "template_size": [76, 76],
+        "kinds": ["dragon", "balloon", "valkyrie", "hero", "rage", "freeze"],
+        "count_max_by_kind": {
+            "dragon": 16,
+            "balloon": 40,
+            "valkyrie": 60,
+            "rage": 5,
+            "freeze": 11,
+        },
+        "count_corrections": {
+            "rage": {"7": 4},
+        },
+        "strict": False,
     },
     "game": {
         "resolution": [1600, 900],
@@ -70,12 +97,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "ocr": {
         "enabled": True,
+        "read_dark_loot": False,
         "tesseract_path": "",
         "regions": {
-            "loot_gold": [78, 125, 160, 35],
-            "loot_elixir": [78, 175, 160, 35],
-            "loot_dark": [78, 220, 140, 35],
-            "damage_percent": [1355, 630, 190, 70],
+            "loot_panel": [78, 123, 145, 86],
+            "loot_gold": [78, 123, 145, 40],
+            "loot_elixir": [78, 169, 145, 40],
+            "loot_dark": [80, 220, 154, 35],
+            "damage_percent": [1495, 645, 89, 51],
             "next_button": [1325, 575, 250, 130],
             "damage_panel": [1320, 615, 260, 120],
             "home_attack_button": [20, 715, 170, 160],
@@ -92,6 +121,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "slots": {
             "dragon": [172, 815],
             "balloon": [295, 815],
+            "valkyrie": [414, 815],
             "titan": [414, 815],
             "siege": [556, 815],
             "hero": [676, 815],
@@ -184,6 +214,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "duoibenphai": [],
             "duoibentrai": [],
         },
+        "deploy_zones": {
+            "trenbenphai": [],
+            "trenbentrai": [],
+            "duoibenphai": [],
+            "duoibentrai": [],
+        },
+        "zone_random_points": 48,
         "line_points": [
             [560, 610],
             [650, 640],
@@ -200,13 +237,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
             [1080, 610],
         ],
         "random_area": [260, 170, 1250, 700],
+        "scan_slot_counts": True,
+        "strict_slot_counts": True,
         "slot_check_every": 8,
         "sequence": [
             {"slot": "siege", "count": 1, "delay": 0.18},
             {"slot": "dragon", "count": "all", "max_taps": 16, "delay": 0.08},
             {"slot": "balloon", "count": "all", "max_taps": 24, "delay": 0.07},
             {"slot": "titan", "count": "all", "max_taps": 4, "delay": 0.10},
-            {"slot": "hero", "count": 1, "delay": 0.12},
+            {"slot": "hero", "count": "all", "max_taps": 5, "delay": 0.12},
         ],
         "spells": [
             {
@@ -215,6 +254,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "name": "No 1",
                 "max_casts": 3,
                 "delay_after_deploy": 2,
+                "zone": [],
+                "zones": copy.deepcopy(EMPTY_VIEW_ZONES),
                 "points": [[807, 281], [958, 371], [1083, 466]],
             },
             {
@@ -223,6 +264,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "name": "Bang",
                 "max_casts": 1,
                 "delay_after_deploy": 4,
+                "zone": [],
+                "zones": copy.deepcopy(EMPTY_VIEW_ZONES),
                 "points": [[781, 352], [912, 436], [986, 490]],
             },
             {
@@ -231,6 +274,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "name": "No 2",
                 "max_casts": 2,
                 "delay_after_deploy": 5,
+                "zone": [],
+                "zones": copy.deepcopy(EMPTY_VIEW_ZONES),
                 "points": [[742, 405], [952, 555]],
             },
         ],
@@ -242,6 +287,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "max_casts": 6,
                 "delay_after_deploy": 2,
                 "delay_between_casts": 0.08,
+                "zone": [],
+                "zones": copy.deepcopy(EMPTY_VIEW_ZONES),
                 "points": [
                     [807, 281],
                     [958, 371],
@@ -289,6 +336,13 @@ DEFAULT_CONFIG["combos"] = {
         "deploy": copy.deepcopy(DEFAULT_CONFIG["deploy"]),
     },
 }
+DEFAULT_CONFIG["combos"]["Valkyrie"] = {
+    "deploy": copy.deepcopy(DEFAULT_CONFIG["deploy"]),
+}
+DEFAULT_CONFIG["combos"]["Valkyrie"]["deploy"]["sequence"] = [
+    {"slot": "valkyrie", "count": "all", "max_taps": 60, "delay": 0.06},
+    {"slot": "hero", "count": "all", "max_taps": 5, "delay": 0.12},
+]
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -299,6 +353,67 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
         else:
             merged[key] = value
     return merged
+
+
+def migrate_fast_attack_delays(config: dict[str, Any]) -> None:
+    def migrate_deploy(deploy: dict[str, Any]) -> None:
+        if not isinstance(deploy, dict):
+            return
+        if deploy.get("slot_check_every") == 2:
+            deploy["slot_check_every"] = 8
+
+        sequence_delays = {
+            "siege": (0.35, 0.18),
+            "dragon": (0.18, 0.08),
+            "balloon": (0.16, 0.07),
+            "titan": (0.25, 0.10),
+            "hero": (0.25, 0.12),
+        }
+        for step in deploy.get("sequence", []):
+            slot = step.get("slot")
+            old_new = sequence_delays.get(slot)
+            if old_new and step.get("delay") == old_new[0]:
+                step["delay"] = old_new[1]
+
+        spell_delays = {"No 1": (4, 2), "Bang": (7, 4), "No 2": (10, 5)}
+        for spell in deploy.get("spells", []):
+            spell.setdefault("zone", [])
+            if not isinstance(spell.get("zones"), dict):
+                spell["zones"] = copy.deepcopy(EMPTY_VIEW_ZONES)
+            else:
+                for view in EMPTY_VIEW_ZONES:
+                    spell["zones"].setdefault(view, [])
+            old_new = spell_delays.get(spell.get("name"))
+            if old_new and spell.get("delay_after_deploy") == old_new[0]:
+                spell["delay_after_deploy"] = old_new[1]
+
+        for group in deploy.get("spell_groups", []):
+            group.setdefault("zone", [])
+            if not isinstance(group.get("zones"), dict):
+                group["zones"] = copy.deepcopy(EMPTY_VIEW_ZONES)
+            else:
+                for view in EMPTY_VIEW_ZONES:
+                    group["zones"].setdefault(view, [])
+            if group.get("delay_after_deploy") == 4:
+                group["delay_after_deploy"] = 2
+            if group.get("delay_between_casts") == 0.22:
+                group["delay_between_casts"] = 0.08
+
+    migrate_deploy(config.get("deploy", {}))
+    for combo in config.get("combos", {}).values():
+        migrate_deploy(combo.get("deploy", {}))
+
+    timing = config.get("attack_timing", {})
+    replacements = {
+        "troop_delay_ms": (150, 80),
+        "freeze_random_max_ms": (1000, 250),
+        "rage_random_min_ms": (2000, 500),
+        "rage_random_max_ms": (4000, 1200),
+        "adb_delay_seconds": (0.3, 0.18),
+    }
+    for key, (old_value, new_value) in replacements.items():
+        if timing.get(key) == old_value:
+            timing[key] = new_value
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
@@ -315,6 +430,7 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
                 "deploy": copy.deepcopy(merged["deploy"]),
             },
         }
+    migrate_fast_attack_delays(merged)
     return merged
 
 

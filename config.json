@@ -10,6 +10,42 @@
   "runtime": {
     "stats_path": "stats.json"
   },
+  "slot_detection": {
+    "enabled": true,
+    "template_dir": "img/slots",
+    "threshold": 0.72,
+    "bar_region": [
+      80,
+      720,
+      1220,
+      180
+    ],
+    "template_size": [
+      76,
+      76
+    ],
+    "kinds": [
+      "dragon",
+      "balloon",
+      "valkyrie",
+      "hero",
+      "rage",
+      "freeze"
+    ],
+    "count_max_by_kind": {
+      "dragon": 16,
+      "balloon": 40,
+      "valkyrie": 60,
+      "rage": 5,
+      "freeze": 11
+    },
+    "count_corrections": {
+      "rage": {
+        "7": 4
+      }
+    },
+    "strict": false
+  },
   "game": {
     "resolution": [
       1600,
@@ -27,26 +63,27 @@
     "resource_stats": true,
     "restart_if_attack_missing": true,
     "attack_missing_retries": 3,
-    "restart_wait_seconds": 18,
-    "max_consecutive_cycle_errors": 8,
-    "max_home_restart_failures": 3
+    "max_home_restart_failures": 3,
+    "restart_wait_seconds": 20,
+    "max_consecutive_cycle_errors": 8
   },
   "farm": {
     "village": "main",
-    "combo": "Rồng Điện",
-    "deploy_mode": "one_edge",
+    "combo": "Valkyrie",
+    "deploy_mode": "random",
     "attack_edge": "random",
+    "attack_view": "random",
     "threshold_mode": "any",
-    "gold_min": 900000,
-    "elixir_min": 900000,
-    "dark_min": 8000,
-    "total_min": 1700000,
+    "gold_min": 700000,
+    "elixir_min": 700000,
+    "dark_min": 0,
+    "total_min": 1500000,
     "max_next": 80,
     "search_delay_seconds": 3,
     "ocr_fail_restart_seconds": 30
   },
   "surrender": {
-    "by_time": false,
+    "by_time": true,
     "time_min_seconds": 90,
     "time_max_seconds": 120,
     "by_destruction": true,
@@ -54,7 +91,7 @@
     "destruction_max_percent": 80,
     "when_low_loot": true,
     "total_remaining_less_than": 200000,
-    "never_surrender": true,
+    "never_surrender": false,
     "max_battle_seconds": 175,
     "damage_jump_confirm_percent": 40,
     "damage_jump_max_pending_reads": 3
@@ -63,29 +100,35 @@
     "enabled": true,
     "tesseract_path": "",
     "regions": {
+      "loot_panel": [
+        76,
+        117,
+        158,
+        141
+      ],
       "loot_gold": [
-        78,
+        80,
         125,
-        160,
+        154,
         35
       ],
       "loot_elixir": [
-        78,
-        175,
-        160,
+        80,
+        174,
+        154,
         35
       ],
       "loot_dark": [
-        78,
+        80,
         220,
-        140,
+        154,
         35
       ],
       "damage_percent": [
-        1355,
-        630,
-        190,
-        70
+        1495,
+        645,
+        89,
+        51
       ],
       "next_button": [
         1325,
@@ -145,6 +188,10 @@
         295,
         815
       ],
+      "valkyrie": [
+        414,
+        815
+      ],
       "titan": [
         414,
         815
@@ -189,6 +236,72 @@
         450
       ]
     ],
+    "view_camera_swipes": {
+      "trenbenphai": [
+        [
+          1050,
+          260,
+          650,
+          620,
+          500
+        ],
+        [
+          1050,
+          260,
+          650,
+          620,
+          500
+        ]
+      ],
+      "trenbentrai": [
+        [
+          550,
+          260,
+          950,
+          620,
+          500
+        ],
+        [
+          550,
+          260,
+          950,
+          620,
+          500
+        ]
+      ],
+      "duoibenphai": [
+        [
+          1050,
+          640,
+          650,
+          280,
+          500
+        ],
+        [
+          1050,
+          640,
+          650,
+          280,
+          500
+        ]
+      ],
+      "duoibentrai": [
+        [
+          550,
+          640,
+          950,
+          280,
+          500
+        ],
+        [
+          550,
+          640,
+          950,
+          280,
+          500
+        ]
+      ]
+    },
     "camera_settle_seconds": 0.8,
     "pre_attack_swipes": [],
     "one_edge_points": [
@@ -394,156 +507,160 @@
     "view_points": {
       "trenbenphai": [
         [
-          730,
-          99
+          759,
+          141
         ],
         [
-          665,
-          145
+          715,
+          178
         ],
         [
-          602,
-          186
+          668,
+          208
         ],
         [
-          544,
-          232
+          622,
+          260
         ],
         [
-          487,
-          271
+          553,
+          298
         ],
         [
-          426,
-          319
+          486,
+          344
         ],
         [
-          365,
-          370
+          443,
+          381
         ],
         [
-          288,
-          433
+          385,
+          439
         ],
         [
-          323,
-          396
+          279,
+          495
         ],
         [
-          394,
-          342
+          329,
+          467
         ],
         [
-          460,
-          299
+          419,
+          406
         ],
         [
-          513,
-          249
+          532,
+          322
         ],
         [
-          572,
-          212
+          588,
+          270
         ],
         [
-          633,
-          168
-        ],
-        [
-          697,
-          121
+          631,
+          216
         ]
       ],
       "trenbentrai": [
         [
-          783,
-          108
+          861,
+          91
         ],
         [
-          691,
-          169
+          932,
+          143
         ],
         [
-          600,
-          232
+          1014,
+          188
         ],
         [
-          501,
-          291
+          1081,
+          246
         ],
         [
-          436,
-          358
+          1163,
+          297
         ],
         [
-          339,
-          425
+          1216,
+          328
         ],
         [
-          287,
-          465
+          1321,
+          400
         ],
         [
-          381,
-          398
+          1275,
+          366
         ],
         [
-          474,
-          331
+          1105,
+          261
         ],
         [
-          564,
-          276
+          1046,
+          215
         ],
         [
-          649,
-          198
+          978,
+          167
         ]
       ],
       "duoibenphai": [
         [
-          813,
-          95
+          835,
+          680
         ],
         [
-          901,
-          154
+          909,
+          627
         ],
         [
-          1000,
-          226
+          997,
+          572
         ],
         [
-          1103,
-          306
+          1060,
+          530
         ],
         [
-          1217,
+          1138,
+          461
+        ],
+        [
+          1214,
+          427
+        ],
+        [
+          1317,
+          343
+        ],
+        [
+          1264,
           379
         ],
         [
-          1322,
-          466
+          1170,
+          440
         ],
         [
-          1267,
-          429
+          1098,
+          499
         ],
         [
-          1166,
-          349
+          1031,
+          539
         ],
         [
-          1055,
-          277
+          978,
+          587
         ],
         [
-          951,
-          195
-        ],
-        [
-          844,
-          138
+          871,
+          648
         ]
       ],
       "duoibentrai": [
@@ -609,6 +726,81 @@
         ]
       ]
     },
+    "deploy_zones": {
+      "trenbenphai": [
+        [
+          662,
+          117
+        ],
+        [
+          690,
+          141
+        ],
+        [
+          305,
+          428
+        ],
+        [
+          277,
+          405
+        ]
+      ],
+      "trenbentrai": [
+        [
+          1347,
+          460
+        ],
+        [
+          863,
+          116
+        ],
+        [
+          896,
+          94
+        ],
+        [
+          1329,
+          416
+        ]
+      ],
+      "duoibenphai": [
+        [
+          1321,
+          336
+        ],
+        [
+          1273,
+          322
+        ],
+        [
+          837,
+          643
+        ],
+        [
+          870,
+          665
+        ]
+      ],
+      "duoibentrai": [
+        [
+          767,
+          683
+        ],
+        [
+          271,
+          302
+        ],
+        [
+          238,
+          332
+        ],
+        [
+          715,
+          694
+        ]
+      ]
+    },
+    "zone_random_points": 48,
     "line_points": [
       [
         560,
@@ -655,35 +847,38 @@
       1250,
       700
     ],
-    "slot_check_every": 2,
+    "scan_slot_counts": true,
+    "strict_slot_counts": true,
+    "slot_check_every": 8,
     "sequence": [
       {
         "slot": "siege",
         "count": 1,
-        "delay": 0.35
+        "delay": 0.18
       },
       {
         "slot": "dragon",
         "count": "all",
         "max_taps": 16,
-        "delay": 0.18
+        "delay": 0.08
       },
       {
         "slot": "balloon",
         "count": "all",
         "max_taps": 24,
-        "delay": 0.16
+        "delay": 0.07
       },
       {
         "slot": "titan",
         "count": "all",
         "max_taps": 4,
-        "delay": 0.25
+        "delay": 0.1
       },
       {
         "slot": "hero",
-        "count": 1,
-        "delay": 0.25
+        "count": "all",
+        "delay": 0.12,
+        "max_taps": 5
       }
     ],
     "spells": [
@@ -692,59 +887,118 @@
         "enabled": true,
         "name": "No 1",
         "max_casts": 3,
-        "delay_after_deploy": 4,
+        "delay_after_deploy": 2,
         "points": [
           [
-            807,
-            281
+            862,
+            355
           ],
           [
-            958,
-            371
+            759,
+            432
           ],
           [
-            1083,
-            466
+            642,
+            502
+          ],
+          [
+            523,
+            573
           ]
-        ]
+        ],
+        "zone": [
+          [
+            338,
+            374
+          ],
+          [
+            426,
+            305
+          ],
+          [
+            707,
+            480
+          ],
+          [
+            625,
+            552
+          ]
+        ],
+        "zones": {
+          "trenbenphai": [],
+          "trenbentrai": [],
+          "duoibenphai": [],
+          "duoibentrai": []
+        }
       },
       {
         "slot": "freeze",
         "enabled": true,
         "name": "Bang",
         "max_casts": 1,
-        "delay_after_deploy": 7,
+        "delay_after_deploy": 4,
         "points": [
           [
-            781,
-            352
+            631,
+            527
           ],
           [
-            912,
-            436
+            841,
+            387
           ],
           [
-            986,
-            490
+            763,
+            473
           ]
-        ]
+        ],
+        "zone": [
+          [
+            485,
+            338
+          ],
+          [
+            556,
+            277
+          ],
+          [
+            685,
+            351
+          ],
+          [
+            640,
+            409
+          ]
+        ],
+        "zones": {
+          "trenbenphai": [],
+          "trenbentrai": [],
+          "duoibenphai": [],
+          "duoibentrai": []
+        }
       },
       {
         "slot": "rage",
         "enabled": true,
         "name": "No 2",
         "max_casts": 2,
-        "delay_after_deploy": 10,
+        "delay_after_deploy": 5,
         "points": [
           [
-            742,
-            405
+            657,
+            532
           ],
           [
-            952,
-            555
+            838,
+            402
           ]
-        ]
+        ],
+        "zone": [],
+        "zones": {
+          "trenbenphai": [],
+          "trenbentrai": [],
+          "duoibenphai": [],
+          "duoibentrai": []
+        }
       }
     ],
     "spell_groups": [
@@ -756,34 +1010,41 @@
           "freeze"
         ],
         "max_casts": 6,
-        "delay_after_deploy": 4,
-        "delay_between_casts": 0.22,
+        "delay_after_deploy": 2,
+        "delay_between_casts": 0.08,
         "points": [
           [
-            807,
-            281
+            530,
+            523
           ],
           [
-            958,
-            371
+            668,
+            424
           ],
           [
-            1083,
-            466
+            793,
+            363
           ],
           [
-            781,
-            352
+            815,
+            465
           ],
           [
-            912,
-            436
+            672,
+            540
           ],
           [
-            952,
-            555
+            815,
+            571
           ]
-        ]
+        ],
+        "zone": [],
+        "zones": {
+          "trenbenphai": [],
+          "trenbentrai": [],
+          "duoibenphai": [],
+          "duoibentrai": []
+        }
       }
     ]
   },
@@ -799,21 +1060,21 @@
     "sleep_jitter_min_seconds": 0.25
   },
   "attack_timing": {
-    "use_default": true,
-    "troop_delay_ms": 150,
-    "freeze_random_min_ms": 0,
-    "freeze_random_max_ms": 1000,
-    "rage_random_min_ms": 2000,
-    "rage_random_max_ms": 4000,
-    "siege_activation_min_ms": 5000,
-    "siege_activation_max_ms": 7000,
-    "hero_skill_min_ms": 2000,
-    "hero_skill_max_ms": 4000,
+    "use_default": false,
+    "troop_delay_ms": 30,
+    "freeze_random_min_ms": 30,
+    "freeze_random_max_ms": 250,
+    "rage_random_min_ms": 50,
+    "rage_random_max_ms": 600,
+    "siege_activation_min_ms": 500,
+    "siege_activation_max_ms": 700,
+    "hero_skill_min_ms": 200,
+    "hero_skill_max_ms": 400,
     "next_battle_min_ms": 2000,
     "next_battle_max_ms": 5000,
-    "adb_delay_seconds": 0.3,
+    "adb_delay_seconds": 0.18,
     "hero_search_delay_seconds": 1.5,
-    "optimized_mode": false
+    "optimized_mode": true
   },
   "combos": {
     "Rồng Điện": {
@@ -835,6 +1096,72 @@
             450
           ]
         ],
+        "view_camera_swipes": {
+          "trenbenphai": [
+            [
+              1050,
+              260,
+              650,
+              620,
+              500
+            ],
+            [
+              1050,
+              260,
+              650,
+              620,
+              500
+            ]
+          ],
+          "trenbentrai": [
+            [
+              550,
+              260,
+              950,
+              620,
+              500
+            ],
+            [
+              550,
+              260,
+              950,
+              620,
+              500
+            ]
+          ],
+          "duoibenphai": [
+            [
+              1050,
+              640,
+              650,
+              280,
+              500
+            ],
+            [
+              1050,
+              640,
+              650,
+              280,
+              500
+            ]
+          ],
+          "duoibentrai": [
+            [
+              550,
+              640,
+              950,
+              280,
+              500
+            ],
+            [
+              550,
+              640,
+              950,
+              280,
+              500
+            ]
+          ]
+        },
         "camera_settle_seconds": 0.8,
         "pre_attack_swipes": [],
         "one_edge_points": [
@@ -1040,156 +1367,160 @@
         "view_points": {
           "trenbenphai": [
             [
-              730,
-              99
+              759,
+              141
             ],
             [
-              665,
-              145
+              715,
+              178
             ],
             [
-              602,
-              186
+              668,
+              208
             ],
             [
-              544,
-              232
+              622,
+              260
             ],
             [
-              487,
-              271
+              553,
+              298
             ],
             [
-              426,
-              319
+              486,
+              344
             ],
             [
-              365,
-              370
+              443,
+              381
             ],
             [
-              288,
-              433
+              385,
+              439
             ],
             [
-              323,
-              396
+              279,
+              495
             ],
             [
-              394,
-              342
+              329,
+              467
             ],
             [
-              460,
-              299
+              419,
+              406
             ],
             [
-              513,
-              249
+              532,
+              322
             ],
             [
-              572,
-              212
+              588,
+              270
             ],
             [
-              633,
-              168
-            ],
-            [
-              697,
-              121
+              631,
+              216
             ]
           ],
           "trenbentrai": [
             [
-              783,
-              108
+              861,
+              91
             ],
             [
-              691,
-              169
+              932,
+              143
             ],
             [
-              600,
-              232
+              1014,
+              188
             ],
             [
-              501,
-              291
+              1081,
+              246
             ],
             [
-              436,
-              358
+              1163,
+              297
             ],
             [
-              339,
-              425
+              1216,
+              328
             ],
             [
-              287,
-              465
+              1321,
+              400
             ],
             [
-              381,
-              398
+              1275,
+              366
             ],
             [
-              474,
-              331
+              1105,
+              261
             ],
             [
-              564,
-              276
+              1046,
+              215
             ],
             [
-              649,
-              198
+              978,
+              167
             ]
           ],
           "duoibenphai": [
             [
-              813,
-              95
+              835,
+              680
             ],
             [
-              901,
-              154
+              909,
+              627
             ],
             [
-              1000,
-              226
+              997,
+              572
             ],
             [
-              1103,
-              306
+              1060,
+              530
             ],
             [
-              1217,
+              1138,
+              461
+            ],
+            [
+              1214,
+              427
+            ],
+            [
+              1317,
+              343
+            ],
+            [
+              1264,
               379
             ],
             [
-              1322,
-              466
+              1170,
+              440
             ],
             [
-              1267,
-              429
+              1098,
+              499
             ],
             [
-              1166,
-              349
+              1031,
+              539
             ],
             [
-              1055,
-              277
+              978,
+              587
             ],
             [
-              951,
-              195
-            ],
-            [
-              844,
-              138
+              871,
+              648
             ]
           ],
           "duoibentrai": [
@@ -1255,6 +1586,81 @@
             ]
           ]
         },
+        "deploy_zones": {
+          "trenbenphai": [
+            [
+              662,
+              117
+            ],
+            [
+              690,
+              141
+            ],
+            [
+              305,
+              428
+            ],
+            [
+              277,
+              405
+            ]
+          ],
+          "trenbentrai": [
+            [
+              1347,
+              460
+            ],
+            [
+              863,
+              116
+            ],
+            [
+              896,
+              94
+            ],
+            [
+              1329,
+              416
+            ]
+          ],
+          "duoibenphai": [
+            [
+              1321,
+              336
+            ],
+            [
+              1273,
+              322
+            ],
+            [
+              837,
+              643
+            ],
+            [
+              870,
+              665
+            ]
+          ],
+          "duoibentrai": [
+            [
+              767,
+              683
+            ],
+            [
+              271,
+              302
+            ],
+            [
+              238,
+              332
+            ],
+            [
+              715,
+              694
+            ]
+          ]
+        },
+        "zone_random_points": 48,
         "line_points": [
           [
             560,
@@ -1301,35 +1707,38 @@
           1250,
           700
         ],
-        "slot_check_every": 2,
+        "scan_slot_counts": true,
+        "strict_slot_counts": true,
+        "slot_check_every": 8,
         "sequence": [
           {
             "slot": "siege",
             "count": 1,
-            "delay": 0.35
+            "delay": 0.18
           },
           {
             "slot": "dragon",
             "count": "all",
             "max_taps": 16,
-            "delay": 0.18
+            "delay": 0.08
           },
           {
             "slot": "balloon",
             "count": "all",
             "max_taps": 24,
-            "delay": 0.16
+            "delay": 0.07
           },
           {
             "slot": "titan",
             "count": "all",
             "max_taps": 4,
-            "delay": 0.25
+            "delay": 0.1
           },
           {
             "slot": "hero",
-            "count": 1,
-            "delay": 0.25
+            "count": "all",
+            "delay": 0.12,
+            "max_taps": 5
           }
         ],
         "spells": [
@@ -1338,7 +1747,587 @@
             "enabled": true,
             "name": "No 1",
             "max_casts": 3,
+            "delay_after_deploy": 2,
+            "points": [
+              [
+                862,
+                355
+              ],
+              [
+                759,
+                432
+              ],
+              [
+                642,
+                502
+              ],
+              [
+                523,
+                573
+              ]
+            ],
+            "zone": [
+              [
+                338,
+                374
+              ],
+              [
+                426,
+                305
+              ],
+              [
+                707,
+                480
+              ],
+              [
+                625,
+                552
+              ]
+            ],
+            "zones": {
+              "trenbenphai": [],
+              "trenbentrai": [],
+              "duoibenphai": [],
+              "duoibentrai": []
+            }
+          },
+          {
+            "slot": "freeze",
+            "enabled": true,
+            "name": "Bang",
+            "max_casts": 1,
             "delay_after_deploy": 4,
+            "points": [
+              [
+                631,
+                527
+              ],
+              [
+                841,
+                387
+              ],
+              [
+                763,
+                473
+              ]
+            ],
+            "zone": [
+              [
+                485,
+                338
+              ],
+              [
+                556,
+                277
+              ],
+              [
+                685,
+                351
+              ],
+              [
+                640,
+                409
+              ]
+            ],
+            "zones": {
+              "trenbenphai": [],
+              "trenbentrai": [],
+              "duoibenphai": [],
+              "duoibentrai": []
+            }
+          },
+          {
+            "slot": "rage",
+            "enabled": true,
+            "name": "No 2",
+            "max_casts": 2,
+            "delay_after_deploy": 5,
+            "points": [
+              [
+                657,
+                532
+              ],
+              [
+                838,
+                402
+              ]
+            ],
+            "zone": [],
+            "zones": {
+              "trenbenphai": [],
+              "trenbentrai": [],
+              "duoibenphai": [],
+              "duoibentrai": []
+            }
+          }
+        ],
+        "spell_groups": [
+          {
+            "name": "No/Bang linh hoat",
+            "enabled": true,
+            "slots": [
+              "rage",
+              "freeze"
+            ],
+            "max_casts": 6,
+            "delay_after_deploy": 2,
+            "delay_between_casts": 0.08,
+            "points": [
+              [
+                530,
+                523
+              ],
+              [
+                668,
+                424
+              ],
+              [
+                793,
+                363
+              ],
+              [
+                815,
+                465
+              ],
+              [
+                672,
+                540
+              ],
+              [
+                815,
+                571
+              ]
+            ],
+            "zone": [],
+            "zones": {
+              "trenbenphai": [],
+              "trenbentrai": [],
+              "duoibenphai": [],
+              "duoibentrai": []
+            }
+          }
+        ]
+      }
+    },
+    "Valkyrie": {
+      "deploy": {
+        "zoom_out_keyevents": 3,
+        "camera_swipes": [
+          [
+            800,
+            250,
+            800,
+            560,
+            450
+          ],
+          [
+            800,
+            250,
+            800,
+            560,
+            450
+          ]
+        ],
+        "view_camera_swipes": {
+          "trenbenphai": [
+            [
+              1050,
+              260,
+              650,
+              620,
+              500
+            ],
+            [
+              1050,
+              260,
+              650,
+              620,
+              500
+            ]
+          ],
+          "trenbentrai": [
+            [
+              550,
+              260,
+              950,
+              620,
+              500
+            ],
+            [
+              550,
+              260,
+              950,
+              620,
+              500
+            ]
+          ],
+          "duoibenphai": [
+            [
+              1050,
+              640,
+              650,
+              280,
+              500
+            ],
+            [
+              1050,
+              640,
+              650,
+              280,
+              500
+            ]
+          ],
+          "duoibentrai": [
+            [
+              550,
+              640,
+              950,
+              280,
+              500
+            ],
+            [
+              550,
+              640,
+              950,
+              280,
+              500
+            ]
+          ]
+        },
+        "camera_settle_seconds": 0.8,
+        "pre_attack_swipes": [],
+        "one_edge_points": [
+          [
+            820,
+            135
+          ],
+          [
+            880,
+            165
+          ],
+          [
+            940,
+            200
+          ],
+          [
+            1000,
+            240
+          ],
+          [
+            1060,
+            285
+          ],
+          [
+            1120,
+            330
+          ],
+          [
+            1180,
+            375
+          ],
+          [
+            1240,
+            425
+          ]
+        ],
+        "edge_points": {
+          "top": [
+            [
+              820,
+              135
+            ],
+            [
+              880,
+              165
+            ],
+            [
+              940,
+              200
+            ],
+            [
+              1000,
+              240
+            ],
+            [
+              1060,
+              285
+            ],
+            [
+              1120,
+              330
+            ],
+            [
+              1180,
+              375
+            ],
+            [
+              1240,
+              425
+            ]
+          ],
+          "bottom": [
+            [
+              760,
+              670
+            ],
+            [
+              820,
+              640
+            ],
+            [
+              880,
+              610
+            ],
+            [
+              940,
+              580
+            ],
+            [
+              1000,
+              545
+            ],
+            [
+              1060,
+              510
+            ],
+            [
+              1120,
+              475
+            ],
+            [
+              1180,
+              440
+            ]
+          ],
+          "left": [
+            [
+              315,
+              330
+            ],
+            [
+              380,
+              365
+            ],
+            [
+              445,
+              400
+            ],
+            [
+              510,
+              435
+            ],
+            [
+              575,
+              470
+            ],
+            [
+              640,
+              505
+            ],
+            [
+              705,
+              540
+            ],
+            [
+              770,
+              575
+            ]
+          ],
+          "right": [
+            [
+              1245,
+              330
+            ],
+            [
+              1180,
+              365
+            ],
+            [
+              1115,
+              400
+            ],
+            [
+              1050,
+              435
+            ],
+            [
+              985,
+              470
+            ],
+            [
+              920,
+              505
+            ],
+            [
+              855,
+              540
+            ],
+            [
+              790,
+              575
+            ]
+          ]
+        },
+        "view_points": {
+          "trenbenphai": [],
+          "trenbentrai": [],
+          "duoibenphai": [],
+          "duoibentrai": []
+        },
+        "deploy_zones": {
+          "trenbenphai": [
+            [
+              662,
+              117
+            ],
+            [
+              690,
+              141
+            ],
+            [
+              305,
+              428
+            ],
+            [
+              277,
+              405
+            ]
+          ],
+          "trenbentrai": [
+            [
+              1347,
+              460
+            ],
+            [
+              863,
+              116
+            ],
+            [
+              896,
+              94
+            ],
+            [
+              1329,
+              416
+            ]
+          ],
+          "duoibenphai": [
+            [
+              1321,
+              336
+            ],
+            [
+              1273,
+              322
+            ],
+            [
+              837,
+              643
+            ],
+            [
+              870,
+              665
+            ]
+          ],
+          "duoibentrai": [
+            [
+              767,
+              683
+            ],
+            [
+              271,
+              302
+            ],
+            [
+              238,
+              332
+            ],
+            [
+              715,
+              694
+            ]
+          ]
+        },
+        "zone_random_points": 48,
+        "line_points": [
+          [
+            560,
+            610
+          ],
+          [
+            650,
+            640
+          ],
+          [
+            740,
+            675
+          ],
+          [
+            835,
+            700
+          ],
+          [
+            930,
+            675
+          ],
+          [
+            1020,
+            640
+          ],
+          [
+            1080,
+            610
+          ]
+        ],
+        "four_corner_points": [
+          [
+            315,
+            330
+          ],
+          [
+            1245,
+            330
+          ],
+          [
+            560,
+            610
+          ],
+          [
+            1080,
+            610
+          ]
+        ],
+        "random_area": [
+          260,
+          170,
+          1250,
+          700
+        ],
+        "scan_slot_counts": true,
+        "strict_slot_counts": true,
+        "slot_check_every": 8,
+        "sequence": [
+          {
+            "slot": "valkyrie",
+            "count": "all",
+            "max_taps": 60,
+            "delay": 0.06
+          },
+          {
+            "slot": "hero",
+            "count": "all",
+            "max_taps": 5,
+            "delay": 0.12
+          }
+        ],
+        "spells": [
+          {
+            "slot": "rage",
+            "enabled": true,
+            "name": "No 1",
+            "max_casts": 3,
+            "delay_after_deploy": 2,
+            "zone": [],
             "points": [
               [
                 807,
@@ -1352,14 +2341,21 @@
                 1083,
                 466
               ]
-            ]
+            ],
+            "zones": {
+              "trenbenphai": [],
+              "trenbentrai": [],
+              "duoibenphai": [],
+              "duoibentrai": []
+            }
           },
           {
             "slot": "freeze",
             "enabled": true,
             "name": "Bang",
             "max_casts": 1,
-            "delay_after_deploy": 7,
+            "delay_after_deploy": 4,
+            "zone": [],
             "points": [
               [
                 781,
@@ -1373,14 +2369,21 @@
                 986,
                 490
               ]
-            ]
+            ],
+            "zones": {
+              "trenbenphai": [],
+              "trenbentrai": [],
+              "duoibenphai": [],
+              "duoibentrai": []
+            }
           },
           {
             "slot": "rage",
             "enabled": true,
             "name": "No 2",
             "max_casts": 2,
-            "delay_after_deploy": 10,
+            "delay_after_deploy": 5,
+            "zone": [],
             "points": [
               [
                 742,
@@ -1390,7 +2393,13 @@
                 952,
                 555
               ]
-            ]
+            ],
+            "zones": {
+              "trenbenphai": [],
+              "trenbentrai": [],
+              "duoibenphai": [],
+              "duoibentrai": []
+            }
           }
         ],
         "spell_groups": [
@@ -1402,8 +2411,9 @@
               "freeze"
             ],
             "max_casts": 6,
-            "delay_after_deploy": 4,
-            "delay_between_casts": 0.22,
+            "delay_after_deploy": 2,
+            "delay_between_casts": 0.08,
+            "zone": [],
             "points": [
               [
                 807,
@@ -1429,7 +2439,13 @@
                 952,
                 555
               ]
-            ]
+            ],
+            "zones": {
+              "trenbenphai": [],
+              "trenbentrai": [],
+              "duoibenphai": [],
+              "duoibentrai": []
+            }
           }
         ]
       }

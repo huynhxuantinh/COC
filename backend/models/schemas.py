@@ -77,3 +77,39 @@ class SavePointsPayload(BaseModel):
     target: str
     points: list[list[int]]
     combo_name: str = ""
+
+
+class SlotTemplateItem(BaseModel):
+    kind: str
+    count: int
+    path: str
+
+
+class SlotTemplatesPayload(BaseModel):
+    kinds: list[str]
+    items: list[SlotTemplateItem]
+
+
+class SlotTemplateSavePayload(BaseModel):
+    kind: str
+    image_base64: str
+    x: int
+    y: int
+    size: int = 76
+    crop_region: list[int] = Field(default_factory=list)
+
+
+class SlotDetectPayload(BaseModel):
+    image_base64: str = ""
+
+
+class SlotDetectionItem(BaseModel):
+    kind: str
+    center: list[int]
+    score: float
+    template: str
+    count: int = -1
+
+
+class SlotDetectionsPayload(BaseModel):
+    items: list[SlotDetectionItem]

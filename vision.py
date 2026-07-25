@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import re
 import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ class Vision:
         self.available = False
         self.Image = None
         self.ImageEnhance = None
+        self.ImageFilter = None
         self.ImageOps = None
         self.pytesseract = None
         self._init_ocr()
@@ -25,7 +27,7 @@ class Vision:
             return
 
         try:
-            from PIL import Image, ImageEnhance, ImageOps
+            from PIL import Image, ImageEnhance, ImageFilter, ImageOps
             import pytesseract
         except ImportError:
             self.log("[OCR] Thieu Pillow/pytesseract. Chay: python -m pip install -r requirements.txt")
@@ -41,6 +43,7 @@ class Vision:
             self.available = True
             self.Image = Image
             self.ImageEnhance = ImageEnhance
+            self.ImageFilter = ImageFilter
             self.ImageOps = ImageOps
             self.pytesseract = pytesseract
             self.log("[OCR] San sang.")
@@ -155,6 +158,100 @@ class Vision:
             return True
         return colorful / visible >= 0.14
 
+    def read_slot_count(self, png: bytes, center: list[int], kind: str = "") -> int:
+        if not self.available:
+            return -1
+        image = self.image_from_png(png)
+        if image is None:
+            return -1
+
+        if kind == "hero":
+            return 1 if self.slot_looks_available(png, center) else 0
+
+        cx, cy = center
+        regions = [
+            [int(cx - 64), int(cy - 92), 128, 52],
+            [int(cx - 58), int(cy - 90), 88, 48],
+            [int(cx - 24), int(cy - 90), 88, 48],
+            [int(cx - 72), int(cy - 102), 144, 62],
+        ]
+        candidates: Counter[int] = Counter()
+        for region in regions:
+            candidates.update(self._read_slot_count_region(image, region))
+        if candidates:
+            return self._select_slot_count_candidate(kind, candidates)
+
+        if self.slot_looks_available(png, center):
+            return 1
+        return 0
+
+    def _select_slot_count_candidate(self, kind: str, candidates: Counter[int]) -> int:
+        settings = self.config.get("slot_detection", {})
+        corrections = settings.get("count_corrections", {}).get(kind, {})
+        max_by_kind = settings.get("count_max_by_kind", {})
+        max_value = int(max_by_kind.get(kind, 99))
+
+        corrected: Counter[int] = Counter()
+        for value, weight in candidates.items():
+            mapped = int(corrections.get(str(value), value))
+            corrected[mapped] += weight
+
+        in_range = Counter({value: weight for value, weight in corrected.items() if 1 <= value <= max_value})
+        if in_range:
+            return in_range.most_common(1)[0][0]
+        return corrected.most_common(1)[0][0]
+
+    def _read_slot_count_region(self, image, region: list[int]) -> Counter[int]:
+        values: Counter[int] = Counter()
+        x, y, w, h = region
+        x = max(0, x)
+        y = max(0, y)
+        crop = image.crop((x, y, min(image.width, x + w), min(image.height, y + h)))
+        if crop.width <= 0 or crop.height <= 0:
+            return values
+        crop = crop.resize((crop.width * 5, crop.height * 5))
+        variants = self._slot_count_ocr_variants(crop)
+        for candidate in variants:
+            for psm in (7, 8, 13):
+                text = self.pytesseract.image_to_string(
+                    candidate,
+                    config=f"--psm {psm} -c tessedit_char_whitelist=xX0123456789",
+                )
+                value, weight = self._parse_slot_count_text(text)
+                if value > 0:
+                    values[value] += weight
+        return values
+
+    def _slot_count_ocr_variants(self, crop) -> list[Any]:
+        gray = self.ImageOps.grayscale(crop)
+        contrast = self.ImageEnhance.Contrast(gray).enhance(3.2)
+        white_text = crop.convert("RGB").point(
+            lambda p: 0 if p >= 172 else 255
+        ).convert("L")
+        white_text = white_text.filter(self.ImageFilter.MinFilter(3))
+        variants = [
+            gray,
+            self.ImageOps.autocontrast(gray),
+            contrast,
+            contrast.point(lambda p: 255 if p > 145 else 0),
+            white_text,
+            self.ImageOps.invert(white_text),
+        ]
+        return variants
+
+    def _parse_slot_count_text(self, text: str) -> tuple[int, int]:
+        compact = re.sub(r"\s+", "", text)
+        match = re.search(r"[xX](\d{1,2})", compact)
+        if match:
+            value = int(match.group(1))
+            return (value, 4) if 1 <= value <= 99 else (-1, 0)
+
+        digit_groups = re.findall(r"\d{1,2}", compact)
+        if not digit_groups:
+            return -1, 0
+        value = max(int(group) for group in digit_groups)
+        return ((value, 1) if 1 <= value <= 99 else (-1, 0))
+
     def _has_attack_button_color(self, image, region: list[int]) -> bool:
         if image is None:
             return False
@@ -203,10 +300,11 @@ class Vision:
     def read_loot(self, png: bytes) -> dict[str, int]:
         image = self.image_from_png(png)
         regions = self.config["ocr"]["regions"]
+        read_dark = bool(self.config.get("ocr", {}).get("read_dark_loot", False))
         return {
             "gold": self.read_number(image, regions["loot_gold"]),
             "elixir": self.read_number(image, regions["loot_elixir"]),
-            "dark": self.read_number(image, regions["loot_dark"]),
+            "dark": self.read_number(image, regions["loot_dark"]) if read_dark else -1,
         }
 
     def read_damage_percent(self, png: bytes) -> int:
