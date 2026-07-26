@@ -3,6 +3,7 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { SelectInput, TextInput, Toggle } from "../components/FormControls";
 import { LogPanel } from "../components/LogPanel";
+import { PageHeader } from "../components/PageHeader";
 import { StatGrid } from "../components/StatGrid";
 import { numberValue, useConfigEditor } from "../hooks/useConfigEditor";
 import { apiErrorMessage } from "../services/http";
@@ -110,89 +111,98 @@ export function DashboardPage({ status, refreshStatus }: Props) {
   }
 
   return (
-    <div className="space-y-5">
-      <Card title="Trung tâm điều khiển" subtitle="Quét ADB trước, sau đó bắt đầu bot.">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <p className="text-2xl font-black text-white">{status?.status ?? "Đang tải..."}</p>
-            <p className="mt-1 text-sm text-slate-400">
-              ADB: {status?.adb_ready ? "đã kết nối" : "chưa kết nối"} · Bot:{" "}
-              {status?.running ? (status.paused ? "tạm dừng" : "đang chạy") : "đang dừng"}
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex">
-            <Button variant="primary" disabled={busyAction !== "" || status?.running} onClick={() => runAction("scan", scanAdb)}>
-              {busyAction === "scan" ? "Đang quét..." : "Quét ADB"}
-            </Button>
-            <Button variant="success" disabled={busyAction !== "" || configSaving || status?.running} onClick={() => runAction("start", handleStartBot)}>
-              {busyAction === "start" || configSaving ? "Đang bắt đầu..." : "Bắt đầu"}
-            </Button>
-            <Button variant="muted" disabled={busyAction !== ""} onClick={() => runAction("pause", togglePause)}>
-              {status?.paused ? "Tiếp tục" : "Tạm dừng"}
-            </Button>
-            <Button variant="danger" disabled={busyAction !== ""} onClick={() => runAction("stop", stopBot)}>
-              Dừng
-            </Button>
-          </div>
-        </div>
-        {actionError && <div className="mt-4 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-rose-200">{actionError}</div>}
-      </Card>
+    <div>
+      <PageHeader
+        eyebrow="Vận hành"
+        title="Tổng quan chạy bot"
+        subtitle="Quét ADB, nhập số quân thủ công nếu cần, bắt đầu bot và theo dõi log trong cùng một màn hình."
+      />
 
-      <Card
-        title="Số quân thủ công"
-        subtitle="Bật mục này nếu không muốn OCR số lượng trên thanh quân. Bot vẫn nhận diện vị trí slot, nhưng dùng số bạn nhập khi bắt đầu trận."
-        action={
-          <Button variant="success" disabled={configSaving || configLoading || !config} onClick={save}>
-            {configSaving ? "Đang lưu..." : "Lưu số quân"}
-          </Button>
-        }
-      >
-        {(configError || savedMessage) && (
-          <div className={`mb-4 rounded-lg px-4 py-3 text-sm ${configError ? "border border-danger/30 bg-danger/10 text-rose-200" : "border border-limewash/30 bg-limewash/10 text-lime-200"}`}>
-            {configError || savedMessage}
-          </div>
-        )}
-        <div className="mb-4">
-          <Toggle
-            label="Dùng số quân nhập tay"
-            hint="Bật thì bot vẫn quét vị trí icon slot, nhưng không OCR số lượng. Tắt thì bot quét số lượng như bình thường."
-            checked={Boolean(manualArmy.enabled)}
-            disabled={configLoading || !config}
-            onChange={(value) => updatePath(["manual_army", "enabled"], value)}
-          />
-        </div>
-        <div className="mb-4">
-          <SelectInput
-            label="Combo áp dụng"
-            value={selectedCombo}
-            options={comboOptions}
-            disabled={configLoading || !config}
-            onChange={(event) => updatePath(["farm", "combo"], event.target.value)}
-          />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {comboSlots.map((kind) => (
-            <TextInput
-              key={kind}
-              type="number"
-              min={0}
-              label={slotLabels[kind] ?? kind}
-              disabled={configLoading || !config || !manualArmy.enabled}
-              value={String(manualCounts[kind] ?? 0)}
-              onChange={(event) => updatePath(["manual_army", "counts", kind], numberValue(event.target.value))}
-            />
-          ))}
-        </div>
-        {!comboSlots.length && <p className="mt-3 text-sm text-slate-400">Combo này chưa có slot quân/phép để nhập.</p>}
-      </Card>
+      <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
+        <div className="space-y-5">
+          <Card title="Điều khiển">
+            <div className="rounded-xl border border-white/10 bg-black/25 p-4">
+              <p className="text-xl font-black text-white">{status?.status ?? "Đang tải..."}</p>
+              <p className="mt-1 text-sm text-slate-400">
+                ADB: {status?.adb_ready ? "đã kết nối" : "chưa kết nối"} · Bot:{" "}
+                {status?.running ? (status.paused ? "tạm dừng" : "đang chạy") : "đang dừng"}
+              </p>
+            </div>
 
-      <Card title="Thống kê phiên" subtitle="Dữ liệu lấy từ callback của bot và file stats.">
-        <StatGrid stats={stats} />
-      </Card>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button variant="primary" disabled={busyAction !== "" || status?.running} onClick={() => runAction("scan", scanAdb)}>
+                {busyAction === "scan" ? "Đang quét..." : "Quét ADB"}
+              </Button>
+              <Button variant="success" disabled={busyAction !== "" || configSaving || status?.running} onClick={() => runAction("start", handleStartBot)}>
+                {busyAction === "start" || configSaving ? "Đang bắt đầu..." : "Bắt đầu"}
+              </Button>
+              <Button variant="muted" disabled={busyAction !== ""} onClick={() => runAction("pause", togglePause)}>
+                {status?.paused ? "Tiếp tục" : "Tạm dừng"}
+              </Button>
+              <Button variant="danger" disabled={busyAction !== ""} onClick={() => runAction("stop", stopBot)}>
+                Dừng
+              </Button>
+            </div>
 
-      <Card title="Theo dõi chạy tool">
-        <LogPanel logs={logs} onClear={handleClearLogs} />
-      </Card>
+            {actionError ? <div className="mt-4 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-rose-200">{actionError}</div> : null}
+          </Card>
+
+          <Card
+            title="Số quân thủ công"
+            action={
+              <Button variant="success" disabled={configSaving || configLoading || !config} onClick={save}>
+                {configSaving ? "Đang lưu..." : "Lưu"}
+              </Button>
+            }
+          >
+            {(configError || savedMessage) && (
+              <div className={`mb-4 rounded-lg px-4 py-3 text-sm ${configError ? "border border-danger/30 bg-danger/10 text-rose-200" : "border border-limewash/30 bg-limewash/10 text-lime-200"}`}>
+                {configError || savedMessage}
+              </div>
+            )}
+            <div className="space-y-4">
+              <Toggle
+                label="Dùng số quân nhập tay"
+                hint="Bật thì bot lấy số lượng ở đây, còn vị trí slot vẫn nhận diện trên thanh quân."
+                checked={Boolean(manualArmy.enabled)}
+                disabled={configLoading || !config}
+                onChange={(value) => updatePath(["manual_army", "enabled"], value)}
+              />
+              <SelectInput
+                label="Combo áp dụng"
+                value={selectedCombo}
+                options={comboOptions}
+                disabled={configLoading || !config}
+                onChange={(event) => updatePath(["farm", "combo"], event.target.value)}
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                {comboSlots.map((kind) => (
+                  <TextInput
+                    key={kind}
+                    type="number"
+                    min={0}
+                    label={slotLabels[kind] ?? kind}
+                    disabled={configLoading || !config || !manualArmy.enabled}
+                    value={String(manualCounts[kind] ?? 0)}
+                    onChange={(event) => updatePath(["manual_army", "counts", kind], numberValue(event.target.value))}
+                  />
+                ))}
+              </div>
+              {!comboSlots.length ? <p className="text-sm text-slate-400">Combo này chưa có slot quân/phép để nhập.</p> : null}
+            </div>
+          </Card>
+        </div>
+
+        <div className="space-y-5">
+          <Card title="Thống kê phiên">
+            <StatGrid stats={stats} />
+          </Card>
+
+          <Card title="Theo dõi chạy tool">
+            <LogPanel logs={logs} onClear={handleClearLogs} />
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

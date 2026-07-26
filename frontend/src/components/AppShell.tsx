@@ -3,14 +3,27 @@ import { useConfigEditor } from "../hooks/useConfigEditor";
 import type { BotStatus } from "../services/types";
 import { StatusBadge } from "./StatusBadge";
 
-const navItems = [
-  { to: "/", label: "Tổng quan" },
-  { to: "/farm", label: "Farm" },
-  { to: "/slots", label: "Nhận diện slot" },
-  { to: "/coordinates/troops", label: "Tọa độ lính" },
-  { to: "/coordinates/spells", label: "Tọa độ thuốc" },
-  { to: "/surrender", label: "Đầu hàng" },
-  { to: "/settings", label: "Cài đặt" },
+const navGroups = [
+  {
+    title: "Vận hành",
+    items: [
+      { to: "/", label: "Tổng quan" },
+      { to: "/farm", label: "Farm" },
+      { to: "/surrender", label: "Đầu hàng" },
+    ],
+  },
+  {
+    title: "Hiệu chỉnh",
+    items: [
+      { to: "/coordinates/troops", label: "Tọa độ lính" },
+      { to: "/coordinates/spells", label: "Tọa độ thuốc" },
+      { to: "/slots", label: "Nhận diện slot" },
+    ],
+  },
+  {
+    title: "Hệ thống",
+    items: [{ to: "/settings", label: "Cài đặt" }],
+  },
 ];
 
 export function AppShell({ status }: { status: BotStatus | null }) {
@@ -29,20 +42,27 @@ export function AppShell({ status }: { status: BotStatus | null }) {
             <StatusBadge status={status} />
           </div>
 
-          <nav className="mt-5 grid grid-cols-2 gap-2 lg:grid-cols-1">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) =>
-                  `rounded-xl px-4 py-3 text-sm font-semibold transition ${
-                    isActive ? "bg-sky-400 text-slate-950" : "bg-ink-900 text-slate-300 hover:bg-ink-700"
-                  }`
-                }
-              >
-                {item.label}
-              </NavLink>
+          <nav className="mt-5 space-y-4">
+            {navGroups.map((group) => (
+              <div key={group.title}>
+                <p className="mb-2 px-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{group.title}</p>
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
+                  {group.items.map((item) => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.to === "/"}
+                      className={({ isActive }) =>
+                        `rounded-xl px-4 py-3 text-sm font-semibold transition ${
+                          isActive ? "bg-sky-400 text-slate-950" : "bg-ink-900 text-slate-300 hover:bg-ink-700"
+                        }`
+                      }
+                    >
+                      {item.label}
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
 

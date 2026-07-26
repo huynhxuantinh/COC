@@ -1,6 +1,7 @@
 import { PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { PageHeader } from "../components/PageHeader";
 import { SelectInput, TextInput } from "../components/FormControls";
 import { captureScreenshot } from "../services/coordinatesApi";
 import { apiErrorMessage } from "../services/http";
@@ -189,152 +190,150 @@ export function SlotDetectionPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <Card
+    <div>
+      <PageHeader
+        eyebrow="Hiệu chỉnh"
         title="Nhận diện slot"
-        subtitle="Tạo mẫu icon cho combo Rồng điện/Bóng trước. Mỗi loại nên lưu 3-5 mẫu ở các trận khác nhau."
+        subtitle="Chụp màn hình trận, khoanh icon quân/phép, lưu mẫu rồi test nhận diện."
         action={
           <Button variant="primary" disabled={busy !== ""} onClick={handleCapture}>
             {busy === "capture" ? "Đang chụp..." : "Chụp từ ADB"}
           </Button>
         }
-      >
-        {(error || message) && (
-          <div className={`mb-4 rounded-lg px-4 py-3 text-sm ${error ? "border border-danger/30 bg-danger/10 text-rose-200" : "border border-limewash/30 bg-limewash/10 text-lime-200"}`}>
-            {error || message}
-          </div>
-        )}
+      />
 
-        <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
-          <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/30">
-            {imageSrc ? (
-              <div className="relative">
-                <img
-                  ref={imageRef}
-                  src={imageSrc}
-                  alt="Ảnh thanh quân"
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  className="block w-full cursor-crosshair select-none"
-                  draggable={false}
+      {(error || message) && (
+        <div className={`mb-5 rounded-lg px-4 py-3 text-sm ${error ? "border border-danger/30 bg-danger/10 text-rose-200" : "border border-limewash/30 bg-limewash/10 text-lime-200"}`}>
+          {error || message}
+        </div>
+      )}
+
+      <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+          {imageSrc ? (
+            <div className="relative">
+              <img
+                ref={imageRef}
+                src={imageSrc}
+                alt="Ảnh thanh quân"
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                className="block w-full cursor-crosshair select-none"
+                draggable={false}
+              />
+              {selectedPoint ? (
+                <div
+                  className="absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-pink-200 bg-pink-500/80"
+                  style={{ left: `${(selectedPoint[0] / (image?.width ?? 1)) * 100}%`, top: `${(selectedPoint[1] / (image?.height ?? 1)) * 100}%` }}
                 />
-                {selectedPoint ? (
-                  <div
-                    className="absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-pink-200 bg-pink-500/80"
-                    style={{ left: `${(selectedPoint[0] / (image?.width ?? 1)) * 100}%`, top: `${(selectedPoint[1] / (image?.height ?? 1)) * 100}%` }}
-                  />
-                ) : null}
-                {cropBox ? (
-                  <div
-                    className="pointer-events-none absolute border-2 border-sky-300 bg-sky-400/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.18)]"
-                    style={{
-                      left: `${cropBox.left}%`,
-                      top: `${cropBox.top}%`,
-                      width: `${cropBox.width}%`,
-                      height: `${cropBox.height}%`,
-                    }}
-                  />
-                ) : null}
-                {image &&
-                  detections.map((item, index) => (
-                    <div
-                      key={`${item.kind}-${index}`}
-                      className="absolute -translate-x-1/2 -translate-y-1/2 rounded-lg border border-lime-200 bg-black/75 px-2 py-1 text-xs font-bold text-lime-100"
-                      style={{ left: `${(item.center[0] / image.width) * 100}%`, top: `${(item.center[1] / image.height) * 100}%` }}
-                    >
-                      {kindLabels[item.kind] ?? item.kind} x{item.count >= 0 ? item.count : "?"}
-                    </div>
-                  ))}
-              </div>
-            ) : (
-              <div className="flex aspect-video items-center justify-center p-8 text-center text-sm text-slate-500">
-                Bấm Chụp từ ADB khi đang ở màn hình trận đấu có thanh quân.
-              </div>
-            )}
-          </div>
-
-          <aside className="space-y-4">
-            <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-              <p className="text-sm font-bold text-white">Lưu mẫu icon</p>
-              <div className="mt-4 space-y-3">
-                <SelectInput label="Loại icon" value={kind} options={kindOptions} onChange={(event) => setKind(event.target.value)} />
-                <TextInput
-                  label="Kích thước crop"
-                  type="number"
-                  min={32}
-                  max={140}
-                  step={4}
-                  hint="Kéo chuột khoanh vùng icon để crop tự do. Size chỉ dùng khi bạn click 1 điểm không kéo."
-                  value={String(cropSize)}
-                  onChange={(event) => setCropSize(clampCropSize(Number(event.target.value || 76)))}
+              ) : null}
+              {cropBox ? (
+                <div
+                  className="pointer-events-none absolute border-2 border-sky-300 bg-sky-400/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.18)]"
+                  style={{
+                    left: `${cropBox.left}%`,
+                    top: `${cropBox.top}%`,
+                    width: `${cropBox.width}%`,
+                    height: `${cropBox.height}%`,
+                  }}
                 />
-                <div className="grid grid-cols-5 gap-2">
-                  {cropPresets.map((size) => (
-                    <button
-                      key={size}
-                      type="button"
-                      onClick={() => setCropSize(size)}
-                      className={`rounded-lg border px-2 py-2 text-xs font-bold transition ${
-                        cropSize === size ? "border-sky-300 bg-sky-400 text-slate-950" : "border-white/10 bg-ink-900 text-slate-300 hover:border-sky-400/50"
-                      }`}
-                    >
-                      {size}
-                    </button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="muted" disabled={cropSize <= 32} onClick={() => setCropSize((value) => clampCropSize(value - 4))}>
-                    Thu nhỏ
-                  </Button>
-                  <Button variant="muted" disabled={cropSize >= 140} onClick={() => setCropSize((value) => clampCropSize(value + 4))}>
-                    Phóng to
-                  </Button>
-                </div>
-                <Button className="w-full" variant="muted" disabled={!cropRegion} onClick={() => setCropRegion(null)}>
-                  Bỏ vùng tự cắt
-                </Button>
-                <div className="rounded-lg border border-white/10 bg-ink-900 px-3 py-2 text-xs text-slate-400">
-                  {cropRegion ? `Vùng crop: [${cropRegion.join(", ")}]` : "Chưa có vùng tự cắt. Kéo chuột trực tiếp trên ảnh để chọn."}
-                </div>
-                <Button className="w-full" variant="success" disabled={busy !== "" || !image || !selectedPoint} onClick={handleSaveTemplate}>
-                  Lưu mẫu
-                </Button>
-                <Button className="w-full" variant="muted" disabled={busy !== ""} onClick={handleDetect}>
-                  Test nhận diện
-                </Button>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-              <p className="text-sm font-bold text-white">Mẫu hiện có</p>
-              <div className="mt-3 space-y-2 text-sm text-slate-300">
-                {(templates?.items ?? []).map((item) => (
-                  <div key={item.kind} className="flex items-center justify-between rounded-lg bg-ink-900 px-3 py-2">
-                    <span>{kindLabels[item.kind] ?? item.kind}</span>
-                    <span className="font-mono text-sky-300">{item.count}</span>
+              ) : null}
+              {image &&
+                detections.map((item, index) => (
+                  <div
+                    key={`${item.kind}-${index}`}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 rounded-lg border border-lime-200 bg-black/75 px-2 py-1 text-xs font-bold text-lime-100"
+                    style={{ left: `${(item.center[0] / image.width) * 100}%`, top: `${(item.center[1] / image.height) * 100}%` }}
+                  >
+                    {kindLabels[item.kind] ?? item.kind} x{item.count >= 0 ? item.count : "?"}
                   </div>
                 ))}
-              </div>
             </div>
-
-            <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-              <p className="text-sm font-bold text-white">Kết quả test</p>
-              <div className="mt-3 max-h-64 space-y-2 overflow-auto text-xs text-slate-300">
-                {detections.length === 0 ? (
-                  <p className="text-slate-500">Chưa có kết quả.</p>
-                ) : (
-                  detections.map((item, index) => (
-                    <div key={`${item.kind}-${index}`} className="rounded-lg bg-ink-900 px-3 py-2">
-                      {kindLabels[item.kind] ?? item.kind} x{item.count >= 0 ? item.count : "?"} [{item.center.join(", ")}] score {item.score}
-                    </div>
-                  ))
-                )}
-              </div>
+          ) : (
+            <div className="flex aspect-video items-center justify-center p-8 text-center text-sm text-slate-500">
+              Bấm Chụp từ ADB khi đang ở màn hình trận đấu có thanh quân.
             </div>
-          </aside>
+          )}
         </div>
-      </Card>
+
+        <aside className="space-y-4">
+          <Card title="Lưu mẫu icon">
+            <div className="space-y-3">
+              <SelectInput label="Loại icon" value={kind} options={kindOptions} onChange={(event) => setKind(event.target.value)} />
+              <TextInput
+                label="Kích thước crop"
+                type="number"
+                min={32}
+                max={140}
+                step={4}
+                hint="Kéo chuột khoanh vùng icon để crop tự do."
+                value={String(cropSize)}
+                onChange={(event) => setCropSize(clampCropSize(Number(event.target.value || 76)))}
+              />
+              <div className="grid grid-cols-5 gap-2">
+                {cropPresets.map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => setCropSize(size)}
+                    className={`rounded-lg border px-2 py-2 text-xs font-bold transition ${
+                      cropSize === size ? "border-sky-300 bg-sky-400 text-slate-950" : "border-white/10 bg-ink-900 text-slate-300 hover:border-sky-400/50"
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="muted" disabled={cropSize <= 32} onClick={() => setCropSize((value) => clampCropSize(value - 4))}>
+                  Thu nhỏ
+                </Button>
+                <Button variant="muted" disabled={cropSize >= 140} onClick={() => setCropSize((value) => clampCropSize(value + 4))}>
+                  Phóng to
+                </Button>
+              </div>
+              <Button className="w-full" variant="muted" disabled={!cropRegion} onClick={() => setCropRegion(null)}>
+                Bỏ vùng tự cắt
+              </Button>
+              <div className="rounded-lg border border-white/10 bg-ink-900 px-3 py-2 text-xs text-slate-400">
+                {cropRegion ? `Vùng crop: [${cropRegion.join(", ")}]` : "Chưa có vùng tự cắt."}
+              </div>
+              <Button className="w-full" variant="success" disabled={busy !== "" || !image || !selectedPoint} onClick={handleSaveTemplate}>
+                Lưu mẫu
+              </Button>
+              <Button className="w-full" variant="muted" disabled={busy !== ""} onClick={handleDetect}>
+                Test nhận diện
+              </Button>
+            </div>
+          </Card>
+
+          <Card title="Mẫu hiện có">
+            <div className="space-y-2 text-sm text-slate-300">
+              {(templates?.items ?? []).map((item) => (
+                <div key={item.kind} className="flex items-center justify-between rounded-lg bg-ink-900 px-3 py-2">
+                  <span>{kindLabels[item.kind] ?? item.kind}</span>
+                  <span className="font-mono text-sky-300">{item.count}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card title="Kết quả test">
+            <div className="max-h-64 space-y-2 overflow-auto text-xs text-slate-300">
+              {detections.length === 0 ? (
+                <p className="text-slate-500">Chưa có kết quả.</p>
+              ) : (
+                detections.map((item, index) => (
+                  <div key={`${item.kind}-${index}`} className="rounded-lg bg-ink-900 px-3 py-2">
+                    {kindLabels[item.kind] ?? item.kind} x{item.count >= 0 ? item.count : "?"} [{item.center.join(", ")}] score {item.score}
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </aside>
+      </div>
     </div>
   );
 }
