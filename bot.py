@@ -15,7 +15,7 @@ from vision import Vision
 
 
 class FarmBot:
-    STAT_KEYS = ("attacks", "next", "gold_seen", "elixir_seen", "dark_seen")
+    STAT_KEYS = ("attacks", "next", "gold_seen", "elixir_seen")
 
     def __init__(
         self,
@@ -286,11 +286,7 @@ class FarmBot:
             png, loot = self._read_loot_frame()
             if self._loot_is_valid(loot):
                 ocr_fail_started_at = None
-                dark_label = f"{loot['dark']:,}" if loot.get("dark", -1) >= 0 else "skip"
-                self.log(
-                    f"[SEARCH] Loot: gold={loot['gold']:,} | elixir={loot['elixir']:,} | "
-                    f"dark={dark_label}"
-                )
+                self.log(f"[SEARCH] Loot: gold={loot['gold']:,} | elixir={loot['elixir']:,}")
                 if self._should_attack(loot):
                     self.stats["attacks"] += 1
                     self._publish_stats()
@@ -439,9 +435,6 @@ class FarmBot:
 
         for step in self.active_deploy.get("sequence", []):
             add(str(step.get("slot", "")))
-        for spell in self.active_deploy.get("spells", []):
-            if spell.get("enabled", True):
-                add(str(spell.get("slot", "")))
         for group in self.active_deploy.get("spell_groups", []):
             if not group.get("enabled", True):
                 continue
@@ -573,34 +566,10 @@ class FarmBot:
 
     def _cast_spells(self, deploy_finished: float) -> None:
         spell_groups = self.active_deploy.get("spell_groups", [])
-        if spell_groups:
-            self._cast_spell_groups(spell_groups, deploy_finished)
+        if not spell_groups:
+            self.log("[SPELL] Chưa cấu hình spell_groups, skip thả thuốc.")
             return
-
-        for spell in self.active_deploy["spells"]:
-            if not spell.get("enabled", True):
-                continue
-            delay = float(spell.get("delay_after_deploy", 0))
-            while time.time() - deploy_finished < delay and not self.stop_event.is_set():
-                self._sleep(0.1)
-            spell_name = spell.get("name", spell["slot"])
-            max_casts = int(spell.get("max_casts", 0))
-            points = self._spell_zone_points(spell, max_casts)
-            if not points:
-                self.log(f"[SPELL] Skip {spell_name}, chưa có vùng thả spell.")
-                continue
-            slot = spell["slot"]
-            self.log(f"[SPELL] Cast {spell_name} ({slot}) in zone.")
-            for x, y in points:
-                if not self._slot_available(slot):
-                    self.log(f"[SPELL] Slot {slot} looks empty, stop {spell_name}.")
-                    break
-                self._tap_slot(slot)
-                self._spell_random_delay(spell["slot"])
-                self.adb.tap(int(x), int(y))
-                self._consume_runtime_slot(slot)
-                self._optimized_action_pause()
-                self._sleep(0.18)
+        self._cast_spell_groups(spell_groups, deploy_finished)
 
     def _cast_spell_groups(self, spell_groups: list[dict[str, Any]], deploy_finished: float) -> None:
         for group in spell_groups:

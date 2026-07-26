@@ -219,7 +219,6 @@ class COCFarmApp(tk.Tk):
             ("next", "Next"),
             ("gold_seen", "Vàng"),
             ("elixir_seen", "Dầu"),
-            ("dark_seen", "Dầu đen"),
         ]
         row = tk.Frame(card, bg=c["panel"])
         row.pack(fill="x", pady=(10, 0))
@@ -258,7 +257,7 @@ class COCFarmApp(tk.Tk):
         stats_dir = Path("stats")
         if not stats_dir.exists():
             return {}
-        keys = ("attacks", "next", "gold_seen", "elixir_seen", "dark_seen")
+        keys = ("attacks", "next", "gold_seen", "elixir_seen")
         total = {key: 0 for key in keys}
         loaded = 0
         for path in stats_dir.glob("*.json"):
@@ -313,7 +312,6 @@ class COCFarmApp(tk.Tk):
         self.vars["attack_edge"] = tk.StringVar(value=self._edge_label(farm.get("attack_edge", "top")))
         self.vars["gold_min"] = tk.StringVar(value=f"{farm['gold_min']:,}")
         self.vars["elixir_min"] = tk.StringVar(value=f"{farm['elixir_min']:,}")
-        self.vars["dark_min"] = tk.StringVar(value=f"{farm['dark_min']:,}")
         self.vars["total_min"] = tk.StringVar(value=f"{farm['total_min']:,}")
 
         left = ttk.Frame(parent, style="Panel.TFrame")
@@ -361,15 +359,14 @@ class COCFarmApp(tk.Tk):
         )
         self._field(right, 3, "Vàng tối thiểu", self.vars["gold_min"])
         self._field(right, 4, "Dầu tối thiểu", self.vars["elixir_min"])
-        self._field(right, 5, "Dầu đen (chỉ thống kê)", self.vars["dark_min"])
-        self._field(right, 6, "Tổng vàng + dầu", self.vars["total_min"])
+        self._field(right, 5, "Tổng vàng + dầu", self.vars["total_min"])
 
-        ttk.Label(right, text="Chế độ thả", style="Panel.TLabel").grid(row=7, column=0, sticky="w", pady=(12, 6))
+        ttk.Label(right, text="Chế độ thả", style="Panel.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 6))
         ttk.Label(
             right,
             text="Thả theo vùng polygon đã vẽ trong trang tọa độ.",
             style="Subtle.TLabel",
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=3)
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=3)
 
     def _build_surrender_tab(self, parent: ttk.Frame) -> None:
         surrender = self.config_data["surrender"]
@@ -651,7 +648,6 @@ class COCFarmApp(tk.Tk):
         farm["attack_edge"] = self._edge_value(str(self.vars["attack_edge"].get()))
         farm["gold_min"] = self._money_var("gold_min")
         farm["elixir_min"] = self._money_var("elixir_min")
-        farm["dark_min"] = self._money_var("dark_min")
         farm["total_min"] = self._money_var("total_min")
 
         surrender["by_time"] = bool(self.vars["by_time"].get())
@@ -751,7 +747,7 @@ class COCFarmApp(tk.Tk):
             self._update_stats_display(self._aggregate_session_stats())
 
     def _aggregate_session_stats(self) -> dict:
-        keys = ("attacks", "next", "gold_seen", "elixir_seen", "dark_seen")
+        keys = ("attacks", "next", "gold_seen", "elixir_seen")
         total = {key: 0 for key in keys}
         for stats in self.stats_by_device.values():
             session = stats.get("current_session", stats)
@@ -766,7 +762,6 @@ class COCFarmApp(tk.Tk):
             "next": "Next",
             "gold_seen": "Vàng",
             "elixir_seen": "Dầu",
-            "dark_seen": "Dầu đen",
         }
         for key, label in labels.items():
             value = int(session.get(key, 0))

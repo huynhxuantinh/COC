@@ -90,7 +90,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "threshold_mode": "any",
         "gold_min": 900000,
         "elixir_min": 900000,
-        "dark_min": 8000,
         "total_min": 1700000,
         "max_next": 80,
         "search_delay_seconds": 3.0,
@@ -113,13 +112,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "ocr": {
         "enabled": True,
-        "read_dark_loot": False,
         "tesseract_path": "",
         "regions": {
             "loot_panel": [78, 123, 145, 86],
             "loot_gold": [78, 123, 145, 40],
             "loot_elixir": [78, 169, 145, 40],
-            "loot_dark": [80, 220, 154, 35],
             "result_loot_panel": [612, 370, 212, 124],
             "result_gold": [612, 388, 210, 40],
             "result_elixir": [612, 430, 210, 40],
@@ -262,38 +259,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             {"slot": "balloon", "count": "all", "max_taps": 24, "delay": 0.07},
             {"slot": "hero", "count": "all", "max_taps": 5, "delay": 0.12},
         ],
-        "spells": [
-            {
-                "slot": "rage",
-                "enabled": True,
-                "name": "No 1",
-                "max_casts": 3,
-                "delay_after_deploy": 2,
-                "zone": [],
-                "zones": copy.deepcopy(EMPTY_VIEW_ZONES),
-                "points": [[807, 281], [958, 371], [1083, 466]],
-            },
-            {
-                "slot": "freeze",
-                "enabled": True,
-                "name": "Bang",
-                "max_casts": 1,
-                "delay_after_deploy": 4,
-                "zone": [],
-                "zones": copy.deepcopy(EMPTY_VIEW_ZONES),
-                "points": [[781, 352], [912, 436], [986, 490]],
-            },
-            {
-                "slot": "rage",
-                "enabled": True,
-                "name": "No 2",
-                "max_casts": 2,
-                "delay_after_deploy": 5,
-                "zone": [],
-                "zones": copy.deepcopy(EMPTY_VIEW_ZONES),
-                "points": [[742, 405], [952, 555]],
-            },
-        ],
         "spell_groups": [
             {
                 "name": "Nộ/Băng linh hoạt",
@@ -301,7 +266,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "slots": ["rage", "freeze"],
                 "max_casts": 6,
                 "delay_after_deploy": 2,
-                "delay_between_casts": 0.08,
+                "delay_between_casts": 0.4,
                 "zone": [],
                 "zones": copy.deepcopy(EMPTY_VIEW_ZONES),
                 "points": [
@@ -386,18 +351,6 @@ def migrate_fast_attack_delays(config: dict[str, Any]) -> None:
             if old_new and step.get("delay") == old_new[0]:
                 step["delay"] = old_new[1]
 
-        spell_delays = {"No 1": (4, 2), "Bang": (7, 4), "No 2": (10, 5)}
-        for spell in deploy.get("spells", []):
-            spell.setdefault("zone", [])
-            if not isinstance(spell.get("zones"), dict):
-                spell["zones"] = copy.deepcopy(EMPTY_VIEW_ZONES)
-            else:
-                for view in EMPTY_VIEW_ZONES:
-                    spell["zones"].setdefault(view, [])
-            old_new = spell_delays.get(spell.get("name"))
-            if old_new and spell.get("delay_after_deploy") == old_new[0]:
-                spell["delay_after_deploy"] = old_new[1]
-
         for group in deploy.get("spell_groups", []):
             group.setdefault("zone", [])
             if not isinstance(group.get("zones"), dict):
@@ -407,8 +360,8 @@ def migrate_fast_attack_delays(config: dict[str, Any]) -> None:
                     group["zones"].setdefault(view, [])
             if group.get("delay_after_deploy") == 4:
                 group["delay_after_deploy"] = 2
-            if group.get("delay_between_casts") == 0.22:
-                group["delay_between_casts"] = 0.08
+            if group.get("delay_between_casts") in (0.08, 0.22):
+                group["delay_between_casts"] = 0.4
 
     migrate_deploy(config.get("deploy", {}))
     for combo in config.get("combos", {}).values():

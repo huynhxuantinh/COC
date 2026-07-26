@@ -300,11 +300,9 @@ class Vision:
     def read_loot(self, png: bytes) -> dict[str, int]:
         image = self.image_from_png(png)
         regions = self.config["ocr"]["regions"]
-        read_dark = bool(self.config.get("ocr", {}).get("read_dark_loot", False))
         return {
             "gold": self.read_number(image, regions["loot_gold"]),
             "elixir": self.read_number(image, regions["loot_elixir"]),
-            "dark": self.read_number(image, regions["loot_dark"]) if read_dark else -1,
         }
 
     def read_result_loot(self, png: bytes) -> dict[str, int]:
@@ -313,7 +311,6 @@ class Vision:
         return {
             "gold": self.read_number(image, regions.get("result_gold", [612, 388, 210, 40])),
             "elixir": self.read_number(image, regions.get("result_elixir", [612, 430, 210, 40])),
-            "dark": -1,
         }
 
     def read_damage_percent(self, png: bytes) -> int:

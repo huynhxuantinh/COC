@@ -9,7 +9,7 @@ from adb_client import ADBClient, ADBError, COMMON_DEVICES, discover_adb_paths
 from bot import FarmBot
 
 
-STAT_KEYS = ("attacks", "next", "gold_seen", "elixir_seen", "dark_seen")
+STAT_KEYS = ("attacks", "next", "gold_seen", "elixir_seen")
 
 
 @dataclass(frozen=True)

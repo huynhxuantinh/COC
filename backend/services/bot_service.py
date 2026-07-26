@@ -232,9 +232,6 @@ class BotService:
             "zone_duoibentrai": ["deploy", "deploy_zones", "duoibentrai"],
         }
         spell_targets = {
-            "spell_no1": ["deploy", "spells", "0", "zones"],
-            "spell_bang": ["deploy", "spells", "1", "zones"],
-            "spell_no2": ["deploy", "spells", "2", "zones"],
             "spell_group": ["deploy", "spell_groups", "0", "zones"],
         }
         for prefix, base_path in spell_targets.items():

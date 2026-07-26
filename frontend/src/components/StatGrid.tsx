@@ -5,7 +5,6 @@ const labels: Record<string, string> = {
   next: "Next",
   gold_seen: "Vàng thực nhận",
   elixir_seen: "Dầu thực nhận",
-  dark_seen: "Dầu đen",
 };
 
 export function StatGrid({ stats }: { stats: StatsPayload | null }) {

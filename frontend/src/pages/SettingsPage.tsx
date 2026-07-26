@@ -108,15 +108,6 @@ export function SettingsPage() {
               Mở thẳng tool tọa độ với từng nhóm spell riêng. Dùng ảnh mẫu hoặc chụp ADB rồi click điểm muốn thả.
             </p>
             <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <Button className="bg-pink-600 hover:bg-pink-500" onClick={() => navigate("/coordinates/spells?target=spell_no1_zone_trenbenphai")}>
-                Nộ 1
-              </Button>
-              <Button className="bg-cyan-500 text-slate-950 hover:bg-cyan-400" onClick={() => navigate("/coordinates/spells?target=spell_bang_zone_trenbenphai")}>
-                Băng
-              </Button>
-              <Button className="bg-pink-600 hover:bg-pink-500" onClick={() => navigate("/coordinates/spells?target=spell_no2_zone_trenbenphai")}>
-                Nộ 2
-              </Button>
               <Button className="bg-violet-500 hover:bg-violet-400" onClick={() => navigate("/coordinates/spells?target=spell_group_zone_trenbenphai")}>
                 Nhóm linh hoạt
               </Button>

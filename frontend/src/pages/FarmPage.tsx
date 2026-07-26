@@ -48,7 +48,6 @@ export function FarmPage() {
           />
           <TextInput label="Vàng tối thiểu" value={String(farm.gold_min)} onChange={(event) => updatePath(["farm", "gold_min"], numberValue(event.target.value))} />
           <TextInput label="Dầu tối thiểu" value={String(farm.elixir_min)} onChange={(event) => updatePath(["farm", "elixir_min"], numberValue(event.target.value))} />
-          <TextInput label="Dầu đen tối thiểu" hint="Hiện chủ yếu để thống kê." value={String(farm.dark_min)} onChange={(event) => updatePath(["farm", "dark_min"], numberValue(event.target.value))} />
           <TextInput label="Tổng vàng + dầu tối thiểu" value={String(farm.total_min)} onChange={(event) => updatePath(["farm", "total_min"], numberValue(event.target.value))} />
           <TextInput label="Max Next" value={String(farm.max_next)} onChange={(event) => updatePath(["farm", "max_next"], numberValue(event.target.value))} />
           <TextInput label="Restart khi OCR fail quá lâu (giây)" value={String(farm.ocr_fail_restart_seconds)} onChange={(event) => updatePath(["farm", "ocr_fail_restart_seconds"], numberValue(event.target.value))} />

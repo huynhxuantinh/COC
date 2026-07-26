@@ -36,9 +36,6 @@ const viewTargets = [
 ];
 
 const spellGroups = [
-  { label: "Nộ 1", value: "spell_no1", read: (deploy: any, view: string) => deploy.spells?.[0]?.zones?.[view] ?? [] },
-  { label: "Băng", value: "spell_bang", read: (deploy: any, view: string) => deploy.spells?.[1]?.zones?.[view] ?? [] },
-  { label: "Nộ 2", value: "spell_no2", read: (deploy: any, view: string) => deploy.spells?.[2]?.zones?.[view] ?? [] },
   { label: "Nhóm Nộ/Băng", value: "spell_group", read: (deploy: any, view: string) => deploy.spell_groups?.[0]?.zones?.[view] ?? [] },
 ];
 
@@ -70,7 +67,7 @@ function targetLabel(target: string): string {
 }
 
 function defaultTarget(mode: CoordinateMode): string {
-  return mode === "spells" ? "spell_no1_zone_trenbenphai" : "zone_trenbenphai";
+  return mode === "spells" ? "spell_group_zone_trenbenphai" : "zone_trenbenphai";
 }
 
 function allowedTargets(mode: CoordinateMode): TargetOption[] {
