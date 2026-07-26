@@ -241,7 +241,7 @@ class BotService:
             for view in ("trenbenphai", "trenbentrai", "duoibenphai", "duoibentrai"):
                 allowed[f"{prefix}_zone_{view}"] = [*base_path, view]
         if target not in allowed:
-            raise ValueError("Target toa do khong hop le.")
+            raise ValueError("Target tọa độ không hợp lệ.")
         normalized = [[int(point[0]), int(point[1])] for point in points]
         with self.lock:
             self._set_config_path(self.config_data, allowed[target], normalized)
@@ -259,7 +259,7 @@ class BotService:
                     updated_combos.append(str(name))
             elif selected_combo:
                 if selected_combo not in combos:
-                    raise ValueError(f"Combo khong hop le: {selected_combo}")
+                    raise ValueError(f"Combo không hợp lệ: {selected_combo}")
                 combo_deploy = combos[selected_combo].setdefault("deploy", copy.deepcopy(self.config_data.get("deploy", {})))
                 self._set_config_path(combo_deploy, combo_path, normalized)
                 updated_combos.append(selected_combo)
@@ -392,6 +392,7 @@ class BotService:
         farm = config.get("farm", {})
         surrender = config.get("surrender", {})
         attack_timing = config.get("attack_timing", {})
+        manual_army = config.get("manual_army", {})
         if int(game.get("periodic_restart_min_seconds", 0)) > int(game.get("periodic_restart_max_seconds", 0)):
             raise ValueError("Thời gian restart tối thiểu phải <= tối đa.")
         if int(farm.get("max_next", 0)) < 1:
@@ -401,15 +402,19 @@ class BotService:
         if int(surrender.get("destruction_min_percent", 0)) > int(surrender.get("destruction_max_percent", 0)):
             raise ValueError("% phá hủy tối thiểu phải <= tối đa.")
         timing_ranges = [
-            ("freeze_random_min_ms", "freeze_random_max_ms", "Tha bang"),
-            ("rage_random_min_ms", "rage_random_max_ms", "Tha no"),
-            ("siege_activation_min_ms", "siege_activation_max_ms", "Kich hoat quan giao"),
-            ("hero_skill_min_ms", "hero_skill_max_ms", "Kich hoat skill tuong"),
+            ("freeze_random_min_ms", "freeze_random_max_ms", "Thả băng"),
+            ("rage_random_min_ms", "rage_random_max_ms", "Thả nộ"),
+            ("hero_skill_min_ms", "hero_skill_max_ms", "Kích hoạt skill tướng"),
             ("next_battle_min_ms", "next_battle_max_ms", "Do tre tran moi"),
         ]
         for min_key, max_key, label in timing_ranges:
             if int(attack_timing.get(min_key, 0)) > int(attack_timing.get(max_key, 0)):
                 raise ValueError(f"{label}: gia tri tu phai <= den.")
+        counts = manual_army.get("counts", {})
+        if isinstance(counts, dict):
+            for kind, value in counts.items():
+                if int(value) < 0:
+                    raise ValueError(f"Số quân {kind} phải >= 0.")
 
     def _set_config_path(self, root: dict[str, Any], path: list[str], value: Any) -> None:
         cursor: Any = root
@@ -430,9 +435,9 @@ class BotService:
         img_dir = Path("img").resolve()
         path = (img_dir / name).resolve()
         if not str(path).startswith(str(img_dir)) or path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
-            raise ValueError("Anh mau khong hop le.")
+            raise ValueError("Ảnh mẫu không hợp lệ.")
         if not path.exists():
-            raise ValueError("Khong tim thay anh mau.")
+            raise ValueError("Không tìm thấy ảnh mẫu.")
         return path
 
     def _image_size(self, path: Path) -> tuple[int, int]:

@@ -40,8 +40,6 @@
       "dragon": 16,
       "balloon": 40,
       "valkyrie": 60,
-      "siege": 1,
-      "titan": 4,
       "rage": 5,
       "freeze": 11
     },
@@ -51,6 +49,17 @@
       }
     },
     "strict": false
+  },
+  "manual_army": {
+    "enabled": true,
+    "counts": {
+      "dragon": 0,
+      "balloon": 0,
+      "valkyrie": 25,
+      "hero": 2,
+      "rage": 4,
+      "freeze": 1
+    }
   },
   "game": {
     "resolution": [
@@ -71,7 +80,9 @@
     "attack_missing_retries": 3,
     "max_home_restart_failures": 3,
     "restart_wait_seconds": 20,
-    "max_consecutive_cycle_errors": 8
+    "max_consecutive_cycle_errors": 8,
+    "home_zoom_out_keyevents": 3,
+    "ldplayer_index": 0
   },
   "farm": {
     "village": "main",
@@ -100,7 +111,8 @@
     "never_surrender": false,
     "max_battle_seconds": 175,
     "damage_jump_confirm_percent": 40,
-    "damage_jump_max_pending_reads": 3
+    "damage_jump_max_pending_reads": 3,
+    "damage_stall_seconds": 20
   },
   "ocr": {
     "enabled": true,
@@ -154,6 +166,24 @@
         715,
         170,
         160
+      ],
+      "result_loot_panel": [
+        612,
+        370,
+        212,
+        124
+      ],
+      "result_gold": [
+        612,
+        388,
+        210,
+        40
+      ],
+      "result_elixir": [
+        612,
+        430,
+        210,
+        40
       ]
     }
   },
@@ -197,14 +227,6 @@
       ],
       "valkyrie": [
         414,
-        815
-      ],
-      "titan": [
-        414,
-        815
-      ],
-      "siege": [
-        556,
         815
       ],
       "hero": [
@@ -859,11 +881,6 @@
     "slot_check_every": 8,
     "sequence": [
       {
-        "slot": "siege",
-        "count": 1,
-        "delay": 0.18
-      },
-      {
         "slot": "dragon",
         "count": "all",
         "max_taps": 16,
@@ -874,12 +891,6 @@
         "count": "all",
         "max_taps": 24,
         "delay": 0.07
-      },
-      {
-        "slot": "titan",
-        "count": "all",
-        "max_taps": 4,
-        "delay": 0.1
       },
       {
         "slot": "hero",
@@ -1214,7 +1225,7 @@
     ],
     "spell_groups": [
       {
-        "name": "No/Bang linh hoat",
+        "name": "Nộ/Băng linh hoạt",
         "enabled": true,
         "slots": [
           "rage",
@@ -1349,8 +1360,6 @@
     "freeze_random_max_ms": 250,
     "rage_random_min_ms": 50,
     "rage_random_max_ms": 600,
-    "siege_activation_min_ms": 500,
-    "siege_activation_max_ms": 700,
     "hero_skill_min_ms": 200,
     "hero_skill_max_ms": 400,
     "next_battle_min_ms": 2000,
@@ -1995,11 +2004,6 @@
         "slot_check_every": 8,
         "sequence": [
           {
-            "slot": "siege",
-            "count": 1,
-            "delay": 0.18
-          },
-          {
             "slot": "dragon",
             "count": "all",
             "max_taps": 16,
@@ -2010,12 +2014,6 @@
             "count": "all",
             "max_taps": 24,
             "delay": 0.07
-          },
-          {
-            "slot": "titan",
-            "count": "all",
-            "max_taps": 4,
-            "delay": 0.1
           },
           {
             "slot": "hero",
@@ -2146,7 +2144,7 @@
         ],
         "spell_groups": [
           {
-            "name": "No/Bang linh hoat",
+            "name": "Nộ/Băng linh hoạt",
             "enabled": true,
             "slots": [
               "rage",
@@ -2891,7 +2889,7 @@
         ],
         "spell_groups": [
           {
-            "name": "No/Bang linh hoat",
+            "name": "Nộ/Băng linh hoạt",
             "enabled": true,
             "slots": [
               "rage",

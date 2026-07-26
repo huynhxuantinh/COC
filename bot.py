@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import subprocess
 import threading
 import time
 from datetime import datetime
@@ -46,6 +47,7 @@ class FarmBot:
         self.current_attack_view = ""
         self.home_restart_failures = 0
         self.runtime_slots: dict[str, list[dict[str, Any]]] = {}
+        self.manual_slot_counts: dict[str, int] = {}
 
     def run(self) -> None:
         try:
@@ -53,7 +55,7 @@ class FarmBot:
                 self.adb.connect()
             if not self._ocr_ready_or_stop():
                 return
-            self.log(f"[COMBO] Dang dung: {self.active_combo}.")
+            self.log(f"[COMBO] Đang dùng: {self.active_combo}.")
             if not self.config["game"]["skip_restart_game"]:
                 self.log("[GAME] Start Clash of Clans.")
                 self.adb.start_app(self.config["adb"]["package"])
@@ -130,8 +132,8 @@ class FarmBot:
         if max_cycle_errors <= 0 or cycle_errors < max_cycle_errors:
             return False
         self.log(
-            f"[ERROR] Qua nhieu loi cycle lien tiep ({cycle_errors}/{max_cycle_errors}). "
-            "Tu dong dung bot."
+            f"[ERROR] Quá nhiều lỗi cycle liên tiếp ({cycle_errors}/{max_cycle_errors}). "
+            "Tự động dừng bot."
         )
         self.stop_event.set()
         return True
@@ -141,8 +143,8 @@ class FarmBot:
             return True
         tesseract_path = self.config.get("ocr", {}).get("tesseract_path") or "PATH/default Windows path"
         self.log(
-            "[ERROR] OCR chua san sang. Kiem tra ocr.tesseract_path, cai Tesseract OCR, "
-            f"va cai Pillow/pytesseract. Hien tai tesseract_path={tesseract_path!r}."
+            "[ERROR] OCR chưa sẵn sàng. Kiểm tra ocr.tesseract_path, cài Tesseract OCR, "
+            f"và cài Pillow/pytesseract. Hiện tại tesseract_path={tesseract_path!r}."
         )
         self.stop_event.set()
         return False
@@ -155,8 +157,27 @@ class FarmBot:
         for _ in range(zoom_count):
             if self.stop_event.is_set():
                 return
-            self.adb.shell("input", "keyevent", "169", timeout=5)
+            if not self._ldplayer_zoom_out():
+                self.adb.shell("input", "keyevent", "KEYCODE_ZOOM_OUT", timeout=5)
             self._sleep(0.2)
+
+    def _ldplayer_zoom_out(self) -> bool:
+        adb_path = Path(self.config.get("adb", {}).get("path", ""))
+        ldconsole = adb_path.with_name("ldconsole.exe") if adb_path.name else Path()
+        if not ldconsole.exists():
+            return False
+        index = str(int(self.config.get("game", {}).get("ldplayer_index", 0)))
+        try:
+            subprocess.run(
+                [str(ldconsole), "zoomOut", "--index", index],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+        return True
 
     def _select_active_combo(self) -> str:
         combos = self.config.get("combos", {})
@@ -226,13 +247,13 @@ class FarmBot:
                     self.log("[HOME] Attack button found.")
                 self.home_restart_failures = 0
                 return True
-            self.log(f"[HOME] Khong thay nut Attack ({attempt}/{retries}).")
+            self.log(f"[HOME] Không thấy nút Attack ({attempt}/{retries}).")
             self._sleep(1)
 
         self._dump_debug_png("home_attack_missing_before_restart", last_png)
         package = self.config["adb"]["package"]
         wait_seconds = float(game.get("restart_wait_seconds", 18))
-        self.log("[HOME] Khong thay nut Attack. Restart game...")
+        self.log("[HOME] Không thấy nút Attack. Restart game...")
         self._restart_app_interruptible(package, wait_seconds)
 
         png = self.adb.screencap_png()
@@ -245,11 +266,11 @@ class FarmBot:
         self.home_restart_failures += 1
         max_failures = int(game.get("max_home_restart_failures", 3))
         self.log(
-            f"[HOME] Restart xong nhung van khong thay nut Attack "
+            f"[HOME] Restart xong nhưng vẫn không thấy nút Attack "
             f"({self.home_restart_failures}/{max_failures})."
         )
         if max_failures > 0 and self.home_restart_failures >= max_failures:
-            self.log("[ERROR] Qua nhieu lan restart home that bai. Tu dong dung bot.")
+            self.log("[ERROR] Quá nhiều lần restart home thất bại. Tự động dừng bot.")
             self.stop_event.set()
         return False
 
@@ -272,9 +293,6 @@ class FarmBot:
                 )
                 if self._should_attack(loot):
                     self.stats["attacks"] += 1
-                    self.stats["gold_seen"] += max(loot["gold"], 0)
-                    self.stats["elixir_seen"] += max(loot["elixir"], 0)
-                    self.stats["dark_seen"] += max(loot["dark"], 0)
                     self._publish_stats()
                     self.log("[SEARCH] Base matched. Deploy troops.")
                     return True
@@ -320,12 +338,13 @@ class FarmBot:
 
     def _attack_base(self) -> None:
         self.current_attack_view = self._selected_attack_view()
+        self.manual_slot_counts = self._manual_army_counts()
         self._prepare_camera()
         self._scan_runtime_slots()
 
         attack_start = time.time()
         if not self._deploy_troops():
-            self.log("[ATTACK] Khong tha duoc linh vi thieu vung polygon. End battle.")
+            self.log("[ATTACK] Không thả được lính vì thiếu vùng polygon. End battle.")
             self._tap_coord("end_battle")
             self._sleep(1)
             self._tap_coord("end_battle_okay")
@@ -359,33 +378,46 @@ class FarmBot:
 
     def _scan_runtime_slots(self) -> None:
         self.runtime_slots = {}
+        manual_enabled = self._manual_army_enabled()
+
         slot_detection = self.config.get("slot_detection", {})
         if not slot_detection.get("enabled", False):
+            if manual_enabled:
+                self.log("[SLOT] Slot detection tắt, dùng số nhập tay + tọa độ slot cũ.")
             return
 
         detector = self.slot_detector
         active_kinds = self._active_slot_detection_kinds(detector.kinds)
         if not active_kinds:
-            self.log("[SLOT] Combo hien tai khong co kind slot nao can detect.")
+            self.log("[SLOT] Combo hiện tại không có kind slot nào cần detect.")
             return
         if not detector.has_templates(active_kinds):
-            self.log(f"[SLOT] Chua co mau icon cho combo {self.active_combo}: {', '.join(active_kinds)}.")
+            self.log(f"[SLOT] Chưa có mẫu icon cho combo {self.active_combo}: {', '.join(active_kinds)}.")
             return
 
         try:
             png = self.adb.screencap_png()
         except ADBError as exc:
-            self.log(f"[SLOT] Khong chup duoc thanh quan de nhan dien: {exc}")
+            self.log(f"[SLOT] Không chụp được thanh quân để nhận diện: {exc}")
             return
 
         self.log(f"[SLOT] Detect theo combo {self.active_combo}: {', '.join(active_kinds)}.")
         detections = detector.detect(png, active_kinds)
+        manual_remaining = dict(self.manual_slot_counts)
         for detection in detections:
-            detection.count = self.vision.read_slot_count(png, detection.center, detection.kind)
+            if manual_enabled:
+                detection.count = self._manual_detection_count(detection.kind, manual_remaining)
+                if detection.count <= 0:
+                    continue
+            else:
+                detection.count = self.vision.read_slot_count(png, detection.center, detection.kind)
             self.runtime_slots.setdefault(detection.kind, []).append(detection.as_dict())
 
         if not self.runtime_slots:
-            self.log("[SLOT] Khong nhan dien duoc slot nao, dung toa do slot cu.")
+            if manual_enabled:
+                self.log("[SLOT] Không nhận diện được slot nào, dùng số nhập tay + tọa độ slot cũ.")
+            else:
+                self.log("[SLOT] Không nhận diện được slot nào, dùng tọa độ slot cũ.")
             return
 
         details: list[str] = []
@@ -417,10 +449,38 @@ class FarmBot:
                 add(str(slot))
         return wanted
 
+    def _manual_army_enabled(self) -> bool:
+        return bool(self.config.get("manual_army", {}).get("enabled", False))
+
+    def _manual_army_counts(self) -> dict[str, int]:
+        if not self._manual_army_enabled():
+            return {}
+        raw_counts = self.config.get("manual_army", {}).get("counts", {})
+        counts: dict[str, int] = {}
+        if isinstance(raw_counts, dict):
+            for kind, value in raw_counts.items():
+                try:
+                    counts[str(kind)] = max(0, int(value))
+                except (TypeError, ValueError):
+                    counts[str(kind)] = 0
+        details = " | ".join(f"{kind}={count}" for kind, count in counts.items() if count > 0)
+        self.log(f"[ARMY] Dùng số quân nhập tay: {details or 'empty'}.")
+        return counts
+
+    def _manual_detection_count(self, kind: str, remaining: dict[str, int]) -> int:
+        count = max(0, int(remaining.get(kind, 0)))
+        if count <= 0:
+            return 0
+        if kind == "hero":
+            remaining[kind] = count - 1
+            return 1
+        remaining[kind] = 0
+        return count
+
     def _deploy_troops(self) -> bool:
         points = self._deploy_points()
         if not points:
-            self.log("[ATTACK] Chua co vung tha linh hop le, skip tha linh.")
+            self.log("[ATTACK] Chưa có vùng thả lính hợp lệ, skip thả lính.")
             return False
         slot_counts = self._read_deploy_slot_counts()
         deployed_any = False
@@ -451,6 +511,12 @@ class FarmBot:
         return deployed_any
 
     def _read_deploy_slot_counts(self) -> dict[str, int]:
+        if self._manual_army_enabled():
+            counts = dict(self.manual_slot_counts)
+            details = " | ".join(f"{slot}={count}" for slot, count in counts.items() if count > 0)
+            self.log(f"[ATTACK] Manual slot counts: {details or 'empty'}.")
+            return counts
+
         counts: dict[str, int] = {}
         detected_kinds: set[str] = set()
 
@@ -521,7 +587,7 @@ class FarmBot:
             max_casts = int(spell.get("max_casts", 0))
             points = self._spell_zone_points(spell, max_casts)
             if not points:
-                self.log(f"[SPELL] Skip {spell_name}, chua co vung tha spell.")
+                self.log(f"[SPELL] Skip {spell_name}, chưa có vùng thả spell.")
                 continue
             slot = spell["slot"]
             self.log(f"[SPELL] Cast {spell_name} ({slot}) in zone.")
@@ -550,7 +616,7 @@ class FarmBot:
             max_casts = self._tap_limit(group.get("max_casts", 0), 0)
             points = self._spell_zone_points(group, max_casts)
             if not points:
-                self.log(f"[SPELL] Skip group {group.get('name', 'spell')}, chua co vung tha spell.")
+                self.log(f"[SPELL] Skip group {group.get('name', 'spell')}, chưa có vùng thả spell.")
                 continue
             delay_between = float(group.get("delay_between_casts", 0.18))
             self.log(f"[SPELL] Group {group.get('name', 'spell')} max {max_casts}.")
@@ -581,8 +647,7 @@ class FarmBot:
             return
 
         activations = [
-            ("hero", "hero_skill_min_ms", "hero_skill_max_ms", "Skill tuong"),
-            ("siege", "siege_activation_min_ms", "siege_activation_max_ms", "Quan giao"),
+            ("hero", "hero_skill_min_ms", "hero_skill_max_ms", "Skill tướng"),
         ]
         scheduled: list[tuple[float, str, str]] = []
         for slot, min_key, max_key, label in activations:
@@ -623,9 +688,12 @@ class FarmBot:
         )
         max_seconds = min(int(surrender["max_battle_seconds"]), 175)
         best_damage = -1
+        last_damage = -1
+        last_damage_changed_at = time.time()
         pending_damage: dict[str, int] = {"value": -1, "reads": 0}
         max_jump = int(surrender.get("damage_jump_confirm_percent", 40))
         max_pending_reads = int(surrender.get("damage_jump_max_pending_reads", 3))
+        damage_stall_seconds = max(0, int(surrender.get("damage_stall_seconds", 20)))
 
         self.log(f"[BATTLE] Monitor. time={target_time}s, damage={target_damage}%.")
         while not self.stop_event.is_set():
@@ -642,6 +710,9 @@ class FarmBot:
             )
             damage = best_damage
             loot = self.vision.read_loot(png) if self.vision.available else {}
+            if damage >= 0 and damage != last_damage:
+                last_damage = damage
+                last_damage_changed_at = time.time()
 
             surrender_reason = self._surrender_reason(
                 elapsed,
@@ -652,6 +723,18 @@ class FarmBot:
             )
             if not surrender["never_surrender"] and surrender_reason:
                 self.log(f"[BATTLE] Surrender condition matched: {surrender_reason}.")
+                self._tap_coord("end_battle")
+                self._sleep(1)
+                self._tap_coord("end_battle_okay")
+                return
+
+            if (
+                not surrender["never_surrender"]
+                and damage_stall_seconds > 0
+                and damage >= 0
+                and time.time() - last_damage_changed_at >= damage_stall_seconds
+            ):
+                self.log(f"[BATTLE] Damage đứng ở {damage}% quá {damage_stall_seconds}s. End battle.")
                 self._tap_coord("end_battle")
                 self._sleep(1)
                 self._tap_coord("end_battle_okay")
@@ -710,10 +793,32 @@ class FarmBot:
         self._sleep(6)
         if self.stop_event.is_set():
             return
+        self._record_result_loot()
         self.log("[RESULT] Tap Return Home.")
         self._tap_coord("return_home")
         self._sleep(self.config["timing"]["after_return_home"])
         self._next_battle_random_delay()
+
+    def _record_result_loot(self) -> None:
+        if not self.vision.available:
+            return
+        try:
+            png = self.adb.screencap_png()
+        except ADBError as exc:
+            self.log(f"[RESULT] Không chụp được màn hình kết quả để thống kê: {exc}")
+            return
+        loot = self.vision.read_result_loot(png)
+        gold = int(loot.get("gold", -1))
+        elixir = int(loot.get("elixir", -1))
+        if gold < 0 and elixir < 0:
+            self.log("[RESULT] Không đọc được vàng/dầu trên màn hình kết quả.")
+            return
+        self.stats["gold_seen"] += max(gold, 0)
+        self.stats["elixir_seen"] += max(elixir, 0)
+        self._publish_stats()
+        gold_label = "?" if gold < 0 else f"{gold:,}"
+        elixir_label = "?" if elixir < 0 else f"{elixir:,}"
+        self.log(f"[RESULT] Loot thực nhận: gold={gold_label} | elixir={elixir_label}.")
 
     def _read_loot(self) -> dict[str, int]:
         return self._read_loot_frame()[1]
@@ -839,7 +944,7 @@ class FarmBot:
             return chosen
         if edge == "auto":
             fallback = self.active_deploy.get("auto_edge_fallback", "top")
-            self.log(f"[EDGE] Auto edge chua bat vision kho, fallback {fallback}.")
+            self.log(f"[EDGE] Auto edge chưa bật vision kho, fallback {fallback}.")
             return fallback
         if edge in valid_edges:
             return edge
@@ -860,7 +965,7 @@ class FarmBot:
             return chosen
         if configured == "auto":
             fallback = valid_views[0]
-            self.log(f"[VIEW] Auto view chua bat vision, fallback {fallback}.")
+            self.log(f"[VIEW] Auto view chưa bật vision, fallback {fallback}.")
             return fallback
         if configured in valid_views:
             self.log(f"[VIEW] Selected view: {configured}.")
@@ -913,6 +1018,8 @@ class FarmBot:
             return True
         if slot in self.runtime_slots:
             return False
+        if self._manual_army_enabled():
+            return self.manual_slot_counts.get(slot, 0) > 0
 
         coords = self.config["coords"]["slots"].get(slot)
         if not coords:
@@ -938,11 +1045,12 @@ class FarmBot:
 
     def _consume_runtime_slot(self, kind: str) -> None:
         item = self._runtime_slot(kind)
-        if not item:
-            return
-        count = int(item.get("count", -1))
-        if count > 0:
-            item["count"] = count - 1
+        if item:
+            count = int(item.get("count", -1))
+            if count > 0:
+                item["count"] = count - 1
+        if self._manual_army_enabled() and self.manual_slot_counts.get(kind, 0) > 0:
+            self.manual_slot_counts[kind] -= 1
 
     def _sequence_uses_slot(self, slot: str) -> bool:
         for step in self.active_deploy.get("sequence", []):
@@ -1032,7 +1140,7 @@ class FarmBot:
         if pause_started_at > 0 and self.auto_stop_at > 0:
             paused_seconds = time.time() - pause_started_at
             self.auto_stop_at += paused_seconds
-            self.log(f"[SCHEDULE] Pause {int(paused_seconds)}s, auto-stop duoc doi lai.")
+            self.log(f"[SCHEDULE] Pause {int(paused_seconds)}s, auto-stop được dời lại.")
 
     def _load_total_stats(self) -> dict[str, int]:
         try:
@@ -1067,7 +1175,7 @@ class FarmBot:
             with self.stats_path.open("w", encoding="utf-8") as file:
                 json.dump(payload, file, ensure_ascii=True, indent=2)
         except OSError as exc:
-            self.log(f"[WARN] Khong ghi duoc stats.json: {exc}")
+            self.log(f"[WARN] Không ghi được stats.json: {exc}")
 
     def _dump_debug_png(self, reason: str, png: bytes) -> None:
         if not png:
@@ -1080,7 +1188,7 @@ class FarmBot:
             path.write_bytes(png)
             self.log(f"[DEBUG] Saved screencap: {path}")
         except OSError as exc:
-            self.log(f"[WARN] Khong ghi duoc debug screencap: {exc}")
+            self.log(f"[WARN] Không ghi được debug screencap: {exc}")
 
     def _safe_name(self, value: str) -> str:
         return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in value)

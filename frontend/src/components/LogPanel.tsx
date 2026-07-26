@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { LogEntry } from "../services/types";
 import { Button } from "./Button";
 
@@ -7,6 +8,16 @@ type Props = {
 };
 
 export function LogPanel({ logs, onClear }: Props) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) {
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+  }, [logs.length]);
+
   return (
     <div className="rounded-xl border border-white/10 bg-black/35">
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
@@ -18,7 +29,7 @@ export function LogPanel({ logs, onClear }: Props) {
           Xóa
         </Button>
       </div>
-      <div className="h-[360px] overflow-auto p-4 font-mono text-xs leading-6 text-slate-200">
+      <div ref={scrollRef} className="h-[360px] overflow-auto p-4 font-mono text-xs leading-6 text-slate-200">
         {logs.length === 0 ? (
           <p className="text-slate-500">Chưa có log.</p>
         ) : (

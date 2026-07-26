@@ -42,8 +42,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "dragon": 16,
             "balloon": 40,
             "valkyrie": 60,
-            "siege": 1,
-            "titan": 4,
             "rage": 5,
             "freeze": 11,
         },
@@ -51,6 +49,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "rage": {"7": 4},
         },
         "strict": False,
+    },
+    "manual_army": {
+        "enabled": False,
+        "counts": {
+            "dragon": 0,
+            "balloon": 0,
+            "valkyrie": 0,
+            "hero": 0,
+            "rage": 0,
+            "freeze": 0,
+        },
     },
     "game": {
         "resolution": [1600, 900],
@@ -69,6 +78,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_home_restart_failures": 3,
         "restart_wait_seconds": 18,
         "max_consecutive_cycle_errors": 8,
+        "home_zoom_out_keyevents": 3,
+        "ldplayer_index": 0,
     },
     "farm": {
         "village": "main",
@@ -98,6 +109,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_battle_seconds": 175,
         "damage_jump_confirm_percent": 40,
         "damage_jump_max_pending_reads": 3,
+        "damage_stall_seconds": 20,
     },
     "ocr": {
         "enabled": True,
@@ -108,6 +120,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "loot_gold": [78, 123, 145, 40],
             "loot_elixir": [78, 169, 145, 40],
             "loot_dark": [80, 220, 154, 35],
+            "result_loot_panel": [612, 370, 212, 124],
+            "result_gold": [612, 388, 210, 40],
+            "result_elixir": [612, 430, 210, 40],
             "damage_percent": [1495, 645, 89, 51],
             "next_button": [1325, 575, 250, 130],
             "damage_panel": [1320, 615, 260, 120],
@@ -126,8 +141,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "dragon": [172, 815],
             "balloon": [295, 815],
             "valkyrie": [414, 815],
-            "titan": [414, 815],
-            "siege": [556, 815],
             "hero": [676, 815],
             "rage": [815, 815],
             "freeze": [932, 815],
@@ -245,10 +258,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "strict_slot_counts": True,
         "slot_check_every": 8,
         "sequence": [
-            {"slot": "siege", "count": 1, "delay": 0.18},
             {"slot": "dragon", "count": "all", "max_taps": 16, "delay": 0.08},
             {"slot": "balloon", "count": "all", "max_taps": 24, "delay": 0.07},
-            {"slot": "titan", "count": "all", "max_taps": 4, "delay": 0.10},
             {"slot": "hero", "count": "all", "max_taps": 5, "delay": 0.12},
         ],
         "spells": [
@@ -285,7 +296,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         ],
         "spell_groups": [
             {
-                "name": "No/Bang linh hoat",
+                "name": "Nộ/Băng linh hoạt",
                 "enabled": True,
                 "slots": ["rage", "freeze"],
                 "max_casts": 6,
@@ -322,8 +333,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "freeze_random_max_ms": 250,
         "rage_random_min_ms": 500,
         "rage_random_max_ms": 1200,
-        "siege_activation_min_ms": 5000,
-        "siege_activation_max_ms": 7000,
         "hero_skill_min_ms": 2000,
         "hero_skill_max_ms": 4000,
         "next_battle_min_ms": 2000,
@@ -367,10 +376,8 @@ def migrate_fast_attack_delays(config: dict[str, Any]) -> None:
             deploy["slot_check_every"] = 8
 
         sequence_delays = {
-            "siege": (0.35, 0.18),
             "dragon": (0.18, 0.08),
             "balloon": (0.16, 0.07),
-            "titan": (0.25, 0.10),
             "hero": (0.25, 0.12),
         }
         for step in deploy.get("sequence", []):

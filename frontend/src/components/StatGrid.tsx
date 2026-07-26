@@ -3,8 +3,8 @@ import type { StatsPayload } from "../services/types";
 const labels: Record<string, string> = {
   attacks: "Trận",
   next: "Next",
-  gold_seen: "Vàng",
-  elixir_seen: "Dầu",
+  gold_seen: "Vàng thực nhận",
+  elixir_seen: "Dầu thực nhận",
   dark_seen: "Dầu đen",
 };
 

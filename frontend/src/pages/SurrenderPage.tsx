@@ -41,6 +41,7 @@ export function SurrenderPage() {
         <TextInput label="Thời gian tối thiểu (giây)" value={String(surrender.time_min_seconds)} onChange={(event) => updatePath(["surrender", "time_min_seconds"], numberValue(event.target.value))} />
         <TextInput label="Thời gian tối đa (giây)" value={String(surrender.time_max_seconds)} onChange={(event) => updatePath(["surrender", "time_max_seconds"], numberValue(event.target.value))} />
         <TextInput label="Thời lượng trận tối đa (giây)" value={String(surrender.max_battle_seconds)} onChange={(event) => updatePath(["surrender", "max_battle_seconds"], numberValue(event.target.value))} />
+        <TextInput label="Damage đứng yên quá (giây)" value={String(surrender.damage_stall_seconds ?? 20)} onChange={(event) => updatePath(["surrender", "damage_stall_seconds"], numberValue(event.target.value))} />
         <TextInput label="% phá hủy tối thiểu" value={String(surrender.destruction_min_percent)} onChange={(event) => updatePath(["surrender", "destruction_min_percent"], numberValue(event.target.value))} />
         <TextInput label="% phá hủy tối đa" value={String(surrender.destruction_max_percent)} onChange={(event) => updatePath(["surrender", "destruction_max_percent"], numberValue(event.target.value))} />
         <TextInput label="Xác nhận nhảy damage bất thường (%)" value={String(surrender.damage_jump_confirm_percent)} onChange={(event) => updatePath(["surrender", "damage_jump_confirm_percent"], numberValue(event.target.value))} />
