@@ -27,7 +27,9 @@ const navGroups = [
 ];
 
 export function AppShell({ status }: { status: BotStatus | null }) {
-  const { isDirty } = useConfigEditor();
+  const { config, isDirty } = useConfigEditor();
+  const resolution = config?.game?.resolution ?? [1600, 900];
+  const resolutionLabel = Array.isArray(resolution) && resolution.length >= 2 ? `${resolution[0]}x${resolution[1]}` : "1600x900";
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.14),_transparent_32%),linear-gradient(145deg,#090b10,#111827_55%,#0f131b)] text-slate-100">
@@ -37,7 +39,7 @@ export function AppShell({ status }: { status: BotStatus | null }) {
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-cobalt">COC Control</p>
               <h1 className="mt-2 text-2xl font-black text-white">Auto Farm</h1>
-              <p className="mt-2 text-sm text-slate-400">LDPlayer 1600x900 qua ADB</p>
+              <p className="mt-2 text-sm text-slate-400">LDPlayer {resolutionLabel} qua ADB</p>
             </div>
             <StatusBadge status={status} />
           </div>

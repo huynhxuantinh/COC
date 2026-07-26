@@ -298,6 +298,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "freeze_random_max_ms": 250,
         "rage_random_min_ms": 500,
         "rage_random_max_ms": 1200,
+        "spell_min_point_distance_px": 120,
         "hero_skill_min_ms": 2000,
         "hero_skill_max_ms": 4000,
         "next_battle_min_ms": 2000,

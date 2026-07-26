@@ -589,12 +589,17 @@ class FarmBot:
                 continue
             delay_between = float(group.get("delay_between_casts", 0.18))
             self.log(f"[SPELL] Group {group.get('name', 'spell')} max {max_casts}.")
-            for i in range(max_casts):
+            if len(points) < max_casts:
+                self.log(
+                    f"[SPELL] Chỉ tạo được {len(points)}/{max_casts} điểm đủ khoảng cách, "
+                    "giảm khoảng cách hoặc mở rộng vùng nếu muốn cast nhiều hơn."
+                )
+            for i, point in enumerate(points[:max_casts]):
                 slot = self._first_available_slot(slots)
                 if not slot:
                     self.log(f"[SPELL] No available slot in {slots}, skip group.")
                     break
-                x, y = points[i % len(points)]
+                x, y = point
                 self.log(f"[SPELL] Cast {slot} at {int(x)},{int(y)}.")
                 self._tap_slot(slot)
                 self._spell_random_delay(slot)
@@ -609,7 +614,8 @@ class FarmBot:
         zone = zones.get(view, []) if isinstance(zones, dict) else []
         if len(zone) < 3:
             return []
-        return self._random_points_in_polygon(zone, max(1, int(count)))
+        min_distance = int(self._attack_timing().get("spell_min_point_distance_px", 0))
+        return self._random_points_in_polygon(zone, max(1, int(count)), min_distance_px=min_distance)
 
     def _activate_post_deploy_slots(self, deploy_finished: float) -> None:
         if not self._custom_attack_timing_enabled():
@@ -870,7 +876,12 @@ class FarmBot:
         normalized = [[int(point[0]), int(point[1])] for point in points if isinstance(point, list) and len(point) >= 2]
         return normalized if len(normalized) >= 3 else []
 
-    def _random_points_in_polygon(self, polygon: list[list[int]], count: int) -> list[list[int]]:
+    def _random_points_in_polygon(
+        self,
+        polygon: list[list[int]],
+        count: int,
+        min_distance_px: int = 0,
+    ) -> list[list[int]]:
         normalized = [[int(point[0]), int(point[1])] for point in polygon if len(point) >= 2]
         if len(normalized) < 3:
             return normalized
@@ -882,12 +893,26 @@ class FarmBot:
         points: list[list[int]] = []
         attempts = 0
         target_count = max(1, int(count))
-        while len(points) < target_count and attempts < target_count * 80:
+        min_distance = max(0, int(min_distance_px))
+        max_attempts = target_count * (180 if min_distance > 0 else 80)
+        while len(points) < target_count and attempts < max_attempts:
             attempts += 1
             candidate = [random.randint(min_x, max_x), random.randint(min_y, max_y)]
-            if self._point_in_polygon(candidate, normalized):
+            if self._point_in_polygon(candidate, normalized) and self._point_far_enough(candidate, points, min_distance):
                 points.append(candidate)
         return points or normalized
+
+    def _point_far_enough(self, point: list[int], points: list[list[int]], min_distance_px: int) -> bool:
+        if min_distance_px <= 0:
+            return True
+        min_distance_sq = min_distance_px * min_distance_px
+        x, y = point
+        for other_x, other_y in points:
+            dx = x - other_x
+            dy = y - other_y
+            if dx * dx + dy * dy < min_distance_sq:
+                return False
+        return True
 
     def _point_in_polygon(self, point: list[int], polygon: list[list[int]]) -> bool:
         x, y = point

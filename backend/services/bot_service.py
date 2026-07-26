@@ -392,6 +392,10 @@ class BotService:
         manual_army = config.get("manual_army", {})
         if int(game.get("periodic_restart_min_seconds", 0)) > int(game.get("periodic_restart_max_seconds", 0)):
             raise ValueError("Thời gian restart tối thiểu phải <= tối đa.")
+        if int(game.get("home_zoom_out_keyevents", 0)) < 0:
+            raise ValueError("Zoom out ở làng chính phải >= 0.")
+        if int(game.get("ldplayer_index", 0)) < 0:
+            raise ValueError("LDPlayer index phải >= 0.")
         if int(farm.get("max_next", 0)) < 1:
             raise ValueError("Max Next phải >= 1.")
         if int(surrender.get("time_min_seconds", 0)) > int(surrender.get("time_max_seconds", 0)):
@@ -407,6 +411,8 @@ class BotService:
         for min_key, max_key, label in timing_ranges:
             if int(attack_timing.get(min_key, 0)) > int(attack_timing.get(max_key, 0)):
                 raise ValueError(f"{label}: gia tri tu phai <= den.")
+        if int(attack_timing.get("spell_min_point_distance_px", 0)) < 0:
+            raise ValueError("Khoảng cách tối thiểu giữa 2 điểm thuốc phải >= 0.")
         counts = manual_army.get("counts", {})
         if isinstance(counts, dict):
             for kind, value in counts.items():

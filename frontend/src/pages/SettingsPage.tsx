@@ -105,10 +105,38 @@ export function SettingsPage() {
             </div>
           </Card>
 
+          <Card title="Camera LDPlayer">
+            <div className="space-y-4">
+              <TextInput
+                label="Zoom out ở làng chính (lần)"
+                type="number"
+                min={0}
+                value={String(game.home_zoom_out_keyevents ?? 3)}
+                onChange={(event) => updatePath(["game", "home_zoom_out_keyevents"], numberValue(event.target.value))}
+              />
+              <TextInput
+                label="LDPlayer index"
+                type="number"
+                min={0}
+                value={String(game.ldplayer_index ?? 0)}
+                onChange={(event) => updatePath(["game", "ldplayer_index"], numberValue(event.target.value))}
+              />
+            </div>
+          </Card>
+
           <Card title="Tọa độ thuốc">
-            <Button className="w-full bg-violet-500 hover:bg-violet-400" onClick={() => navigate("/coordinates/spells?target=spell_group_zone_trenbenphai")}>
-              Mở tọa độ Nộ/Băng
-            </Button>
+            <div className="space-y-4">
+              <TextInput
+                label="Khoảng cách tối thiểu giữa 2 điểm thuốc (px)"
+                type="number"
+                min={0}
+                value={String(attackTiming.spell_min_point_distance_px ?? 120)}
+                onChange={(event) => updatePath(["attack_timing", "spell_min_point_distance_px"], numberValue(event.target.value))}
+              />
+              <Button className="w-full bg-violet-500 hover:bg-violet-400" onClick={() => navigate("/coordinates/spells?target=spell_group_zone_trenbenphai")}>
+                Mở tọa độ Nộ/Băng
+              </Button>
+            </div>
           </Card>
         </div>
       </div>

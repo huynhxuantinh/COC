@@ -151,7 +151,7 @@ export function DashboardPage({ status, refreshStatus }: Props) {
             title="Số quân thủ công"
             action={
               <Button variant="success" disabled={configSaving || configLoading || !config} onClick={save}>
-                {configSaving ? "Đang lưu..." : "Lưu"}
+                {configSaving ? "Đang lưu..." : "Lưu cấu hình"}
               </Button>
             }
           >
