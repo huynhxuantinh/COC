@@ -32,10 +32,16 @@
       "rage",
       "freeze"
     ],
+    "cluster_kinds": [
+      "hero"
+    ],
+    "cluster_padding": 430,
     "count_max_by_kind": {
       "dragon": 16,
       "balloon": 40,
       "valkyrie": 60,
+      "siege": 1,
+      "titan": 4,
       "rage": 5,
       "freeze": 11
     },
@@ -76,7 +82,7 @@
     "threshold_mode": "any",
     "gold_min": 800000,
     "elixir_min": 800000,
-    "dark_min": 0,
+    "dark_min": 6000,
     "total_min": 1500000,
     "max_next": 80,
     "search_delay_seconds": 3,
@@ -89,7 +95,7 @@
     "by_destruction": true,
     "destruction_min_percent": 50,
     "destruction_max_percent": 80,
-    "when_low_loot": true,
+    "when_low_loot": false,
     "total_remaining_less_than": 200000,
     "never_surrender": false,
     "max_battle_seconds": 175,
@@ -1287,20 +1293,20 @@
           ],
           "duoibenphai": [
             [
-              705,
-              374
+              435,
+              345
             ],
             [
-              791,
-              482
+              530,
+              216
             ],
             [
-              1176,
-              333
+              824,
+              395
             ],
             [
-              994,
-              232
+              692,
+              525
             ]
           ],
           "duoibentrai": [
@@ -1337,7 +1343,7 @@
     "sleep_jitter_min_seconds": 0.25
   },
   "attack_timing": {
-    "use_default": true,
+    "use_default": false,
     "troop_delay_ms": 30,
     "freeze_random_min_ms": 30,
     "freeze_random_max_ms": 250,
@@ -1351,7 +1357,7 @@
     "next_battle_max_ms": 5000,
     "adb_delay_seconds": 0.18,
     "hero_search_delay_seconds": 1.5,
-    "optimized_mode": true
+    "optimized_mode": false
   },
   "combos": {
     "Rồng Điện": {
@@ -2964,20 +2970,20 @@
               ],
               "duoibenphai": [
                 [
-                  705,
-                  374
+                  435,
+                  345
                 ],
                 [
-                  791,
-                  482
+                  530,
+                  216
                 ],
                 [
-                  1176,
-                  333
+                  824,
+                  395
                 ],
                 [
-                  994,
-                  232
+                  692,
+                  525
                 ]
               ],
               "duoibentrai": [

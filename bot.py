@@ -108,6 +108,8 @@ class FarmBot:
             self.log("[HOME] Attack button still missing. Skip this cycle.")
             return
 
+        self._zoom_out_home()
+
         self.log("[HOME] Tap Attack.")
         self._tap_coord("home_attack")
         self._sleep(self.config["timing"]["after_home_attack"])
@@ -144,6 +146,17 @@ class FarmBot:
         )
         self.stop_event.set()
         return False
+
+    def _zoom_out_home(self) -> None:
+        zoom_count = int(self.config.get("game", {}).get("home_zoom_out_keyevents", 0))
+        if zoom_count <= 0:
+            return
+        self.log(f"[HOME] Zoom out x{zoom_count}.")
+        for _ in range(zoom_count):
+            if self.stop_event.is_set():
+                return
+            self.adb.shell("input", "keyevent", "169", timeout=5)
+            self._sleep(0.2)
 
     def _select_active_combo(self) -> str:
         combos = self.config.get("combos", {})
@@ -510,12 +523,16 @@ class FarmBot:
             if not points:
                 self.log(f"[SPELL] Skip {spell_name}, chua co vung tha spell.")
                 continue
-            self.log(f"[SPELL] Cast {spell_name} ({spell['slot']}) in zone.")
-            self._tap_slot(spell["slot"])
+            slot = spell["slot"]
+            self.log(f"[SPELL] Cast {spell_name} ({slot}) in zone.")
             for x, y in points:
+                if not self._slot_available(slot):
+                    self.log(f"[SPELL] Slot {slot} looks empty, stop {spell_name}.")
+                    break
+                self._tap_slot(slot)
                 self._spell_random_delay(spell["slot"])
                 self.adb.tap(int(x), int(y))
-                self._consume_runtime_slot(spell["slot"])
+                self._consume_runtime_slot(slot)
                 self._optimized_action_pause()
                 self._sleep(0.18)
 

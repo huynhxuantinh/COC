@@ -36,10 +36,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "bar_region": [80, 720, 1220, 180],
         "template_size": [76, 76],
         "kinds": ["dragon", "balloon", "valkyrie", "hero", "rage", "freeze"],
+        "cluster_kinds": ["hero"],
+        "cluster_padding": 430,
         "count_max_by_kind": {
             "dragon": 16,
             "balloon": 40,
             "valkyrie": 60,
+            "siege": 1,
+            "titan": 4,
             "rage": 5,
             "freeze": 11,
         },
@@ -312,7 +316,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "sleep_jitter_min_seconds": 0.25,
     },
     "attack_timing": {
-        "use_default": True,
+        "use_default": False,
         "troop_delay_ms": 80,
         "freeze_random_min_ms": 0,
         "freeze_random_max_ms": 250,

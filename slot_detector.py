@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -84,6 +85,28 @@ class SlotDetector:
                 self._template_cache[key] = cached
         return cached
 
+    def _match_one(self, gray_search: Any, offset_x: int, offset_y: int, template_path: Path, kind: str) -> list[SlotDetection]:
+        import cv2
+        import numpy as np
+
+        template = self._load_template(template_path)
+        if template is None:
+            return []
+        if template.shape[0] > gray_search.shape[0] or template.shape[1] > gray_search.shape[1]:
+            return []
+
+        result = cv2.matchTemplate(gray_search, template, cv2.TM_CCOEFF_NORMED)
+        locations = np.where(result >= self.threshold)
+        detections: list[SlotDetection] = []
+        for top, left in zip(locations[0], locations[1]):
+            score = float(result[top, left])
+            center = [
+                int(offset_x + left + template.shape[1] / 2),
+                int(offset_y + top + template.shape[0] / 2),
+            ]
+            detections.append(SlotDetection(kind=kind, center=center, score=score, template=template_path.name))
+        return detections
+
     def save_template_from_base64(
         self,
         kind: str,
@@ -151,19 +174,22 @@ class SlotDetector:
         gray_search = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
         detections: list[SlotDetection] = []
         active_kinds = [kind for kind in (kinds or self.kinds) if kind in self.kinds]
-        for kind in active_kinds:
-            for template_path in self.templates_for(kind):
-                template = self._load_template(template_path)
-                if template is None:
-                    continue
-                if template.shape[0] > gray_search.shape[0] or template.shape[1] > gray_search.shape[1]:
-                    continue
-                result = cv2.matchTemplate(gray_search, template, cv2.TM_CCOEFF_NORMED)
-                locations = np.where(result >= self.threshold)
-                for top, left in zip(locations[0], locations[1]):
-                    score = float(result[top, left])
-                    center = [int(x + left + template.shape[1] / 2), int(y + top + template.shape[0] / 2)]
-                    detections.append(SlotDetection(kind=kind, center=center, score=score, template=template_path.name))
+        jobs = [
+            (kind, template_path)
+            for kind in active_kinds
+            for template_path in self.templates_for(kind)
+        ]
+        if not jobs:
+            return []
+
+        max_workers = min(8, len(jobs))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = executor.map(
+                lambda job: self._match_one(gray_search, x, y, job[1], job[0]),
+                jobs,
+            )
+        for result in results:
+            detections.extend(result)
 
         detections.sort(key=lambda item: item.score, reverse=True)
         return self._dedupe(detections)
@@ -173,6 +199,8 @@ class SlotDetector:
         for detection in detections:
             duplicate = False
             for current in kept:
+                if current.kind != detection.kind:
+                    continue
                 dx = detection.center[0] - current.center[0]
                 dy = detection.center[1] - current.center[1]
                 if dx * dx + dy * dy <= 48 * 48:
