@@ -669,6 +669,8 @@ class FarmBot:
         max_jump = int(surrender.get("damage_jump_confirm_percent", 40))
         max_pending_reads = int(surrender.get("damage_jump_max_pending_reads", 3))
         damage_stall_seconds = max(0, int(surrender.get("damage_stall_seconds", 20)))
+        damage_unknown_restart_seconds = max(0, int(surrender.get("damage_unknown_restart_seconds", 20)))
+        damage_unknown_started_at: float | None = None
 
         self.log(f"[BATTLE] Monitor. time={target_time}s, damage={target_damage}%.")
         while not self.stop_event.is_set():
@@ -676,6 +678,19 @@ class FarmBot:
             elapsed = int(time.time() - attack_start)
             png = self.adb.screencap_png()
             raw_damage = self.vision.read_damage_percent(png)
+            if raw_damage < 0:
+                if damage_unknown_started_at is None:
+                    damage_unknown_started_at = time.time()
+                unknown_seconds = int(time.time() - damage_unknown_started_at)
+                if damage_unknown_restart_seconds > 0 and unknown_seconds >= damage_unknown_restart_seconds:
+                    self._dump_debug_png("damage_ocr_unknown_restart", png)
+                    self.log(
+                        f"[BATTLE] Damage OCR '?' quá {unknown_seconds}s. Restart game."
+                    )
+                    self._restart_game_from_search()
+                    return
+            else:
+                damage_unknown_started_at = None
             best_damage, pending_damage = self._filter_damage_reading(
                 raw_damage,
                 best_damage,

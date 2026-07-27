@@ -88,8 +88,10 @@ export function ConfigEditorProvider({ children }: { children: ReactNode }) {
     setSaving(true);
     try {
       const saved = await saveConfig(config);
+      const optionsPayload = await getOptions();
       setConfig(saved);
       setSavedSignature(configSignature(saved));
+      setOptions(optionsPayload);
       setSavedMessage("Đã lưu cấu hình. Cần quét ADB lại trước khi chạy.");
     } catch (err) {
       setError(apiErrorMessage(err));

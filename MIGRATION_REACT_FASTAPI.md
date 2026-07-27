@@ -1,45 +1,121 @@
-# Tách Tkinter sang React + FastAPI
+# Ghi chú chuyển Tkinter sang React + FastAPI
 
-## Chức năng đọc từ Tkinter hiện tại
+## Mục tiêu
 
-| Nhóm chức năng | Chức năng hiện có | Hàm Tkinter/Python đang gọi |
-| --- | --- | --- |
-| Điều khiển bot | Quét ADB, tìm `adb.exe`, thử kết nối LDPlayer, chụp màn hình kiểm tra | `scan_adb`, `_scan_adb_worker`, `ADBClient.connect`, `screencap_png` |
-| Điều khiển bot | Bắt đầu bot sau khi đã quét ADB | `start_bot`, `FarmBot.run` |
-| Điều khiển bot | Tạm dừng / tiếp tục bot | `toggle_pause`, `pause_event` |
-| Điều khiển bot | Dừng bot | `stop_bot`, `stop_event` |
-| Thống kê | Hiển thị trận, next, vàng, dầu, dầu đen từ RAM/file | `_load_saved_stats`, `_load_multi_device_stats`, `_drain_stats` |
-| Logs | Hiển thị log realtime và xóa log | `_drain_logs`, `_log`, `clear_logs` |
-| Farm | Combo, cạnh đánh, chế độ thả, ngưỡng vàng/dầu/dầu đen/tổng, max next, OCR fail timeout | `_build_farm_tab`, `_sync_config_from_ui` |
-| Vận hành | Bỏ qua restart game, auto-stop, chờ lính, đổi combo, thống kê tài nguyên, restart nếu mất nút Attack | `_build_farm_tab`, `_sync_config_from_ui` |
-| Đầu hàng | Theo thời gian, % phá hủy, ít tài nguyên, không đầu hàng, ngưỡng còn lại | `_build_surrender_tab`, `_sync_config_from_ui` |
-| Cài đặt | ADB path, device, Tesseract path, Max Next | `open_settings_hint`, `_settings_row`, `_pick_file` |
+Tách giao diện khỏi logic Python cũ.
+
+- Tkinter cũ vẫn giữ ở root.
+- React + FastAPI là hướng phát triển chính.
+- Logic đánh vẫn dùng lại `FarmBot`, `ADBClient`, `Vision`, `SlotDetector`, `config_manager`.
+- Chưa đóng gói `.exe` ở giai đoạn này.
+
+## Kiến trúc mới
+
+```text
+frontend/
+  src/components/
+  src/pages/
+  src/services/
+  src/hooks/
+  src/styles/
+
+backend/
+  main.py
+  routers/
+  services/
+  models/
+```
+
+React gọi API qua service trong `frontend/src/services/`, component không gọi bot Python trực tiếp.
 
 ## Bảng đối chiếu chức năng
 
-| Chức năng Tkinter cũ | Màn React mới | API Python tương ứng |
+| Chức năng cũ | Màn React | API/backend |
 | --- | --- | --- |
 | Quét ADB | Tổng quan | `POST /api/bot/scan-adb` |
-| Bắt đầu bot | Tổng quan | `POST /api/bot/start` |
-| Tạm dừng / tiếp tục | Tổng quan | `POST /api/bot/pause-toggle` |
-| Dừng bot | Tổng quan | `POST /api/bot/stop` |
-| Hiển thị trạng thái bot | Sidebar + Tổng quan | `GET /api/bot/status` |
-| Hiển thị thống kê phiên | Tổng quan | `GET /api/stats` |
-| Hiển thị logs realtime | Tổng quan | `GET /api/logs?after=<id>` |
-| Xóa logs | Tổng quan | `DELETE /api/logs` |
-| Combo/cạnh đánh/chế độ thả/ngưỡng farm | Farm | `GET /api/config`, `PUT /api/config`, `GET /api/config/options` |
-| Cài đặt vận hành bot | Farm | `GET /api/config`, `PUT /api/config` |
-| Điều kiện đầu hàng | Đầu hàng | `GET /api/config`, `PUT /api/config` |
-| ADB/device/Tesseract/OCR/restart định kỳ | Cài đặt | `GET /api/config`, `PUT /api/config` |
+| Start bot | Tổng quan | `POST /api/bot/start` |
+| Pause/Resume | Tổng quan | `POST /api/bot/pause-toggle` |
+| Stop bot | Tổng quan | `POST /api/bot/stop` |
+| Status bot | Sidebar + Tổng quan | `GET /api/bot/status` |
+| Logs realtime | Tổng quan | `GET /api/logs` |
+| Xóa log | Tổng quan | `DELETE /api/logs` |
+| Stats | Tổng quan | `GET /api/stats` |
+| Số quân thủ công | Tổng quan | `GET/PUT /api/config` |
+| Ngưỡng farm | Farm | `GET/PUT /api/config` |
+| Chọn combo/góc đánh | Farm | `GET/PUT /api/config` |
+| CRUD combo/lính | Combo | `GET/PUT /api/config` |
+| Nhận diện slot | Nhận diện slot | API slot/template trong backend |
+| Tọa độ lính | Tọa độ lính | API tọa độ trong backend |
+| Tọa độ thuốc | Tọa độ thuốc | API tọa độ trong backend |
+| Điều kiện đầu hàng | Đầu hàng | `GET/PUT /api/config` |
+| ADB/OCR/restart | Cài đặt | `GET/PUT /api/config` |
 
-## Kiểm tra sau từng màn
+## Các màn React hiện có
 
-| Màn | Giao diện | Sự kiện | Dữ liệu vào/ra | Lỗi | API thật |
-| --- | --- | --- | --- | --- | --- |
-| Tổng quan | Card điều khiển, stats, logs responsive | Scan/Start/Pause/Stop/Clear | Status, stats, logs | Hiển thị lỗi backend/ADB | Có |
-| Farm | Form combo, cạnh đánh, ngưỡng, công tắc vận hành | Lưu cấu hình | `game`, `farm` trong config | Validate từ backend | Có |
-| Đầu hàng | Form luật kết thúc trận | Lưu cấu hình | `surrender` trong config | Validate từ backend | Có |
-| Cài đặt | Form ADB/OCR/restart | Lưu cấu hình | `adb`, `ocr`, `game` | Validate từ backend | Có |
+### Tổng quan
+
+- Scan ADB.
+- Start/Pause/Resume/Stop.
+- Số quân thủ công.
+- Stats.
+- Logs.
+
+### Farm
+
+- Combo.
+- Góc đánh.
+- Ngưỡng vàng/dầu/tổng.
+- Max next.
+- Cơ chế tự phục hồi.
+
+### Combo
+
+- Tạo/sửa/copy/xóa combo.
+- Thêm/sửa/xóa lính.
+- Sắp xếp quân trong combo.
+- Giữ tọa độ lính/thuốc ở trang riêng.
+
+### Nhận diện slot
+
+- Chụp ADB.
+- Crop/lưu template icon.
+- Test nhận diện.
+
+### Tọa độ lính
+
+- Lưu vùng polygon thả lính theo combo và 4 góc nhìn.
+
+### Tọa độ thuốc
+
+- Lưu vùng polygon thả thuốc theo combo và 4 góc nhìn.
+
+### Đầu hàng
+
+- Điều kiện dừng trận.
+- Damage stall.
+- Damage unknown restart.
+
+### Cài đặt
+
+- ADB.
+- Device.
+- OCR/Tesseract.
+- Restart.
+- Zoom home.
+- LDPlayer index.
+- Timing.
+
+## Dữ liệu
+
+Không dùng SQL/PostgreSQL.
+
+```text
+config.json
+stats/
+debug/
+img/
+img/slots/
+```
 
 ## Chạy local
 
@@ -47,7 +123,7 @@ Backend:
 
 ```powershell
 python -m pip install -r requirements.txt
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Frontend:
@@ -58,22 +134,29 @@ npm install
 npm run dev
 ```
 
-Frontend mặc định gọi `http://127.0.0.1:8000`. Nếu cần đổi API:
+Frontend mặc định gọi:
+
+```text
+http://127.0.0.1:8000
+```
+
+Nếu cần đổi API:
 
 ```powershell
 $env:VITE_API_BASE_URL="http://127.0.0.1:8000"
 npm run dev
 ```
 
-Nếu frontend chạy cổng/domain khác, cấu hình CORS cho backend:
+Nếu frontend chạy port khác, cấu hình CORS:
 
 ```powershell
-$env:COC_CORS_ORIGINS="http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:3000"
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+$env:COC_CORS_ORIGINS="http://127.0.0.1:5173,http://localhost:5173"
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ## Ghi chú
 
-- Code Tkinter cũ ở gốc vẫn giữ nguyên.
-- Logic đánh vẫn dùng `FarmBot`, `ADBClient`, `Vision`, `config_manager`; FastAPI chỉ bọc thành API.
-- Trình duyệt không thể mở native file picker để lấy đường dẫn `.exe` giống Tkinter một cách đáng tin cậy, nên màn Cài đặt dùng ô nhập/paste path. Khi đóng gói Electron/Tauri có thể thêm file picker native.
+- Không xóa code Tkinter cũ.
+- Không rewrite thuật toán đánh trong giai đoạn chuyển UI.
+- Các tính năng mới nên ưu tiên đi qua FastAPI + React.
+- Khi ổn định mới tính Electron/Tauri để đóng gói `.exe`.

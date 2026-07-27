@@ -402,6 +402,8 @@ class BotService:
             raise ValueError("Thời gian đầu hàng tối thiểu phải <= tối đa.")
         if int(surrender.get("destruction_min_percent", 0)) > int(surrender.get("destruction_max_percent", 0)):
             raise ValueError("% phá hủy tối thiểu phải <= tối đa.")
+        if int(surrender.get("damage_unknown_restart_seconds", 0)) < 0:
+            raise ValueError("Thời gian restart khi damage không đọc được phải >= 0.")
         timing_ranges = [
             ("freeze_random_min_ms", "freeze_random_max_ms", "Thả băng"),
             ("rage_random_min_ms", "rage_random_max_ms", "Thả nộ"),

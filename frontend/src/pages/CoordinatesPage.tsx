@@ -132,8 +132,10 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
     label: `${item.label} (${item.width}x${item.height})`,
     value: item.name,
   }));
+  const comboNames = Object.keys(config?.combos ?? {});
+  const comboSource = comboNames.length ? comboNames : options?.combos ?? [];
   const comboOptions = [
-    ...(options?.combos ?? []).map((name) => ({ label: `Combo: ${name}`, value: name })),
+    ...comboSource.map((name) => ({ label: `Combo: ${name}`, value: name })),
     { label: "Tất cả combo", value: "__all__" },
     { label: "Chỉ deploy mặc định", value: "__global__" },
   ];

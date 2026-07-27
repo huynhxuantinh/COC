@@ -109,6 +109,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "damage_jump_confirm_percent": 40,
         "damage_jump_max_pending_reads": 3,
         "damage_stall_seconds": 20,
+        "damage_unknown_restart_seconds": 20,
     },
     "ocr": {
         "enabled": True,

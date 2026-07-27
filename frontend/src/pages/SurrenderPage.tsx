@@ -59,6 +59,7 @@ export function SurrenderPage() {
               <TextInput label="% phá hủy tối thiểu" value={String(surrender.destruction_min_percent)} onChange={(event) => updatePath(["surrender", "destruction_min_percent"], numberValue(event.target.value))} />
               <TextInput label="% phá hủy tối đa" value={String(surrender.destruction_max_percent)} onChange={(event) => updatePath(["surrender", "destruction_max_percent"], numberValue(event.target.value))} />
               <TextInput label="Damage đứng yên quá (giây)" value={String(surrender.damage_stall_seconds ?? 20)} onChange={(event) => updatePath(["surrender", "damage_stall_seconds"], numberValue(event.target.value))} />
+              <TextInput label="Damage ? quá thì restart game (giây)" value={String(surrender.damage_unknown_restart_seconds ?? 20)} onChange={(event) => updatePath(["surrender", "damage_unknown_restart_seconds"], numberValue(event.target.value))} />
               <TextInput label="Xác nhận nhảy damage bất thường (%)" value={String(surrender.damage_jump_confirm_percent)} onChange={(event) => updatePath(["surrender", "damage_jump_confirm_percent"], numberValue(event.target.value))} />
             </div>
           </Card>

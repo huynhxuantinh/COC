@@ -1,84 +1,85 @@
 # COC Auto Farm LDPlayer
 
-Tool auto farm làng chính Clash of Clans qua LDPlayer + ADB. Dự án hiện có 2 giao diện:
+Tool auto farm làng chính Clash of Clans qua LDPlayer + ADB.
 
-- React + FastAPI: giao diện mới, nên dùng để phát triển tiếp.
-- Tkinter: giao diện Python cũ, vẫn giữ lại để dự phòng.
+Kiến trúc hiện tại:
+
+- Frontend: React + Vite + Tailwind CSS
+- Backend: Python FastAPI
+- Bot core: Python, ADB, OCR, OpenCV/template matching
+- UI cũ Tkinter vẫn giữ lại để dự phòng
 
 Độ phân giải mục tiêu: `1600x900`.
 
-## Tính năng chính
+## Chức năng chính
 
 - Quét và kết nối ADB.
-- Start / Tạm dừng / Tiếp tục / Stop bot.
-- Tìm trận theo ngưỡng tài nguyên.
-- Chọn combo, cạnh đánh, góc nhìn đánh.
-- Thả quân và spell theo cấu hình.
-- Theo dõi % phá hủy để đầu hàng theo điều kiện.
-- Tự restart game khi OCR lỗi lâu hoặc không thấy nút Attack.
-- Lưu stats theo phiên và theo device.
-- Dump ảnh debug khi lỗi OCR / nhận diện.
-- Tool lấy tọa độ thả quân/spell bằng ảnh mẫu hoặc ảnh chụp ADB.
+- Start / Pause / Resume / Stop bot.
+- Tìm trận theo ngưỡng vàng và dầu.
+- Next nếu base không đạt.
+- Chọn combo farm.
+- CRUD combo và loại lính trên UI.
+- Nhận diện slot quân/thuốc bằng template trong `img/slots/`.
+- Hỗ trợ nhập số quân thủ công nếu không muốn đọc số lượng bằng OCR.
+- Thả lính theo vùng polygon 4 góc nhìn.
+- Thả thuốc theo vùng polygon riêng 4 góc nhìn.
+- Theo dõi % phá hủy để đầu hàng hoặc chờ kết quả.
+- Đọc vàng/dầu nhận được ở màn Victory.
+- Lưu stats theo device.
+- Dump ảnh debug khi OCR/vision lỗi.
 
-## Yêu cầu cài đặt
+## Cài đặt
 
-### 1. Python
+### Python
 
 Khuyến nghị Python `3.10+`.
 
 ```powershell
 python --version
-```
-
-Cài thư viện Python:
-
-```powershell
 python -m pip install -r requirements.txt
 ```
 
-### 2. Node.js
+### Node.js
 
 Khuyến nghị Node.js `18+`.
 
 ```powershell
 node -v
 npm -v
-```
-
-Cài thư viện frontend:
-
-```powershell
 cd frontend
 npm install
 ```
 
-### 3. LDPlayer + ADB
+### LDPlayer + ADB
 
-Mở LDPlayer, bật game ở độ phân giải `1600x900`.
+Mở LDPlayer ở độ phân giải `1600x900`.
 
-ADB thường nằm ở một trong các chỗ này:
+ADB thường nằm ở:
 
-- LDPlayer: `dnadb.exe`
-- Android platform-tools: `adb.exe`
+- `D:\LDPlayer\LDPlayer9\adb.exe`
+- `D:\LDPlayer\LDPlayer9\dnadb.exe`
+- Android platform-tools `adb.exe`
 
-Nếu tool không tự tìm được ADB, điền tay trong `config.json`:
+Nếu tool không tự tìm được ADB, cấu hình tay trong `config.json`:
 
 ```json
 "adb": {
-  "path": "C:/duong/dan/toi/adb.exe",
+  "path": "D:/LDPlayer/LDPlayer9/adb.exe",
   "device": "127.0.0.1:5555"
 }
 ```
 
-Kiểm tra nhanh:
+Kiểm tra môi trường:
 
 ```powershell
 python check_env.py
 ```
 
-### 4. Tesseract OCR
+### Tesseract OCR
 
-OCR dùng để đọc loot và % phá hủy. Nếu máy chưa có, cài Tesseract OCR rồi cấu hình:
+OCR dùng để đọc loot và damage.
+
+Nếu máy chưa có Tesseract, cài rồi cấu hình:
 
 ```json
 "ocr": {
@@ -86,189 +87,234 @@ OCR dùng để đọc loot và % phá hủy. Nếu máy chưa có, cài Tessera
 }
 ```
 
-Nếu để trống, tool sẽ thử tự nhận theo đường dẫn mặc định.
+## Chạy local
 
-## Chạy bản React + FastAPI
-
-Mở terminal 1, chạy backend:
+Terminal 1, chạy backend:
 
 ```powershell
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Backend chạy tại:
+Backend:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-Mở terminal 2, chạy frontend:
+Terminal 2, chạy frontend:
 
 ```powershell
 cd frontend
 npm run dev
 ```
 
-Frontend chạy tại:
+Frontend:
 
 ```text
 http://127.0.0.1:5173
 ```
 
-Nếu frontend báo `Network Error`, kiểm tra:
+Nếu frontend báo `Network Error`, kiểm tra backend đã chạy đúng port `8000` chưa.
 
-- Backend đã chạy chưa.
-- Backend đúng port `8000` chưa.
-- Frontend đúng port `5173` chưa.
-- Không bị firewall chặn.
-
-## Chạy bản Tkinter cũ
-
-Nếu muốn chạy giao diện Python cũ:
+## Chạy UI Tkinter cũ
 
 ```powershell
 python main.py
 ```
 
-Bản Tkinter vẫn dùng chung `config.json`, logic bot và ADB.
+UI Tkinter dùng chung `config.json` và logic bot, nhưng hướng phát triển chính là React + FastAPI.
 
-## Luồng hoạt động bot
+## Luồng bot
 
 ```text
 Home
+-> zoom nhỏ ở làng chính
 -> Attack
 -> Find a Match
--> My Army Attack
--> Đọc loot
+-> đọc vàng/dầu
 -> Next hoặc đánh
--> Zoom/kéo camera theo góc đánh
--> Thả quân/spell
--> Theo dõi trận
--> End Battle / OK nếu đủ điều kiện
+-> chọn/random góc nhìn
+-> zoom/kéo camera theo góc
+-> nhận diện slot quân/thuốc
+-> thả lính trong vùng polygon
+-> thả thuốc trong vùng polygon
+-> theo dõi damage
+-> End Battle hoặc chờ result
+-> đọc vàng/dầu nhận được ở Victory
 -> Return Home
--> Lặp lại
+-> lặp lại
 ```
 
-## Các màn hình React
+## Các trang React
 
-- Dashboard: trạng thái bot, nút Start/Pause/Stop, logs, stats.
-- Farm: ngưỡng tài nguyên, combo, cạnh đánh, góc nhìn, delay.
-- Đầu hàng: điều kiện dừng trận theo thời gian, % phá hủy, loot còn lại.
-- Cài đặt: ADB, device, restart, OCR, runtime.
-- Tọa độ: chụp ảnh ADB hoặc dùng ảnh mẫu trong `img/`, click để lưu điểm thả.
+### Tổng quan
 
-## Cấu hình quan trọng
+- Quét ADB.
+- Start / Pause / Resume / Stop.
+- Nhập số quân thủ công.
+- Xem stats.
+- Xem log realtime.
+- Log có chế độ gọn/chi tiết.
 
-File chính:
+### Farm
+
+- Chọn combo.
+- Chọn góc đánh hoặc random.
+- Đặt ngưỡng vàng/dầu/tổng.
+- Đặt số lần Next tối đa.
+- Bật/tắt cơ chế tự phục hồi.
+
+### Combo
+
+Quản lý combo và lính.
+
+Combo:
+
+- Tạo combo.
+- Đổi tên combo.
+- Copy combo.
+- Xóa combo.
+- Chọn combo đang chạy.
+
+Lính:
+
+- Thêm loại lính.
+- Đổi tên lính.
+- Xóa lính.
+- Khi đổi tên lính, config tự đổi theo trong combo, số quân thủ công và tọa độ slot nếu có.
+- Nếu lính đang được dùng trong combo, UI chặn xóa để tránh hỏng config.
+
+Quân trong combo:
+
+- `Loại`: loại quân sẽ thả.
+- `Số lượng`: `all` là thả hết, hoặc nhập số cụ thể.
+- `Tối đa`: giới hạn số tap.
+- `Delay`: thời gian giữa mỗi tap.
+
+### Nhận diện slot
+
+- Chụp ảnh từ ADB.
+- Crop icon quân/thuốc.
+- Lưu mẫu vào `img/slots/`.
+- Test nhận diện slot.
+- Bot chỉ quét các loại slot liên quan combo đang chạy.
+
+### Tọa độ lính
+
+- Set vùng thả lính theo combo.
+- Mỗi combo có 4 vùng:
+  - Trên phải
+  - Trên trái
+  - Dưới phải
+  - Dưới trái
+- Mỗi vùng cần ít nhất 3 điểm polygon.
+
+### Tọa độ thuốc
+
+- Set vùng thả thuốc riêng theo combo.
+- Thuốc cũng có 4 vùng theo góc nhìn giống lính.
+- Bot random điểm trong vùng và có giới hạn khoảng cách để giảm trùng điểm cast.
+
+### Đầu hàng
+
+- Đầu hàng theo thời gian.
+- Đầu hàng theo % phá hủy.
+- Đầu hàng khi tài nguyên còn lại thấp.
+- Dừng trận nếu damage đứng yên quá lâu.
+- Restart game nếu damage OCR toàn `?` quá ngưỡng.
+
+### Cài đặt
+
+- ADB path.
+- Device.
+- Package game.
+- Tesseract path.
+- OCR.
+- Restart game.
+- Zoom camera ở home.
+- LDPlayer index.
+- Delay nâng cao.
+
+## Dữ liệu lưu ở đâu
+
+Tool không dùng SQL/PostgreSQL.
+
+Dữ liệu lưu bằng file local:
 
 ```text
-config.json
+config.json        Cấu hình chính
+stats/             Stats theo device
+debug/             Ảnh debug OCR/vision
+img/               Ảnh mẫu 4 góc
+img/slots/         Template icon quân/thuốc
 ```
 
-Các nhóm hay chỉnh:
+## Config quan trọng
 
-- `adb`: đường dẫn ADB, device.
-- `farm`: combo, ngưỡng tài nguyên, cách chọn base.
-- `deploy`: tọa độ, sequence thả quân, spell, delay.
-- `combos`: cấu hình riêng từng combo.
-- `surrender`: điều kiện đầu hàng.
-- `ocr`: vùng OCR và đường dẫn Tesseract.
+Các nhóm chính trong `config.json`:
+
+- `adb`: ADB path/device.
+- `game`: package, resolution, restart, zoom.
+- `farm`: combo, ngưỡng tài nguyên, góc đánh.
+- `combos`: cấu hình deploy riêng từng combo.
+- `deploy`: deploy mặc định.
+- `slot_detection`: danh sách loại slot và template matching.
+- `manual_army`: số quân thủ công.
+- `surrender`: điều kiện dừng trận.
+- `ocr`: vùng OCR và Tesseract.
 - `attack_timing`: delay nâng cao.
 
-Lưu ý: combo đang chạy lấy cấu hình từ:
+Combo đang chạy ưu tiên lấy từ:
 
-```json
-combos["Rồng Điện"].deploy
+```text
+combos[config.farm.combo].deploy
 ```
 
 Không chỉ lấy từ `deploy` gốc.
 
-Combo hiện có:
+## Cách thêm combo mới
 
-- `Rồng Điện`
-- `Valkyrie`
+1. Vào trang Combo.
+2. Tạo combo mới.
+3. Thêm hoặc chọn loại lính cần dùng.
+4. Thêm quân vào `Quân trong combo`.
+5. Lưu cấu hình.
+6. Vào Nhận diện slot, lưu template icon cho các loại lính/thuốc cần detect.
+7. Vào Tọa độ lính, set 4 vùng thả cho combo đó.
+8. Vào Tọa độ thuốc, set 4 vùng spell cho combo đó.
+9. Test nhận diện slot.
+10. Chạy bot.
 
-Khi chạy bot, nhận diện slot sẽ lọc theo combo đang chọn. Ví dụ combo `Valkyrie` chỉ quét các slot liên quan như `valkyrie`, `hero`, `rage`, `freeze`, không quét `dragon/balloon`.
+## Cách thêm lính mới
 
-## Lấy tọa độ thả quân/spell
-
-Ảnh mẫu nằm trong:
-
-```text
-img/
-```
-
-Hiện có các góc:
-
-- `trenbenphai.png`
-- `trenbentrai.png`
-- `duoibenphai.png`
-- `duoibentrai.png`
-
-Cách lấy:
-
-1. Mở frontend.
-2. Vào trang Tọa độ.
-3. Chọn ảnh mẫu hoặc bấm Chụp từ ADB.
-4. Click vào điểm muốn thả.
-5. Chọn nhóm tọa độ.
-6. Bấm Lưu điểm.
-7. Test tap nếu cần.
-
-Với vùng thả lính:
-
-1. Vào trang `Tọa độ lính`.
-2. Chọn một mục `Vùng thả ...`.
-3. Click tối thiểu 3 điểm quanh khu vực muốn thả quân.
-4. Bấm `Lưu điểm`.
-5. Khi đánh đúng góc đó, bot sẽ random điểm bên trong vùng đã khoanh để thả quân.
-
-Bot hiện chỉ thả lính bằng 4 vùng polygon:
-
-- Vùng thả trên phải
-- Vùng thả trên trái
-- Vùng thả dưới phải
-- Vùng thả dưới trái
-
-Các kiểu thả lính theo tọa độ cố định, theo cạnh, theo hàng và bốn góc map đã bỏ khỏi luồng chạy.
-
-Với vùng thả thuốc:
-
-1. Vào trang `Tọa độ thuốc`.
-2. Chọn nhóm thuốc kèm góc nhìn, ví dụ `Nộ 1 - trên phải`, `Băng - dưới trái`.
-3. Click tối thiểu 3 điểm quanh khu vực muốn thả spell.
-4. Bấm `Lưu điểm`.
-5. Khi đánh ở góc nào, bot sẽ random điểm bên trong vùng spell của đúng góc đó.
-
-Bot hiện không còn thả thuốc bằng tọa độ điểm cố định. Thuốc cũng có 4 vùng theo góc nhìn giống lính:
-
-- Trên phải
-- Trên trái
-- Dưới phải
-- Dưới trái
+1. Vào trang Combo.
+2. Nhập tên lính mới, ví dụ `witch`, `baby dragon`, `rồng`.
+3. Tool tự chuẩn hóa tên thành mã không dấu, ví dụ `rồng` -> `rong`.
+4. Lưu cấu hình.
+5. Vào Nhận diện slot để lưu mẫu icon cho lính đó.
+6. Thêm lính đó vào combo cần dùng.
 
 ## Stats và debug
 
-Stats:
+Stats nằm trong:
 
 ```text
 stats/
-stats.json
 ```
 
-Ảnh debug:
+Ảnh debug nằm trong:
 
 ```text
 debug/
 ```
 
-Khi OCR fail lâu hoặc không nhận diện được màn hình, bot có thể lưu ảnh vào `debug/` để chỉnh lại vùng OCR.
+Khi OCR fail lâu hoặc màn hình sai trạng thái, bot có thể lưu ảnh debug để chỉnh lại vùng OCR/template.
 
 ## Lỗi thường gặp
 
-### Không kết nối được backend
+### Network Error
 
-Chạy lại backend:
+Backend chưa chạy hoặc sai port.
 
 ```powershell
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
@@ -276,42 +322,38 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 
 ### Không thấy ADB
 
-Chạy:
-
 ```powershell
 python check_env.py
 ```
 
-Sau đó vào Cài đặt, bấm Quét ADB hoặc điền tay `adb.path`.
+Hoặc vào Cài đặt, bấm Quét ADB.
 
-### OCR could not read loot
+### OCR không đọc được loot
 
-Thường do:
+Kiểm tra:
 
-- Chưa cài Tesseract.
-- Sai `ocr.tesseract_path`.
-- Game chưa ở màn hình tìm trận.
-- Độ phân giải không phải `1600x900`.
-- Vùng OCR lệch.
+- Tesseract path.
+- Game đang ở màn tìm trận.
+- Resolution `1600x900`.
+- Vùng OCR `ocr.regions`.
+- Ảnh debug trong `debug/`.
 
-### Thả quân/spell chậm
+### Nhận diện sai số quân
 
-Kiểm tra cả 2 chỗ trong `config.json`:
+Cách xử lý nhanh:
 
-- `deploy`
-- `combos["Rồng Điện"].deploy`
+- Bật số quân thủ công ở Tổng quan.
+- Hoặc lưu lại template slot rõ hơn trong Nhận diện slot.
 
-Nếu combo có snapshot cũ, sửa `deploy` gốc thôi chưa đủ.
+## Kiểm tra build
 
-## Build kiểm tra
-
-Kiểm tra Python:
+Python:
 
 ```powershell
 python -m py_compile main.py bot.py adb_client.py vision.py config_manager.py check_env.py
 ```
 
-Kiểm tra frontend:
+Frontend:
 
 ```powershell
 cd frontend
@@ -320,6 +362,6 @@ npm run build
 
 ## Ghi chú
 
-- Chưa cần đóng gói `.exe` ở giai đoạn hiện tại.
-- Khi hoàn thiện UI và logic, có thể đóng gói bằng Electron hoặc Tauri.
-- Không xóa code Tkinter cũ vì vẫn dùng làm bản dự phòng.
+- Chưa đóng gói `.exe` ở giai đoạn này.
+- Khi UI và logic ổn định, có thể đóng gói bằng Electron hoặc Tauri.
+- Không xóa code Tkinter cũ.

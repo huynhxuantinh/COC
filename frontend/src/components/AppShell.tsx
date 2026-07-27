@@ -15,6 +15,7 @@ const navGroups = [
   {
     title: "Hiệu chỉnh",
     items: [
+      { to: "/combos", label: "Combo" },
       { to: "/coordinates/troops", label: "Tọa độ lính" },
       { to: "/coordinates/spells", label: "Tọa độ thuốc" },
       { to: "/slots", label: "Nhận diện slot" },

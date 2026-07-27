@@ -1,40 +1,73 @@
 # Mô tả chi tiết COC Auto Farm Tool
 
-## 1. Mục tiêu của tool
+## Mục tiêu
 
-COC Auto Farm Tool là tool chạy local để tự động farm tài nguyên ở làng chính Clash of Clans qua LDPlayer. Tool điều khiển giả lập bằng ADB, đọc màn hình bằng OCR/vision, sau đó tự thao tác theo kịch bản đã cấu hình.
-
-Mục tiêu chính hiện tại:
-
-- Farm vàng và dầu ở làng chính.
-- Tìm base theo ngưỡng tài nguyên người dùng đặt.
-- Tự Next nếu base không đạt.
-- Tự chọn góc đánh, zoom/kéo camera, thả quân và thuốc.
-- Theo dõi trận, đầu hàng/về làng theo điều kiện cấu hình.
-- Có giao diện React để cấu hình, xem log, xem stats và lấy tọa độ.
+COC Auto Farm Tool là tool chạy local để farm vàng và dầu ở làng chính Clash of Clans qua LDPlayer. Tool dùng ADB để thao tác giả lập, OCR/vision để đọc màn hình, sau đó tự chạy theo cấu hình người dùng đặt trong UI.
 
 Độ phân giải mục tiêu:
 
 ```text
-LDPlayer: 1600x900
+1600x900
 ```
 
-## 2. Kiến trúc tổng quan
-
-Tool hiện có 3 phần chính:
+## Kiến trúc
 
 ```text
 React UI
-  -> gọi API
-FastAPI backend
-  -> bọc logic Python
-Bot core Python
-  -> ADB, OCR, vision, deploy, monitor battle
+-> FastAPI backend
+-> Python bot core
+-> ADB / OCR / OpenCV
+-> LDPlayer
 ```
 
-### Frontend
+Các file core:
 
-Thư mục:
+```text
+bot.py
+adb_client.py
+vision.py
+slot_detector.py
+config_manager.py
+bot_runtime.py
+backend/services/bot_service.py
+```
+
+## Dữ liệu
+
+Tool không dùng database server.
+
+```text
+config.json        Cấu hình chính
+stats/             Thống kê theo device
+debug/             Ảnh debug khi lỗi
+img/               Ảnh mẫu góc nhìn
+img/slots/         Template icon slot
+```
+
+## Luồng chạy
+
+```text
+Home
+-> zoom nhỏ home
+-> Attack
+-> Find a Match
+-> đọc vàng/dầu
+-> Next nếu base thấp
+-> đánh nếu base đạt
+-> chọn/random góc nhìn
+-> zoom/kéo camera theo góc
+-> nhận diện slot quân/thuốc
+-> thả lính theo vùng polygon
+-> thả thuốc theo vùng polygon
+-> theo dõi damage
+-> đầu hàng hoặc chờ kết quả
+-> đọc vàng/dầu nhận được ở Victory
+-> Return Home
+```
+
+## Frontend
+
+Frontend nằm trong:
 
 ```text
 frontend/
@@ -45,203 +78,118 @@ Công nghệ:
 - React
 - Vite
 - Tailwind CSS
-- Axios/fetch qua service riêng
+- Axios/service API riêng
 
-Frontend chỉ làm giao diện và gọi API. Component không gọi trực tiếp logic bot.
+Các trang chính:
 
-### Backend
+- Tổng quan
+- Farm
+- Combo
+- Nhận diện slot
+- Tọa độ lính
+- Tọa độ thuốc
+- Đầu hàng
+- Cài đặt
 
-Thư mục:
+## Backend
+
+Backend nằm trong:
 
 ```text
 backend/
 ```
 
-Công nghệ:
+Backend FastAPI bọc logic Python thành API để React gọi.
 
-- Python FastAPI
-- Uvicorn
+Chạy backend:
 
-Backend nhận lệnh từ React rồi gọi lại logic Python có sẵn.
-
-### Bot core
-
-Các file chính:
-
-```text
-bot.py
-adb_client.py
-vision.py
-slot_detector.py
-config_manager.py
-bot_runtime.py
+```powershell
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Nhiệm vụ:
-
-- Kết nối ADB.
-- Chụp màn hình LDPlayer.
-- OCR vàng/dầu, % phá hủy, màn hình kết quả.
-- Detect slot quân/thuốc bằng template matching.
-- Thả quân trong vùng polygon.
-- Thả thuốc theo vùng polygon riêng.
-- Theo dõi trận và xử lý đầu hàng/về làng.
-
-## 3. Dữ liệu lưu ở đâu
-
-Tool chưa dùng SQL, PostgreSQL hay database server.
-
-Hiện tại dữ liệu lưu bằng file JSON và ảnh local:
-
-```text
-config.json          Cấu hình chính
-stats/               Stats theo device/phiên
-debug/               Ảnh debug khi OCR/vision lỗi
-img/                 Ảnh mẫu 4 góc
-img/slots/           Mẫu icon quân/thuốc để nhận diện slot
-```
-
-File quan trọng nhất là:
-
-```text
-config.json
-```
-
-File này chứa:
-
-- ADB path/device.
-- Ngưỡng farm.
-- Combo đang dùng.
-- Vùng thả quân.
-- Vùng thả thuốc.
-- Điều kiện đầu hàng.
-- Vùng OCR.
-- Delay/timing.
-- Cấu hình detect slot.
-
-## 4. Luồng chạy bot
-
-Luồng chính:
-
-```text
-Home
--> Attack
--> Find a Match
--> đọc loot vàng/dầu
--> nếu không đạt thì Next
--> nếu đạt thì đánh
--> random hoặc chọn góc đánh
--> zoom nhỏ
--> kéo camera theo góc
--> nhận diện slot quân/thuốc
--> thả quân trong vùng polygon
--> thả thuốc trong vùng polygon riêng
--> theo dõi % phá hủy
--> đầu hàng hoặc chờ kết quả
--> đọc tài nguyên thực nhận ở Victory screen
--> Return Home
--> lặp lại
-```
-
-Bot hiện chỉ quan tâm farm:
-
-- Vàng
-- Dầu
-
-Dầu đen đã bỏ khỏi luồng đọc/tính ngưỡng chính.
-
-## 5. Các trang giao diện React
-
-### 5.1. Tổng quan
+## Trang Tổng quan
 
 Chức năng:
 
 - Quét ADB.
-- Bắt đầu bot.
-- Tạm dừng/tiếp tục.
-- Dừng bot.
-- Xem trạng thái ADB/bot.
-- Nhập số quân thủ công nếu không muốn OCR số lượng.
-- Xem stats phiên.
+- Start/Pause/Resume/Stop bot.
+- Nhập số quân thủ công.
+- Xem stats.
 - Xem log realtime.
 - Xóa log.
 
-Lưu ý:
+Số quân thủ công dùng khi không muốn phụ thuộc OCR số lượng. Bot vẫn cần nhận diện vị trí slot để biết tap vào đâu.
 
-- Nếu bật số quân thủ công, bot dùng số lượng người dùng nhập.
-- Bot vẫn cần nhận diện vị trí slot trên thanh quân để biết tap vào đâu.
-
-### 5.2. Farm
+## Trang Farm
 
 Chức năng:
 
 - Chọn combo.
-- Chọn góc đánh hoặc random góc.
-- Chọn kiểu xét ngưỡng: `any`, `all`, `total`.
-- Nhập ngưỡng vàng tối thiểu.
-- Nhập ngưỡng dầu tối thiểu.
-- Nhập tổng vàng + dầu tối thiểu.
-- Nhập số lần Next tối đa.
-- Bật/tắt các cơ chế tự phục hồi.
+- Chọn/random góc đánh.
+- Cấu hình ngưỡng vàng/dầu/tổng.
+- Cấu hình số lần Next tối đa.
+- Bật/tắt cơ chế tự phục hồi.
 
-Các cơ chế tự phục hồi:
+Dark elixir không còn là tài nguyên chính để xét ngưỡng farm.
 
-- Restart game nếu không thấy nút Attack.
-- Restart khi OCR loot fail quá lâu.
-- Dừng bot sau số lỗi cycle liên tiếp.
-- Auto-stop nếu bật.
+## Trang Combo
 
-### 5.3. Tọa độ lính
+Trang này quản lý combo và loại lính.
 
-Chức năng:
+CRUD combo:
 
-- Dùng ảnh mẫu trong `img/`.
-- Hoặc chụp trực tiếp từ ADB.
-- Click nhiều điểm để tạo vùng polygon.
-- Lưu vùng thả quân theo combo.
-- Test tap một điểm.
+- Tạo combo.
+- Đổi tên combo.
+- Copy combo.
+- Xóa combo.
+- Chọn combo đang chạy.
 
-Hiện chỉ dùng 4 vùng thả quân:
+CRUD lính:
+
+- Thêm lính.
+- Đổi tên lính.
+- Xóa lính.
+
+Khi đổi tên lính, tool cập nhật theo trong:
+
+- `slot_detection.kinds`
+- `slot_detection.count_max_by_kind`
+- `manual_army.counts`
+- `coords.slots`
+- `deploy.sequence`
+- `combos[*].deploy.sequence`
+
+Khi xóa lính, tool sẽ chặn nếu lính đó đang được dùng trong combo hoặc deploy mặc định.
+
+## Quân trong combo
+
+Mỗi dòng quân gồm:
+
+- `Loại`: loại quân sẽ thả.
+- `Số lượng`: `all` hoặc số cụ thể.
+- `Tối đa`: giới hạn số tap.
+- `Delay`: thời gian nghỉ giữa các tap.
+
+Ví dụ:
 
 ```text
-Vùng thả trên phải
-Vùng thả trên trái
-Vùng thả dưới phải
-Vùng thả dưới trái
+rong | all | 20 | 0.08
 ```
 
-Bot không còn phụ thuộc vào kiểu thả lính theo tọa độ cố định/cạnh/hàng cũ.
+Nghĩa là chọn slot `rong`, thả hết, tối đa 20 tap, mỗi tap cách nhau 0.08 giây.
 
-### 5.4. Tọa độ thuốc
-
-Chức năng:
-
-- Tách riêng khỏi trang tọa độ lính.
-- Cấu hình vùng thả thuốc theo 4 góc giống lính.
-- Dùng cho nhóm Nộ/Băng linh hoạt.
-
-Hiện thuốc cũng dùng vùng polygon:
-
-```text
-Nhóm Nộ/Băng - trên phải
-Nhóm Nộ/Băng - trên trái
-Nhóm Nộ/Băng - dưới phải
-Nhóm Nộ/Băng - dưới trái
-```
-
-Khi đánh ở góc nào, bot lấy vùng thuốc tương ứng góc đó để random điểm cast.
-
-### 5.5. Nhận diện slot
+## Trang Nhận diện slot
 
 Chức năng:
 
 - Chụp màn hình từ ADB.
-- Khoanh/crop icon quân hoặc thuốc trên thanh quân.
-- Lưu mẫu icon vào `img/slots/`.
-- Test nhận diện slot.
-- Hiển thị kết quả nhận diện: loại slot, số lượng, tọa độ, score.
+- Crop icon slot.
+- Lưu template vào `img/slots/`.
+- Test nhận diện.
 
-Các loại đang hỗ trợ:
+Bot chỉ detect các loại slot liên quan combo đang chạy để giảm thời gian quét.
+
+Các slot thường dùng:
 
 ```text
 dragon
@@ -252,160 +200,125 @@ rage
 freeze
 ```
 
-Tên hiển thị:
+Có thể thêm loại mới từ trang Combo, sau đó qua Nhận diện slot để lưu mẫu icon.
+
+## Trang Tọa độ lính
+
+Lính thả theo vùng polygon, không còn phụ thuộc tọa độ điểm cố định.
+
+Mỗi combo có 4 vùng:
 
 ```text
-Rồng điện
-Bóng
-Valkyrie
-Tướng
-Nộ
-Băng
+Trên phải
+Trên trái
+Dưới phải
+Dưới trái
 ```
 
-### 5.6. Đầu hàng
+Mỗi vùng cần tối thiểu 3 điểm.
+
+## Trang Tọa độ thuốc
+
+Thuốc cũng thả theo vùng polygon riêng.
+
+Mỗi combo có 4 vùng spell:
+
+```text
+Trên phải
+Trên trái
+Dưới phải
+Dưới trái
+```
+
+Bot random điểm trong vùng spell và có cấu hình khoảng cách tối thiểu giữa 2 điểm cast để giảm trùng vị trí.
+
+Tool dùng `spell_groups`, không còn dùng kiểu spell riêng lẻ `No1/Băng/No2`.
+
+## Trang Đầu hàng
 
 Chức năng:
 
-- Đầu hàng theo thời gian.
-- Đầu hàng theo % phá hủy.
-- Đầu hàng khi tài nguyên còn lại thấp.
-- Không đầu hàng, đánh hết.
-- Giới hạn thời lượng trận.
-- Dừng trận nếu damage đứng yên quá lâu.
-- Lọc OCR damage nhảy bất thường.
+- Dừng theo thời gian.
+- Dừng theo % phá hủy.
+- Dừng khi tài nguyên còn lại thấp.
+- Đánh hết nếu chọn không đầu hàng.
+- Dừng nếu damage đứng yên quá lâu.
+- Restart nếu damage OCR liên tục là `?` quá ngưỡng.
 
-### 5.7. Cài đặt
+Damage OCR là phần dễ lệch nhất, nên đã có lọc outlier và cơ chế restart khi không đọc được quá lâu.
+
+## Trang Cài đặt
 
 Chức năng:
 
 - ADB path.
 - Device.
 - Package game.
-- Kết nối ADB khi bắt đầu.
-- Quét sâu tìm ADB.
-- Bật/tắt OCR.
 - Tesseract path.
-- Restart game định kỳ.
+- OCR on/off.
+- Restart game.
+- Zoom camera home.
+- LDPlayer index.
 - Delay nâng cao.
-- Mở nhanh trang tọa độ thuốc.
 
-## 6. Combo hiện có
+## Cơ chế nhận diện slot
 
-### Rồng Điện
+Slot detector dùng template matching OpenCV.
 
-Sequence hiện tại:
-
-```text
-dragon
-balloon
-hero
-```
-
-Spell group:
+Nguồn template:
 
 ```text
-rage
-freeze
+img/slots/
 ```
 
-Bot chỉ nhận diện các slot liên quan combo đang chạy, không quét toàn bộ mọi loại nếu combo không cần.
+Kết quả detect gồm:
 
-### Valkyrie
+- loại slot
+- tọa độ slot
+- số lượng đọc được
+- score
 
-Sequence hiện tại:
+Nếu bật số quân thủ công, bot dùng số người dùng nhập để quyết định thả bao nhiêu, nhưng vẫn detect slot để biết vị trí tap.
+
+## Cơ chế thả lính
 
 ```text
-valkyrie
-hero
+Chọn slot quân
+-> lấy vùng polygon theo góc đang đánh
+-> random điểm trong vùng
+-> tap thả quân
+-> lặp theo số lượng/tối đa/delay
 ```
 
-Spell group:
+Không dùng các mode cũ như thả theo cạnh, thả theo hàng, 4 góc map.
+
+## Cơ chế thả thuốc
 
 ```text
-rage
-freeze
+Chọn slot spell còn phép
+-> lấy vùng spell theo góc đang đánh
+-> random điểm trong vùng
+-> tránh điểm quá gần điểm vừa cast
+-> cast spell
 ```
 
-## 7. Nhận diện quân/thuốc
+Spell hiện đi theo nhóm Nộ/Băng linh hoạt.
 
-Bot có 2 cách lấy số lượng:
-
-### Cách 1: Tự detect slot
-
-Bot chụp màn hình, dùng template matching để tìm icon slot trên thanh quân.
-
-Kết quả gồm:
-
-- Loại slot.
-- Tọa độ slot.
-- Số lượng đọc được.
-- Score nhận diện.
-
-Slot nào không có thì skip.
-
-### Cách 2: Nhập số lượng thủ công
-
-Trong trang Tổng quan có mục `Số quân thủ công`.
-
-Nếu bật:
-
-- Người dùng nhập số quân/thuốc theo combo.
-- Bot dùng số đó để quyết định thả bao nhiêu.
-- Bot vẫn detect vị trí slot để tap đúng icon.
-
-Cách này dùng khi OCR số lượng chưa ổn hoặc muốn test nhanh.
-
-## 8. Nguyên tắc thả quân
-
-Bot không thả quân theo một list tọa độ cố định nữa.
-
-Hiện tại:
-
-```text
-Chọn góc đánh
--> zoom/kéo camera theo góc
--> lấy vùng polygon tương ứng góc
--> random điểm bên trong vùng
--> thả quân vào các điểm random đó
-```
-
-Ưu điểm:
-
-- Dễ chỉnh hơn khi base lệch.
-- Ít phụ thuộc từng điểm cố định.
-- Có thể thay đổi vùng cho từng góc.
-
-## 9. Nguyên tắc thả thuốc
-
-Thuốc đã được tách riêng khỏi tọa độ lính.
-
-Hiện tại:
-
-```text
-Chọn góc đánh
--> lấy vùng spell của góc đó
--> chọn slot Nộ/Băng còn phép
--> cast vào điểm random trong vùng
-```
-
-Tool hiện dùng `spell_groups`, không dùng cấu hình spell riêng kiểu No1/Băng/No2 nữa.
-
-## 10. OCR và vùng đọc
+## OCR
 
 OCR dùng để đọc:
 
-- Vàng/dầu khi đang tìm trận.
-- % phá hủy trong trận.
-- Vàng/dầu thực nhận ở màn hình Victory.
+- vàng/dầu khi tìm trận
+- damage trong trận
+- vàng/dầu nhận được ở màn Victory
 
 Các vùng OCR nằm trong:
 
-```json
+```text
 ocr.regions
 ```
 
-Một số vùng quan trọng:
+Vùng quan trọng:
 
 ```text
 loot_panel
@@ -418,23 +331,15 @@ result_elixir
 home_attack_button
 ```
 
-Nếu OCR sai, cần kiểm tra:
+## Stats
 
-- Game đúng 1600x900 chưa.
-- Camera/màn hình có đúng trạng thái không.
-- Vùng OCR có lệch không.
-- Tesseract path đúng chưa.
-- Ảnh debug trong `debug/`.
-
-## 11. Stats
-
-Stats được ghi ra file trong:
+Stats nằm trong:
 
 ```text
 stats/
 ```
 
-Các chỉ số chính:
+Chỉ số chính:
 
 ```text
 attacks
@@ -443,51 +348,47 @@ gold_seen
 elixir_seen
 ```
 
-Vàng/dầu thực nhận được đọc ở màn hình Victory, không lấy từ màn hình tìm trận.
+Vàng/dầu nhận thực tế được đọc ở màn Victory.
 
-## 12. Debug
+## Debug
 
-Khi lỗi OCR hoặc màn hình không đúng trạng thái, bot có thể dump ảnh vào:
+Ảnh debug nằm trong:
 
 ```text
 debug/
 ```
 
-Ảnh debug dùng để:
+Dùng để kiểm tra:
 
-- Kiểm tra bot đang thấy màn hình gì.
-- Chỉnh lại vùng OCR.
-- Chỉnh lại nhận diện nút Attack.
-- Chỉnh template slot quân/thuốc.
+- OCR loot
+- OCR damage
+- nút Attack
+- màn hình result
+- template slot
 
-## 13. Các cơ chế bảo vệ
+## Cơ chế bảo vệ
 
-Bot có các cơ chế tránh treo vô hạn:
+Bot có các lớp bảo vệ:
 
-- Screencap ADB có retry.
-- Validate PNG trước khi mở ảnh.
-- Một lỗi cycle không làm chết cả bot ngay.
-- Circuit breaker nếu lỗi liên tiếp quá ngưỡng.
-- Restart nếu không thấy nút Attack nhiều lần.
+- ADB screencap retry.
+- Validate PNG.
+- Lỗi 1 cycle không làm chết bot ngay.
+- Circuit breaker khi lỗi liên tiếp.
+- Restart nếu không thấy Attack.
 - Restart nếu OCR loot fail quá lâu.
-- Auto-stop chỉ xử lý ở ranh giới an toàn giữa các trận.
+- Restart nếu damage OCR `?` quá lâu.
+- Auto-stop ở ranh giới an toàn.
 - Dump debug khi lỗi kéo dài.
 
-## 14. Cách chạy local
+## Chạy local
 
-### Backend
+Backend:
 
 ```powershell
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Backend:
-
-```text
-http://127.0.0.1:8000
-```
-
-### Frontend
+Frontend:
 
 ```powershell
 cd frontend
@@ -495,62 +396,24 @@ npm install
 npm run dev
 ```
 
-Frontend:
+## Test cơ bản
 
-```text
-http://127.0.0.1:5173
-```
-
-Nếu frontend báo `Network Error`, kiểm tra backend đã chạy ở port `8000` chưa.
-
-## 15. Cách test cơ bản
-
-1. Mở LDPlayer 1600x900.
+1. Mở LDPlayer `1600x900`.
 2. Mở Clash of Clans ở làng chính.
 3. Chạy backend.
 4. Chạy frontend.
-5. Vào Tổng quan.
-6. Bấm `Quét ADB`.
-7. Kiểm tra log thấy ADB connected.
-8. Chọn combo ở Farm.
-9. Kiểm tra tọa độ lính/thuốc đã có đủ 4 góc.
-10. Nếu chưa tin OCR số lượng, bật `Số quân thủ công`.
-11. Bấm `Bắt đầu`.
-12. Theo dõi log.
+5. Vào Tổng quan, bấm Quét ADB.
+6. Chọn combo ở Farm.
+7. Kiểm tra template slot.
+8. Kiểm tra 4 vùng tọa độ lính.
+9. Kiểm tra 4 vùng tọa độ thuốc.
+10. Bật số quân thủ công nếu cần.
+11. Start bot.
 
-## 16. Lưu ý khi phát triển tiếp
+## Hướng phát triển tiếp
 
-Các hướng nâng cấp hợp lý:
-
-- Cải thiện OCR damage vì hiện vẫn là vùng dễ lệch.
-- Hoàn thiện template slot cho từng combo.
-- Thêm combo mới theo cấu trúc riêng.
-- Tự chọn góc đánh theo vị trí kho tài nguyên bằng vision.
-- Tách config theo profile/account.
-- Đóng gói thành app Windows bằng Electron hoặc Tauri sau khi UI ổn định.
-
-Khi thêm combo mới, cần có:
-
-- Sequence quân.
-- Spell group.
-- Template icon slot cần nhận diện.
-- Vùng thả quân 4 góc.
-- Vùng thả thuốc 4 góc.
-- Ngưỡng/timing phù hợp.
-
-## 17. Tóm tắt ngắn
-
-Tool này là một hệ thống auto farm local:
-
-```text
-React UI cấu hình
--> FastAPI nhận lệnh
--> Python bot điều khiển LDPlayer qua ADB
--> OCR/vision đọc màn hình
--> detect slot quân/thuốc
--> thả quân/thuốc theo vùng
--> theo dõi trận
--> lưu stats/debug
-```
-
-Hiện tại hướng chính là farm vàng + dầu, dùng vùng polygon cho cả lính và thuốc, nhận diện slot theo combo, có tùy chọn nhập số quân thủ công để giảm phụ thuộc OCR số lượng.
+- Cải thiện OCR damage.
+- Tối ưu template slot theo nhiều army.
+- Thêm combo bằng UI thay vì sửa config tay.
+- Tự chọn góc đánh theo vị trí kho tài nguyên.
+- Đóng gói Windows app bằng Electron/Tauri khi ổn định.

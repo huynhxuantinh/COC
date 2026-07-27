@@ -4,6 +4,7 @@ import { AppShell } from "./components/AppShell";
 import { ConfigEditorProvider } from "./hooks/useConfigEditor";
 import { usePolling } from "./hooks/usePolling";
 import { SpellCoordinatesPage, TroopCoordinatesPage } from "./pages/CoordinatesPage";
+import { ComboPage } from "./pages/ComboPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { FarmPage } from "./pages/FarmPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -47,6 +48,7 @@ export function App() {
               }
             />
             <Route path="/farm" element={<FarmPage />} />
+            <Route path="/combos" element={<ComboPage />} />
             <Route path="/coordinates" element={<TroopCoordinatesPage />} />
             <Route path="/coordinates/troops" element={<TroopCoordinatesPage />} />
             <Route path="/coordinates/spells" element={<SpellCoordinatesPage />} />
