@@ -313,6 +313,37 @@ class Vision:
             "elixir": self.read_number(image, regions.get("result_elixir", [612, 430, 210, 40])),
         }
 
+    def read_home_resources(self, png: bytes) -> dict[str, int]:
+        image = self.image_from_png(png)
+        regions = self.config["ocr"]["regions"]
+        return {
+            "gold": self.read_number(image, regions.get("home_gold", [1330, 35, 200, 40])),
+            "elixir": self.read_number(image, regions.get("home_elixir", [1330, 105, 200, 40])),
+        }
+
+    def find_wall_row(self, png: bytes, search_region: list[int]) -> list[int] | None:
+        if not self.available:
+            return None
+        image = self.image_from_png(png)
+        if image is None:
+            return None
+        x, y, w, h = search_region
+        crop = image.crop((x, y, x + w, y + h))
+        data = self.pytesseract.image_to_data(crop, output_type=self.pytesseract.Output.DICT)
+        for index, text in enumerate(data.get("text", [])):
+            if text.strip().lower().startswith("wall"):
+                bx = int(data["left"][index])
+                by = int(data["top"][index])
+                bw = int(data["width"][index])
+                bh = int(data["height"][index])
+                return [x + bx + bw // 2, y + by + bh // 2]
+        return None
+
+    def read_wall_upgrade_cost(self, png: bytes, button_center: list[int]) -> int:
+        image = self.image_from_png(png)
+        cx, cy = int(button_center[0]), int(button_center[1])
+        return self.read_number(image, [cx - 90, cy - 55, 180, 35])
+
     def read_damage_percent(self, png: bytes) -> int:
         image = self.image_from_png(png)
         region = self.config["ocr"]["regions"]["damage_percent"]

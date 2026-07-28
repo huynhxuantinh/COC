@@ -48,6 +48,7 @@ class FarmBot:
         self.home_restart_failures = 0
         self.runtime_slots: dict[str, list[dict[str, Any]]] = {}
         self.manual_slot_counts: dict[str, int] = {}
+        self.attacks_since_wall_upgrade = 0
 
     def run(self) -> None:
         try:
@@ -127,6 +128,11 @@ class FarmBot:
         if self._search_base():
             self._attack_base()
             self._wait_return_home()
+            if self.stop_event.is_set():
+                return
+            self.attacks_since_wall_upgrade += 1
+            if self._wall_upgrade_due():
+                self._upgrade_walls()
 
     def _too_many_cycle_errors(self, cycle_errors: int, max_cycle_errors: int) -> bool:
         if max_cycle_errors <= 0 or cycle_errors < max_cycle_errors:
@@ -809,6 +815,163 @@ class FarmBot:
         gold_label = "?" if gold < 0 else f"{gold:,}"
         elixir_label = "?" if elixir < 0 else f"{elixir:,}"
         self.log(f"[RESULT] Loot thực nhận: gold={gold_label} | elixir={elixir_label}.")
+
+    def _wall_upgrade_due(self) -> bool:
+        settings = self.config.get("wall_upgrade", {})
+        if not settings.get("enabled", False):
+            return False
+
+        every = int(settings.get("run_every_n_attacks", 20))
+        if every > 0 and self.attacks_since_wall_upgrade >= every:
+            return True
+
+        if not self.vision.available:
+            return False
+        try:
+            png = self.adb.screencap_png()
+        except ADBError as exc:
+            self.log(f"[WALL] Khong doc duoc tai nguyen o lang: {exc}")
+            return False
+
+        resources = self.vision.read_home_resources(png)
+        threshold = max(0.0, float(settings.get("trigger_percent", 95))) / 100.0
+        gold_capacity = max(1.0, float(settings.get("gold_capacity", 1)))
+        elixir_capacity = max(1.0, float(settings.get("elixir_capacity", 1)))
+        gold_full = resources.get("gold", -1) >= threshold * gold_capacity
+        elixir_full = resources.get("elixir", -1) >= threshold * elixir_capacity
+        return gold_full or elixir_full
+
+    def _wall_upgrade_budget(self) -> tuple[str, int]:
+        settings = self.config.get("wall_upgrade", {})
+        if not self.vision.available:
+            return "", 0
+        try:
+            png = self.adb.screencap_png()
+        except ADBError as exc:
+            self.log(f"[WALL] Khong doc duoc tai nguyen o lang: {exc}")
+            return "", 0
+
+        resources = self.vision.read_home_resources(png)
+        gold = int(resources.get("gold", -1))
+        elixir = int(resources.get("elixir", -1))
+        if gold < 0 or elixir < 0:
+            self.log("[WALL] Khong doc duoc vang/dau o lang, bo qua lan nay.")
+            return "", 0
+
+        gold_budget = max(0, gold - int(settings.get("reserve_gold", 0)))
+        elixir_budget = max(0, elixir - int(settings.get("reserve_elixir", 0)))
+        pay_with = str(settings.get("pay_with", "auto")).lower()
+        if pay_with == "gold":
+            return ("gold", gold_budget) if gold_budget > 0 else ("", 0)
+        if pay_with == "elixir":
+            return ("elixir", elixir_budget) if elixir_budget > 0 else ("", 0)
+        if gold_budget <= 0 and elixir_budget <= 0:
+            return "", 0
+        return ("gold", gold_budget) if gold_budget >= elixir_budget else ("elixir", elixir_budget)
+
+    def _upgrade_walls(self) -> None:
+        settings = self.config.get("wall_upgrade", {})
+        coords = settings.get("coords", {})
+        pay_with, budget = self._wall_upgrade_budget()
+        if not pay_with or budget <= 0:
+            self.log("[WALL] Khong du ngan sach sau khi tru du tru, bo qua.")
+            return
+
+        self.log(f"[WALL] Bat dau nang tuong. Ngan sach: {budget:,} {pay_with}.")
+        self.adb.tap(*coords["builder_icon"])
+        self._sleep(1.0)
+
+        try:
+            png = self.adb.screencap_png()
+        except ADBError as exc:
+            self.log(f"[WALL] Khong chup duoc danh sach nang cap: {exc}")
+            return
+
+        search_region = settings.get("search_region", [560, 100, 500, 600])
+        wall_pos = self.vision.find_wall_row(png, search_region)
+        if not wall_pos:
+            self.log("[WALL] Khong tim thay dong Wall trong danh sach nang cap.")
+            self._close_wall_popup()
+            return
+
+        self.log(f"[WALL] Chon dong Wall tai {wall_pos[0]},{wall_pos[1]}.")
+        self.adb.tap(int(wall_pos[0]), int(wall_pos[1]))
+        self._sleep(0.4)
+        self.adb.tap(*coords["upgrade_more_button"])
+        self._sleep(0.6)
+
+        upgrade_button = coords["upgrade_gold_button"] if pay_with == "gold" else coords["upgrade_elixir_button"]
+        use_add10 = bool(settings.get("use_add10", False))
+        add_button = coords["add10_button"] if use_add10 else coords["add1_button"]
+        add_label = "+10" if use_add10 else "+1"
+        max_rounds = max(1, int(settings.get("max_add_rounds", 60)))
+        self.log(f"[WALL] Dung nut {add_label}, toi da {max_rounds} lan bam.")
+        last_safe_cost = 0
+        rounds = 0
+        while rounds < max_rounds and not self.stop_event.is_set():
+            self.adb.tap(*add_button)
+            self._sleep(0.2)
+            try:
+                png = self.adb.screencap_png()
+            except ADBError as exc:
+                self.log(f"[WALL] Khong chup duoc gia nang tuong: {exc}")
+                self._close_wall_popup()
+                return
+            cost = self.vision.read_wall_upgrade_cost(png, upgrade_button)
+            if cost < 0:
+                self.log("[WALL] Khong doc duoc gia nang tuong, huy de tranh tieu nham.")
+                self._close_wall_popup()
+                return
+            if cost > budget:
+                self.log(f"[WALL] Gia {cost:,} vuot ngan sach {budget:,}, lui lai.")
+                cost = self._rollback_wall_selection_to_budget(coords, upgrade_button, budget, use_add10)
+                if cost > 0:
+                    last_safe_cost = cost
+                break
+            last_safe_cost = cost
+            rounds += 1
+
+        if last_safe_cost <= 0:
+            self.log("[WALL] Khong du tai nguyen de nang tuong, huy.")
+            self._close_wall_popup()
+            return
+
+        self.log(f"[WALL] Xac nhan nang tuong: {last_safe_cost:,} {pay_with}.")
+        self.adb.tap(*upgrade_button)
+        self._sleep(0.6)
+        self.adb.tap(*coords["confirm_okay_button"])
+        self._sleep(0.8)
+        self.attacks_since_wall_upgrade = 0
+
+    def _rollback_wall_selection_to_budget(
+        self,
+        coords: dict[str, Any],
+        upgrade_button: list[int],
+        budget: int,
+        use_add10: bool,
+    ) -> int:
+        rollback_clicks = 10 if use_add10 else 1
+        for _ in range(rollback_clicks):
+            self.adb.tap(*coords["remove_button"])
+            self._sleep(0.2)
+            try:
+                png = self.adb.screencap_png()
+            except ADBError as exc:
+                self.log(f"[WALL] Khong chup duoc gia sau khi lui: {exc}")
+                return 0
+            cost = self.vision.read_wall_upgrade_cost(png, upgrade_button)
+            if 0 < cost <= budget:
+                return cost
+        return 0
+
+    def _close_wall_popup(self) -> None:
+        try:
+            self.adb.shell("input", "keyevent", "KEYCODE_BACK", timeout=5)
+            self._sleep(0.3)
+            self.adb.shell("input", "keyevent", "KEYCODE_BACK", timeout=5)
+            self._sleep(0.3)
+        except ADBError as exc:
+            self.log(f"[WALL] Khong dong duoc popup nang tuong: {exc}")
 
     def _read_loot(self) -> dict[str, int]:
         return self._read_loot_frame()[1]

@@ -401,6 +401,7 @@ class BotService:
         surrender = config.get("surrender", {})
         attack_timing = config.get("attack_timing", {})
         manual_army = config.get("manual_army", {})
+        wall_upgrade = config.get("wall_upgrade", {})
         if int(game.get("periodic_restart_min_seconds", 0)) > int(game.get("periodic_restart_max_seconds", 0)):
             raise ValueError("Thời gian restart tối thiểu phải <= tối đa.")
         if int(game.get("home_zoom_out_keyevents", 0)) < 0:
@@ -426,6 +427,19 @@ class BotService:
                 raise ValueError(f"{label}: gia tri tu phai <= den.")
         if int(attack_timing.get("spell_min_point_distance_px", 0)) < 0:
             raise ValueError("Khoảng cách tối thiểu giữa 2 điểm thuốc phải >= 0.")
+        if wall_upgrade:
+            if int(wall_upgrade.get("run_every_n_attacks", 1)) < 1:
+                raise ValueError("Nâng tường: số trận phải >= 1.")
+            if int(wall_upgrade.get("trigger_percent", 0)) < 1 or int(wall_upgrade.get("trigger_percent", 0)) > 100:
+                raise ValueError("Nâng tường: ngưỡng tài nguyên phải từ 1 đến 100.")
+            if int(wall_upgrade.get("gold_capacity", 1)) < 1 or int(wall_upgrade.get("elixir_capacity", 1)) < 1:
+                raise ValueError("Nâng tường: sức chứa vàng/dầu phải >= 1.")
+            if int(wall_upgrade.get("reserve_gold", 0)) < 0 or int(wall_upgrade.get("reserve_elixir", 0)) < 0:
+                raise ValueError("Nâng tường: tài nguyên giữ lại phải >= 0.")
+            if int(wall_upgrade.get("max_add_rounds", 1)) < 1:
+                raise ValueError("Nâng tường: tối đa lần bấm +10 phải >= 1.")
+            if str(wall_upgrade.get("pay_with", "auto")) not in {"auto", "gold", "elixir"}:
+                raise ValueError("Nâng tường: tài nguyên dùng phải là auto/gold/elixir.")
         counts = manual_army.get("counts", {})
         if isinstance(counts, dict):
             for kind, value in counts.items():

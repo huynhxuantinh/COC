@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { PageHeader } from "../components/PageHeader";
-import { TextInput, Toggle } from "../components/FormControls";
+import { SelectInput, TextInput, Toggle } from "../components/FormControls";
 import { numberValue, useConfigEditor } from "../hooks/useConfigEditor";
 
 export function SettingsPage() {
@@ -20,6 +20,7 @@ export function SettingsPage() {
   const game = config.game;
   const ocr = config.ocr;
   const attackTiming = config.attack_timing ?? {};
+  const wallUpgrade = config.wall_upgrade ?? {};
   const useDefaultTiming = attackTiming.use_default ?? true;
   const timingDisabled = Boolean(useDefaultTiming);
 
@@ -120,6 +121,85 @@ export function SettingsPage() {
                 min={0}
                 value={String(game.ldplayer_index ?? 0)}
                 onChange={(event) => updatePath(["game", "ldplayer_index"], numberValue(event.target.value))}
+              />
+            </div>
+          </Card>
+
+          <Card title="Nâng tường">
+            <div className="space-y-4">
+              <Toggle
+                label="Bật tự động nâng tường"
+                checked={Boolean(wallUpgrade.enabled)}
+                onChange={(value) => updatePath(["wall_upgrade", "enabled"], value)}
+              />
+              <Toggle
+                label="Nâng 10 tường mỗi lần"
+                checked={Boolean(wallUpgrade.use_add10)}
+                onChange={(value) => updatePath(["wall_upgrade", "use_add10"], value)}
+              />
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextInput
+                  label="Chạy sau số trận"
+                  type="number"
+                  min={1}
+                  value={String(wallUpgrade.run_every_n_attacks ?? 20)}
+                  onChange={(event) => updatePath(["wall_upgrade", "run_every_n_attacks"], numberValue(event.target.value))}
+                />
+                <TextInput
+                  label="Ngưỡng tài nguyên (%)"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={String(wallUpgrade.trigger_percent ?? 95)}
+                  onChange={(event) => updatePath(["wall_upgrade", "trigger_percent"], numberValue(event.target.value))}
+                />
+              </div>
+              <SelectInput
+                label="Dùng tài nguyên"
+                value={wallUpgrade.pay_with ?? "auto"}
+                onChange={(event) => updatePath(["wall_upgrade", "pay_with"], event.target.value)}
+                options={[
+                  { label: "Tự động", value: "auto" },
+                  { label: "Vàng", value: "gold" },
+                  { label: "Dầu", value: "elixir" },
+                ]}
+              />
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextInput
+                  label="Kho vàng tối đa"
+                  type="number"
+                  min={1}
+                  value={String(wallUpgrade.gold_capacity ?? 6000000)}
+                  onChange={(event) => updatePath(["wall_upgrade", "gold_capacity"], numberValue(event.target.value))}
+                />
+                <TextInput
+                  label="Kho dầu tối đa"
+                  type="number"
+                  min={1}
+                  value={String(wallUpgrade.elixir_capacity ?? 6000000)}
+                  onChange={(event) => updatePath(["wall_upgrade", "elixir_capacity"], numberValue(event.target.value))}
+                />
+                <TextInput
+                  label="Giữ lại vàng"
+                  type="number"
+                  min={0}
+                  value={String(wallUpgrade.reserve_gold ?? 200000)}
+                  onChange={(event) => updatePath(["wall_upgrade", "reserve_gold"], numberValue(event.target.value))}
+                />
+                <TextInput
+                  label="Giữ lại dầu"
+                  type="number"
+                  min={0}
+                  value={String(wallUpgrade.reserve_elixir ?? 200000)}
+                  onChange={(event) => updatePath(["wall_upgrade", "reserve_elixir"], numberValue(event.target.value))}
+                />
+              </div>
+              <TextInput
+                label="Tối đa lần bấm"
+                type="number"
+                min={1}
+                value={String(wallUpgrade.max_add_rounds ?? 60)}
+                onChange={(event) => updatePath(["wall_upgrade", "max_add_rounds"], numberValue(event.target.value))}
               />
             </div>
           </Card>
