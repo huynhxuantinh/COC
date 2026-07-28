@@ -56,7 +56,7 @@ export function DashboardPage({ status, refreshStatus }: Props) {
   const comboSlots = Array.from(
     new Set<string>([
       ...((deploy?.sequence ?? []).map((step: any) => String(step.slot ?? "")).filter(Boolean)),
-      ...((deploy?.spell_groups ?? [])
+      ...((config?.deploy?.spell_groups ?? [])
         .filter((group: any) => group.enabled !== false)
         .flatMap((group: any) => (group.slots ?? []).map((slot: unknown) => String(slot)).filter(Boolean))),
     ]),

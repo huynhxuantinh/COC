@@ -147,6 +147,7 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
       : "Thiết lập 4 vùng polygon để bot random điểm thả quân trong vùng.";
   const isZoneTarget = mode === "spells" || target.startsWith("zone_");
   const isTroopZoneTarget = target.startsWith("zone_");
+  const isGlobalTarget = isTroopZoneTarget || target.startsWith("spell_group_zone_");
 
   async function run(name: string, action: () => Promise<void>) {
     setBusy(name);
@@ -203,7 +204,7 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
       return;
     }
     await run("save", async () => {
-      await saveCoordinatePoints(target, points, isTroopZoneTarget ? "__global__" : comboName || config?.farm?.combo || "");
+      await saveCoordinatePoints(target, points, isGlobalTarget ? "" : comboName || config?.farm?.combo || "");
       await reload();
       setMessage(`Đã lưu ${points.length} tọa độ vào ${targetLabel(target)}.`);
     });
@@ -326,9 +327,9 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
 
           <Card title="Lưu tọa độ">
             <div className="space-y-4">
-              {isTroopZoneTarget ? (
+              {isGlobalTarget ? (
                 <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-sm text-slate-300">
-                  Vùng thả quân dùng chung cho tất cả combo.
+                  Dùng chung cho tất cả combo.
                 </div>
               ) : (
                 <SelectInput label="Lưu cho combo" value={comboName || config?.farm?.combo || ""} options={comboOptions} onChange={(event) => setComboName(event.target.value)} />

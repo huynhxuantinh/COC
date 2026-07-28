@@ -435,7 +435,7 @@ class FarmBot:
 
         for step in self.active_deploy.get("sequence", []):
             add(str(step.get("slot", "")))
-        for group in self.active_deploy.get("spell_groups", []):
+        for group in self.config.get("deploy", {}).get("spell_groups", []):
             if not group.get("enabled", True):
                 continue
             for slot in group.get("slots", []):
@@ -565,7 +565,7 @@ class FarmBot:
         return len(self.runtime_slots.get(slot, [])) > 1
 
     def _cast_spells(self, deploy_finished: float) -> None:
-        spell_groups = self.active_deploy.get("spell_groups", [])
+        spell_groups = self.config.get("deploy", {}).get("spell_groups", [])
         if not spell_groups:
             self.log("[SPELL] Chưa cấu hình spell_groups, skip thả thuốc.")
             return

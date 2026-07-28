@@ -325,6 +325,7 @@ DEFAULT_CONFIG["combos"]["Valkyrie"]["deploy"]["sequence"] = [
 ]
 for combo in DEFAULT_CONFIG["combos"].values():
     combo.get("deploy", {}).pop("deploy_zones", None)
+    combo.get("deploy", {}).pop("spell_groups", None)
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -389,6 +390,7 @@ def migrate_global_deploy_zones(config: dict[str, Any]) -> None:
         deploy = combo.get("deploy", {}) if isinstance(combo, dict) else {}
         if isinstance(deploy, dict):
             deploy.pop("deploy_zones", None)
+            deploy.pop("spell_groups", None)
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:

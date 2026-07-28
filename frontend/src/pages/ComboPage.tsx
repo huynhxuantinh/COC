@@ -58,6 +58,7 @@ function remapDeployKind(deploy: any, oldKind: string, newKind: string) {
 function comboDeployCopy(deploy: any) {
   const nextDeploy = clone(deploy ?? {});
   delete nextDeploy.deploy_zones;
+  delete nextDeploy.spell_groups;
   return nextDeploy;
 }
 
@@ -151,7 +152,10 @@ export function ComboPage() {
     }
     const nextCombos = clone(appConfig.combos ?? {});
     nextCombos[copyName] = clone(nextCombos[currentCombo]);
-    if (nextCombos[copyName]?.deploy) delete nextCombos[copyName].deploy.deploy_zones;
+    if (nextCombos[copyName]?.deploy) {
+      delete nextCombos[copyName].deploy.deploy_zones;
+      delete nextCombos[copyName].deploy.spell_groups;
+    }
     updateCombos(nextCombos);
     setRunningCombo(copyName);
   }

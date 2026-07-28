@@ -31,7 +31,8 @@
       "hero",
       "rage",
       "freeze",
-      "rong"
+      "rong",
+      "linh_sk"
     ],
     "cluster_kinds": [
       "hero"
@@ -43,7 +44,8 @@
       "valkyrie": 60,
       "rage": 5,
       "freeze": 11,
-      "rong": 99
+      "rong": 99,
+      "linh_sk": 99
     },
     "count_corrections": {
       "rage": {
@@ -61,7 +63,8 @@
       "hero": 2,
       "rage": 4,
       "freeze": 1,
-      "rong": 0
+      "rong": 0,
+      "linh_sk": 0
     }
   },
   "game": {
@@ -1993,13 +1996,19 @@
             "slot": "valkyrie",
             "count": "all",
             "max_taps": 60,
-            "delay": 0.06
+            "delay": 0.03
           },
           {
             "slot": "hero",
             "count": "all",
             "max_taps": 5,
             "delay": 0.12
+          },
+          {
+            "slot": "linh_sk",
+            "count": "all",
+            "max_taps": 60,
+            "delay": 0.05
           }
         ],
         "spell_groups": [

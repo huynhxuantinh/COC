@@ -232,12 +232,14 @@ class BotService:
             "zone_duoibentrai": ["deploy", "deploy_zones", "duoibentrai"],
         }
         allowed = dict(deploy_zone_targets)
+        global_targets = set(deploy_zone_targets)
         spell_targets = {
             "spell_group": ["deploy", "spell_groups", "0", "zones"],
         }
         for prefix, base_path in spell_targets.items():
             for view in ("trenbenphai", "trenbentrai", "duoibenphai", "duoibentrai"):
                 allowed[f"{prefix}_zone_{view}"] = [*base_path, view]
+                global_targets.add(f"{prefix}_zone_{view}")
         if target not in allowed:
             raise ValueError("Target tọa độ không hợp lệ.")
         normalized = [[int(point[0]), int(point[1])] for point in points]
@@ -248,7 +250,7 @@ class BotService:
             combo_path = allowed[target][1:] if allowed[target][0] == "deploy" else allowed[target]
             updated_combos: list[str] = []
 
-            if target in deploy_zone_targets:
+            if target in global_targets:
                 selected_combo = "__global__"
             elif selected_combo == "__global__":
                 updated_combos = []
@@ -264,7 +266,7 @@ class BotService:
                 self._set_config_path(combo_deploy, combo_path, normalized)
                 updated_combos.append(selected_combo)
             save_config(self.config_data)
-        combo_label = "global deploy" if target in deploy_zone_targets else (", ".join(updated_combos) if updated_combos else "global deploy")
+        combo_label = "global deploy" if target in global_targets else (", ".join(updated_combos) if updated_combos else "global deploy")
         self._log(f"[COORD] Saved {len(normalized)} point(s) to {target} | {combo_label}.")
         return self.get_config()
 
