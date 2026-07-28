@@ -6,6 +6,7 @@ import { SelectInput, TextInput } from "../components/FormControls";
 import { captureScreenshot } from "../services/coordinatesApi";
 import { apiErrorMessage } from "../services/http";
 import {
+  deleteSlotTemplate,
   detectSlots,
   getSlotTemplates,
   saveSlotTemplate,
@@ -28,6 +29,12 @@ const cropPresets = [48, 64, 76, 96, 112];
 function clampCropSize(value: number): number {
   if (!Number.isFinite(value)) return 76;
   return Math.max(32, Math.min(140, Math.round(value)));
+}
+
+function templateImageSrc(filename: string, imageBase64: string): string {
+  const lower = filename.toLowerCase();
+  const mime = lower.endsWith(".webp") ? "image/webp" : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" : "image/png";
+  return `data:${mime};base64,${imageBase64}`;
 }
 
 export function SlotDetectionPage() {
@@ -181,6 +188,15 @@ export function SlotDetectionPage() {
     });
   }
 
+  async function handleDeleteTemplate(templateKind: string, filename: string) {
+    if (!window.confirm(`Xóa template ${templateKind}/${filename}?`)) return;
+    await run(`delete-${templateKind}-${filename}`, async () => {
+      const payload = await deleteSlotTemplate(templateKind, filename);
+      setTemplates(payload);
+      setMessage(`Đã xóa template ${kindLabels[templateKind] ?? templateKind}: ${filename}.`);
+    });
+  }
+
   async function handleDetect() {
     await run("detect", async () => {
       const items = await detectSlots(image?.image_base64 ?? "");
@@ -309,11 +325,39 @@ export function SlotDetectionPage() {
           </Card>
 
           <Card title="Mẫu hiện có">
-            <div className="space-y-2 text-sm text-slate-300">
+            <div className="max-h-96 space-y-3 overflow-auto text-sm text-slate-300">
               {(templates?.items ?? []).map((item) => (
-                <div key={item.kind} className="flex items-center justify-between rounded-lg bg-ink-900 px-3 py-2">
-                  <span>{kindLabels[item.kind] ?? item.kind}</span>
-                  <span className="font-mono text-sky-300">{item.count}</span>
+                <div key={item.kind} className="rounded-lg bg-ink-900 px-3 py-2">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="font-semibold text-white">{kindLabels[item.kind] ?? item.kind}</span>
+                    <span className="font-mono text-sky-300">{item.count}</span>
+                  </div>
+                  <div className="space-y-2">
+                    {(item.files ?? []).length === 0 ? (
+                      <p className="text-xs text-slate-500">Chưa có mẫu.</p>
+                    ) : (
+                      (item.files ?? []).map((file) => (
+                        <div key={file.filename} className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/25 p-2">
+                          <img
+                            src={templateImageSrc(file.filename, file.image_base64)}
+                            alt={file.filename}
+                            className="h-12 w-12 rounded border border-white/10 bg-black object-contain"
+                          />
+                          <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-300" title={file.filename}>
+                            {file.filename}
+                          </span>
+                          <Button
+                            className="px-3 py-1.5"
+                            variant="danger"
+                            disabled={busy !== ""}
+                            onClick={() => handleDeleteTemplate(item.kind, file.filename)}
+                          >
+                            Xóa
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

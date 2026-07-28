@@ -4,6 +4,10 @@ export type SlotTemplateItem = {
   kind: string;
   count: number;
   path: string;
+  files: {
+    filename: string;
+    image_base64: string;
+  }[];
 };
 
 export type SlotTemplatesPayload = {
@@ -40,6 +44,11 @@ export async function saveSlotTemplate(
     size,
     crop_region: cropRegion,
   });
+  return response.data;
+}
+
+export async function deleteSlotTemplate(kind: string, filename: string): Promise<SlotTemplatesPayload> {
+  const response = await http.delete<SlotTemplatesPayload>(`/api/slots/templates/${encodeURIComponent(kind)}/${encodeURIComponent(filename)}`);
   return response.data;
 }
 

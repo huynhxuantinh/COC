@@ -70,9 +70,38 @@ class SlotDetector:
                 "kind": kind,
                 "count": len(self.templates_for(kind)),
                 "path": str(self.template_dir / self._safe_kind(kind)),
+                "files": [
+                    {
+                        "filename": path.name,
+                        "image_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
+                    }
+                    for path in self.templates_for(kind)
+                ],
             }
             for kind in self.kinds
         ]
+
+    def delete_template(self, kind: str, filename: str) -> Path:
+        safe_kind = self._safe_kind(kind)
+        if safe_kind not in self.kinds:
+            raise ValueError(f"Loai slot khong hop le: {kind}")
+
+        safe_filename = Path(filename).name
+        if not safe_filename or safe_filename != filename:
+            raise ValueError("Ten file template khong hop le.")
+
+        directory = (self.template_dir / safe_kind).resolve()
+        path = (directory / safe_filename).resolve()
+        if path.parent != directory:
+            raise ValueError("Duong dan template khong hop le.")
+        if path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+            raise ValueError("Dinh dang template khong hop le.")
+        if not path.exists() or not path.is_file():
+            raise ValueError("Khong tim thay template.")
+
+        path.unlink()
+        self._template_cache.pop(str(path), None)
+        return path
 
     def _load_template(self, path: Path):
         import cv2

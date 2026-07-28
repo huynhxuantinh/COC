@@ -39,13 +39,25 @@ function deployFromCombo(combo: any, fallbackDeploy: any) {
 
 function deployUsesKind(deploy: any, kind: string): boolean {
   const sequence = Array.isArray(deploy?.sequence) ? deploy.sequence : [];
-  return sequence.some((step: any) => step?.slot === kind);
+  const spellGroups = Array.isArray(deploy?.spell_groups) ? deploy.spell_groups : [];
+  return sequence.some((step: any) => step?.slot === kind) || spellGroups.some((group: any) => Array.isArray(group?.slots) && group.slots.includes(kind));
 }
 
 function remapDeployKind(deploy: any, oldKind: string, newKind: string) {
   const nextDeploy = clone(deploy ?? {});
   const sequence = Array.isArray(nextDeploy.sequence) ? nextDeploy.sequence : [];
   nextDeploy.sequence = sequence.map((step: any) => (step?.slot === oldKind ? { ...step, slot: newKind } : step));
+  const spellGroups = Array.isArray(nextDeploy.spell_groups) ? nextDeploy.spell_groups : [];
+  nextDeploy.spell_groups = spellGroups.map((group: any) => {
+    const slots = Array.isArray(group?.slots) ? group.slots : [];
+    return { ...group, slots: slots.map((slot: string) => (slot === oldKind ? newKind : slot)) };
+  });
+  return nextDeploy;
+}
+
+function comboDeployCopy(deploy: any) {
+  const nextDeploy = clone(deploy ?? {});
+  delete nextDeploy.deploy_zones;
   return nextDeploy;
 }
 
@@ -108,7 +120,7 @@ export function ComboPage() {
     const name = cleanName(newComboName);
     if (!name || appConfig.combos?.[name]) return;
     const nextCombos = clone(appConfig.combos ?? {});
-    nextCombos[name] = { deploy: clone(appConfig.deploy ?? deploy) };
+    nextCombos[name] = { deploy: comboDeployCopy(appConfig.deploy ?? deploy) };
     updateCombos(nextCombos);
     setRunningCombo(name);
     setNewComboName("");
@@ -139,6 +151,7 @@ export function ComboPage() {
     }
     const nextCombos = clone(appConfig.combos ?? {});
     nextCombos[copyName] = clone(nextCombos[currentCombo]);
+    if (nextCombos[copyName]?.deploy) delete nextCombos[copyName].deploy.deploy_zones;
     updateCombos(nextCombos);
     setRunningCombo(copyName);
   }

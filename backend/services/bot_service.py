@@ -225,12 +225,13 @@ class BotService:
         self._log(f"[COORD] Test tap {int(x)},{int(y)}.")
 
     def save_points(self, target: str, points: list[list[int]], combo_name: str = "") -> dict[str, Any]:
-        allowed = {
+        deploy_zone_targets = {
             "zone_trenbenphai": ["deploy", "deploy_zones", "trenbenphai"],
             "zone_trenbentrai": ["deploy", "deploy_zones", "trenbentrai"],
             "zone_duoibenphai": ["deploy", "deploy_zones", "duoibenphai"],
             "zone_duoibentrai": ["deploy", "deploy_zones", "duoibentrai"],
         }
+        allowed = dict(deploy_zone_targets)
         spell_targets = {
             "spell_group": ["deploy", "spell_groups", "0", "zones"],
         }
@@ -247,7 +248,9 @@ class BotService:
             combo_path = allowed[target][1:] if allowed[target][0] == "deploy" else allowed[target]
             updated_combos: list[str] = []
 
-            if selected_combo == "__global__":
+            if target in deploy_zone_targets:
+                selected_combo = "__global__"
+            elif selected_combo == "__global__":
                 updated_combos = []
             elif selected_combo == "__all__":
                 for name, combo in combos.items():
@@ -261,7 +264,7 @@ class BotService:
                 self._set_config_path(combo_deploy, combo_path, normalized)
                 updated_combos.append(selected_combo)
             save_config(self.config_data)
-        combo_label = ", ".join(updated_combos) if updated_combos else "global deploy"
+        combo_label = "global deploy" if target in deploy_zone_targets else (", ".join(updated_combos) if updated_combos else "global deploy")
         self._log(f"[COORD] Saved {len(normalized)} point(s) to {target} | {combo_label}.")
         return self.get_config()
 
@@ -281,6 +284,12 @@ class BotService:
         detector = SlotDetector(self.get_config(), self._log)
         path = detector.save_template_from_base64(kind, image_base64, x, y, size, crop_region)
         self._log(f"[SLOT] Saved template {kind}: {path}.")
+        return self.slot_templates()
+
+    def delete_slot_template(self, kind: str, filename: str) -> dict[str, Any]:
+        detector = SlotDetector(self.get_config(), self._log)
+        path = detector.delete_template(kind, filename)
+        self._log(f"[SLOT] Deleted template {kind}: {path.name}.")
         return self.slot_templates()
 
     def detect_slots(self, image_base64: str = "") -> dict[str, Any]:

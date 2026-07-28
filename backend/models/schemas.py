@@ -79,10 +79,16 @@ class SavePointsPayload(BaseModel):
     combo_name: str = ""
 
 
+class SlotTemplateFile(BaseModel):
+    filename: str
+    image_base64: str
+
+
 class SlotTemplateItem(BaseModel):
     kind: str
     count: int
     path: str
+    files: list[SlotTemplateFile] = Field(default_factory=list)
 
 
 class SlotTemplatesPayload(BaseModel):

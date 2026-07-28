@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import unquote
+
 from fastapi import APIRouter, HTTPException
 
 from backend.models.schemas import (
@@ -32,6 +34,14 @@ def save_template(payload: SlotTemplateSavePayload) -> SlotTemplatesPayload:
                 payload.crop_region,
             )
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/templates/{kind}/{filename}", response_model=SlotTemplatesPayload)
+def delete_template(kind: str, filename: str) -> SlotTemplatesPayload:
+    try:
+        return SlotTemplatesPayload(**bot_service.delete_slot_template(kind, unquote(filename)))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

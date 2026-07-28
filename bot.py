@@ -861,29 +861,18 @@ class FarmBot:
     def _deploy_points(self) -> list[list[int]]:
         deploy = self.active_deploy
         view = self.current_attack_view or self._selected_attack_view()
-        zone, source = self._deploy_zone_for_view(view)
+        zone = self._deploy_zone_for_view(view)
         if len(zone) >= 3:
-            suffix = "default deploy" if source == "default" else "combo deploy"
-            self.log(f"[ZONE] Deploy random in zone: {view} ({suffix}).")
+            self.log(f"[ZONE] Deploy random in zone: {view} (global deploy).")
             return self._random_points_in_polygon(
                 zone,
                 int(deploy.get("zone_random_points", 48)),
             )
-        self.log(f"[ZONE] Missing deploy zone for {view or 'unknown view'} in combo/default deploy.")
+        self.log(f"[ZONE] Missing global deploy zone for {view or 'unknown view'}.")
         return []
 
-    def _deploy_zone_for_view(self, view: str) -> tuple[list[list[int]], str]:
-        zone = self._valid_polygon(self.active_deploy.get("deploy_zones", {}).get(view, []))
-        if zone:
-            return zone, "combo"
-
-        base_deploy = self.config.get("deploy", {})
-        if base_deploy is not self.active_deploy:
-            zone = self._valid_polygon(base_deploy.get("deploy_zones", {}).get(view, []))
-            if zone:
-                return zone, "default"
-
-        return [], ""
+    def _deploy_zone_for_view(self, view: str) -> list[list[int]]:
+        return self._valid_polygon(self.config.get("deploy", {}).get("deploy_zones", {}).get(view, []))
 
     def _valid_polygon(self, points: Any) -> list[list[int]]:
         if not isinstance(points, list):
@@ -963,7 +952,7 @@ class FarmBot:
         valid_views = tuple(
             view
             for view in ("trenbenphai", "trenbentrai", "duoibenphai", "duoibentrai")
-            if len(self._deploy_zone_for_view(view)[0]) >= 3
+            if len(self._deploy_zone_for_view(view)) >= 3
         )
         if not valid_views:
             return ""

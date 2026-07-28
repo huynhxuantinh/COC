@@ -323,6 +323,8 @@ DEFAULT_CONFIG["combos"]["Valkyrie"]["deploy"]["sequence"] = [
     {"slot": "valkyrie", "count": "all", "max_taps": 60, "delay": 0.06},
     {"slot": "hero", "count": "all", "max_taps": 5, "delay": 0.12},
 ]
+for combo in DEFAULT_CONFIG["combos"].values():
+    combo.get("deploy", {}).pop("deploy_zones", None)
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -382,6 +384,13 @@ def migrate_fast_attack_delays(config: dict[str, Any]) -> None:
             timing[key] = new_value
 
 
+def migrate_global_deploy_zones(config: dict[str, Any]) -> None:
+    for combo in config.get("combos", {}).values():
+        deploy = combo.get("deploy", {}) if isinstance(combo, dict) else {}
+        if isinstance(deploy, dict):
+            deploy.pop("deploy_zones", None)
+
+
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     if not path.exists():
         save_config(DEFAULT_CONFIG, path)
@@ -397,6 +406,7 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
             },
         }
     migrate_fast_attack_delays(merged)
+    migrate_global_deploy_zones(merged)
     return merged
 
 
