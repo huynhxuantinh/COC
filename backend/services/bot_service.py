@@ -438,6 +438,8 @@ class BotService:
                 raise ValueError("Nâng tường: tài nguyên giữ lại phải >= 0.")
             if int(wall_upgrade.get("max_add_rounds", 1)) < 1:
                 raise ValueError("Nâng tường: tối đa lần bấm +10 phải >= 1.")
+            if int(wall_upgrade.get("retry_backoff_attacks", 1)) < 1:
+                raise ValueError("Nâng tường: số trận nghỉ sau lỗi phải >= 1.")
             if str(wall_upgrade.get("pay_with", "auto")) not in {"auto", "gold", "elixir"}:
                 raise ValueError("Nâng tường: tài nguyên dùng phải là auto/gold/elixir.")
         counts = manual_army.get("counts", {})

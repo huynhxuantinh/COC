@@ -198,8 +198,15 @@ export function SettingsPage() {
                 label="Tối đa lần bấm"
                 type="number"
                 min={1}
-                value={String(wallUpgrade.max_add_rounds ?? 60)}
+                value={String(wallUpgrade.max_add_rounds ?? 10)}
                 onChange={(event) => updatePath(["wall_upgrade", "max_add_rounds"], numberValue(event.target.value))}
+              />
+              <TextInput
+                label="Nghỉ sau lỗi (trận)"
+                type="number"
+                min={1}
+                value={String(wallUpgrade.retry_backoff_attacks ?? 20)}
+                onChange={(event) => updatePath(["wall_upgrade", "retry_backoff_attacks"], numberValue(event.target.value))}
               />
             </div>
           </Card>

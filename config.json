@@ -1060,6 +1060,7 @@
     "reserve_elixir": 800000,
     "use_add10": false,
     "max_add_rounds": 10,
+    "retry_backoff_attacks": 20,
     "max_wall_search_scrolls": 6,
     "resource_read_attempts": 3,
     "cost_read_attempts": 3,
