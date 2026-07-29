@@ -70,27 +70,34 @@ class Vision:
             return self._ocr_digits(gray, whitelist, psm=7)
 
         white_mask = self._white_digit_mask(crop)
+        fast_candidates = [
+            (white_mask, 7),
+            (white_mask, 8),
+        ]
+        values: Counter[int] = Counter()
+        for candidate, psm in fast_candidates:
+            value = self._ocr_digits(candidate, whitelist, psm)
+            if value >= 0:
+                values[value] += 1
+                if values[value] >= 2 and len(str(value)) >= 4:
+                    return value
+
         candidates = [
+            (white_mask, 13),
+            (white_mask.filter(self.ImageFilter.MinFilter(3)), 7),
+            (white_mask.filter(self.ImageFilter.MaxFilter(3)), 7),
             (gray, 8),
             (gray, 13),
             (gray, 7),
             (self.ImageEnhance.Contrast(gray).enhance(2.2), 8),
             (gray.point(lambda p: 255 if p > 120 else 0), 8),
-            (white_mask, 7),
-            (white_mask, 8),
-            (white_mask, 13),
-            (white_mask.filter(self.ImageFilter.MinFilter(3)), 7),
-            (white_mask.filter(self.ImageFilter.MaxFilter(3)), 7),
         ]
-        values: Counter[int] = Counter()
         for candidate, psm in candidates:
             value = self._ocr_digits(candidate, whitelist, psm)
             if value >= 0:
                 values[value] += 1
         if values:
-            best_count = max(values.values())
-            best_values = [value for value, count in values.items() if count == best_count]
-            return max(best_values, key=lambda value: (len(str(value)), value))
+            return max(values, key=lambda value: (values[value] * len(str(value)), values[value], len(str(value)), value))
         return -1
 
     def _ocr_digits(self, image, whitelist: str, psm: int) -> int:
@@ -100,15 +107,14 @@ class Vision:
         return int(digits) if digits else -1
 
     def _white_digit_mask(self, image):
-        mask = self.Image.new("L", image.size, 255)
-        pixels = image.load()
-        mask_pixels = mask.load()
-        for y in range(image.height):
-            for x in range(image.width):
-                r, g, b = pixels[x, y]
-                if r > 175 and g > 175 and b > 175 and max(r, g, b) - min(r, g, b) < 85:
-                    mask_pixels[x, y] = 0
-        return mask
+        import numpy as np
+
+        pixels = np.asarray(image.convert("RGB"), dtype=np.int16)
+        bright = np.all(pixels > 175, axis=2)
+        low_chroma = pixels.max(axis=2) - pixels.min(axis=2) < 85
+        digit_pixels = bright & low_chroma
+        mask = np.where(digit_pixels, 0, 255).astype(np.uint8)
+        return self.Image.fromarray(mask, mode="L")
 
     def read_text(self, image, region: list[int]) -> str:
         if not self.available or image is None:
