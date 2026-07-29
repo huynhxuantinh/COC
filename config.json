@@ -1051,7 +1051,7 @@
   },
   "wall_upgrade": {
     "enabled": true,
-    "run_every_n_attacks": 1,
+    "run_every_n_attacks": 3,
     "gold_capacity": 26000000,
     "elixir_capacity": 26000000,
     "trigger_percent": 95,

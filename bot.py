@@ -905,11 +905,12 @@ class FarmBot:
         use_add10 = bool(settings.get("use_add10", False))
         add_button = coords["add10_button"] if use_add10 else coords["add1_button"]
         add_label = "+10" if use_add10 else "+1"
-        max_rounds = max(1, int(settings.get("max_add_rounds", 60)))
+        max_rounds = max(1, int(settings.get("max_add_rounds", 60))) if use_add10 else 1
         self.log(f"[WALL] Dung nut {add_label}, toi da {max_rounds} lan bam.")
         last_safe_cost = 0
         last_add_increment = 0
         rounds = 0
+        selected_pay_with = pay_with
         while rounds < max_rounds and not self.stop_event.is_set():
             if last_safe_cost > 0 and last_add_increment > 0 and last_safe_cost + last_add_increment > budget:
                 self.log(
@@ -938,17 +939,55 @@ class FarmBot:
             last_safe_cost = cost
             rounds += 1
 
+        selected = self._select_wall_upgrade_payment(settings, coords)
+        if selected:
+            selected_pay_with, upgrade_button, last_safe_cost, budget = selected
+
         if last_safe_cost <= 0:
             self.log("[WALL] Khong du tai nguyen de nang tuong, huy.")
             self._close_wall_popup()
             return
 
-        self.log(f"[WALL] Xac nhan nang tuong: {last_safe_cost:,} {pay_with}.")
+        if last_safe_cost > budget:
+            self.log(f"[WALL] Gia {last_safe_cost:,} vuot ngan sach {budget:,} {selected_pay_with}, huy.")
+            self._close_wall_popup()
+            return
+
+        self.log(f"[WALL] Xac nhan nang tuong: {last_safe_cost:,} {selected_pay_with}.")
         self.adb.tap(*upgrade_button)
         self._sleep(1.0)
         self.adb.tap(*coords["confirm_okay_button"])
         self._sleep(1.2)
         self.attacks_since_wall_upgrade = 0
+
+    def _select_wall_upgrade_payment(
+        self,
+        settings: dict[str, Any],
+        coords: dict[str, Any],
+    ) -> tuple[str, list[int], int, int] | None:
+        resources = self._read_home_resources_stable(settings)
+        if not resources:
+            return None
+
+        budgets = {
+            "gold": max(0, int(resources.get("gold", -1)) - int(settings.get("reserve_gold", 0))),
+            "elixir": max(0, int(resources.get("elixir", -1)) - int(settings.get("reserve_elixir", 0))),
+        }
+        buttons = {
+            "gold": coords["upgrade_gold_button"],
+            "elixir": coords["upgrade_elixir_button"],
+        }
+        requested = str(settings.get("pay_with", "auto")).lower()
+        order = [requested] if requested in {"gold", "elixir"} else sorted(
+            budgets,
+            key=lambda key: budgets[key],
+            reverse=True,
+        )
+        for kind in order:
+            cost = self._read_wall_cost_stable(settings, buttons[kind])
+            if 0 < cost <= budgets[kind]:
+                return kind, buttons[kind], cost, budgets[kind]
+        return None
 
     def _find_wall_row(self, settings: dict[str, Any]) -> list[int] | None:
         search_region = settings.get("search_region", [560, 100, 500, 600])
