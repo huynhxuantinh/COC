@@ -55,6 +55,18 @@ function remapDeployKind(deploy: any, oldKind: string, newKind: string) {
   return nextDeploy;
 }
 
+function removeDeployKind(deploy: any, kind: string) {
+  const nextDeploy = clone(deploy ?? {});
+  const sequence = Array.isArray(nextDeploy.sequence) ? nextDeploy.sequence : [];
+  nextDeploy.sequence = sequence.filter((step: any) => step?.slot !== kind);
+  const spellGroups = Array.isArray(nextDeploy.spell_groups) ? nextDeploy.spell_groups : [];
+  nextDeploy.spell_groups = spellGroups.map((group: any) => {
+    const slots = Array.isArray(group?.slots) ? group.slots : [];
+    return { ...group, slots: slots.filter((slot: string) => slot !== kind) };
+  });
+  return nextDeploy;
+}
+
 function comboDeployCopy(deploy: any) {
   const nextDeploy = clone(deploy ?? {});
   delete nextDeploy.deploy_zones;
@@ -220,28 +232,26 @@ export function ComboPage() {
   }
 
   function deleteTroopKind(kind: string) {
-    const usedCombos = Object.entries(appConfig.combos ?? {})
-      .filter(([, item]) => deployUsesKind(deployFromCombo(item, appConfig.deploy), kind))
-      .map(([name]) => name);
-    if (deployUsesKind(appConfig.deploy, kind)) usedCombos.unshift("deploy mặc định");
-    if (usedCombos.length) {
-      setInfo(`Lính đang dùng trong: ${usedCombos.join(", ")}.`);
-      return;
-    }
-
     const nextKinds = allKinds.filter((item: string) => item !== kind);
     const nextMaxByKind = clone(appConfig.slot_detection?.count_max_by_kind ?? {});
     const nextManualCounts = clone(appConfig.manual_army?.counts ?? {});
     const nextCoordsSlots = clone(appConfig.coords?.slots ?? {});
+    const nextCombos = clone(appConfig.combos ?? {});
     delete nextMaxByKind[kind];
     delete nextManualCounts[kind];
     delete nextCoordsSlots[kind];
+    for (const name of Object.keys(nextCombos)) {
+      nextCombos[name] = { ...(nextCombos[name] ?? {}), deploy: removeDeployKind(deployFromCombo(nextCombos[name], appConfig.deploy), kind) };
+    }
 
     updatePath(["slot_detection", "kinds"], nextKinds);
     updatePath(["slot_detection", "count_max_by_kind"], nextMaxByKind);
     updatePath(["manual_army", "counts"], nextManualCounts);
     updatePath(["coords", "slots"], nextCoordsSlots);
+    updatePath(["deploy"], removeDeployKind(appConfig.deploy, kind));
+    updateCombos(nextCombos);
     setEditingKind("");
+    setInfo(`Đã xóa lính ${troopLabels[kind] ?? kind}.`);
   }
 
   function updateSequence(nextSequence: any[]) {

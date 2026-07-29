@@ -31,8 +31,7 @@
       "hero",
       "rage",
       "freeze",
-      "rong",
-      "linh_sk"
+      "rong"
     ],
     "cluster_kinds": [
       "hero"
@@ -44,8 +43,7 @@
       "valkyrie": 60,
       "rage": 5,
       "freeze": 11,
-      "rong": 99,
-      "linh_sk": 99
+      "rong": 99
     },
     "count_corrections": {
       "rage": {
@@ -58,13 +56,12 @@
     "enabled": true,
     "counts": {
       "dragon": 0,
-      "balloon": 8,
+      "balloon": 12,
       "valkyrie": 25,
       "hero": 4,
       "rage": 5,
       "freeze": 1,
-      "rong": 14,
-      "linh_sk": 50
+      "rong": 13
     }
   },
   "game": {
@@ -97,20 +94,20 @@
     "attack_edge": "random",
     "attack_view": "random",
     "threshold_mode": "any",
-    "gold_min": 800000,
-    "elixir_min": 800000,
-    "total_min": 1500000,
+    "gold_min": 1000000,
+    "elixir_min": 1000000,
+    "total_min": 1700000,
     "max_next": 80,
     "search_delay_seconds": 3,
     "ocr_fail_restart_seconds": 30
   },
   "surrender": {
-    "by_time": true,
+    "by_time": false,
     "time_min_seconds": 90,
     "time_max_seconds": 120,
-    "by_destruction": false,
-    "destruction_min_percent": 70,
-    "destruction_max_percent": 80,
+    "by_destruction": true,
+    "destruction_min_percent": 80,
+    "destruction_max_percent": 90,
     "when_low_loot": false,
     "total_remaining_less_than": 200000,
     "never_surrender": true,
@@ -951,74 +948,74 @@
         "zones": {
           "trenbenphai": [
             [
-              812,
-              228
+              819,
+              183
             ],
             [
-              1141,
-              464
+              631,
+              360
             ],
             [
-              1016,
-              565
+              973,
+              633
             ],
             [
-              705,
-              333
+              1115,
+              462
             ]
           ],
           "trenbentrai": [
             [
-              481,
-              450
+              775,
+              234
             ],
             [
-              720,
-              261
+              940,
+              442
             ],
             [
-              816,
-              382
+              640,
+              631
             ],
             [
-              607,
-              553
+              457,
+              437
             ]
           ],
           "duoibenphai": [
             [
-              730,
-              388
+              662,
+              396
             ],
             [
-              860,
-              530
+              816,
+              540
             ],
             [
-              1082,
-              353
+              1119,
+              316
             ],
             [
-              917,
-              238
+              882,
+              187
             ]
           ],
           "duoibentrai": [
             [
-              422,
-              331
+              440,
+              300
             ],
             [
-              726,
-              542
+              761,
+              547
             ],
             [
-              862,
-              382
+              917,
+              407
             ],
             [
-              574,
-              224
+              619,
+              183
             ]
           ]
         }
@@ -1043,7 +1040,7 @@
     "freeze_random_max_ms": 250,
     "rage_random_min_ms": 50,
     "rage_random_max_ms": 600,
-    "spell_min_point_distance_px": 120,
+    "spell_min_point_distance_px": 125,
     "hero_skill_min_ms": 200,
     "hero_skill_max_ms": 400,
     "next_battle_min_ms": 2000,
@@ -1053,21 +1050,32 @@
     "optimized_mode": false
   },
   "wall_upgrade": {
-    "enabled": false,
-    "run_every_n_attacks": 20,
-    "gold_capacity": 6000000,
-    "elixir_capacity": 6000000,
+    "enabled": true,
+    "run_every_n_attacks": 1,
+    "gold_capacity": 26000000,
+    "elixir_capacity": 26000000,
     "trigger_percent": 95,
     "pay_with": "auto",
-    "reserve_gold": 200000,
-    "reserve_elixir": 200000,
+    "reserve_gold": 800000,
+    "reserve_elixir": 800000,
     "use_add10": false,
-    "max_add_rounds": 60,
+    "max_add_rounds": 10,
+    "max_wall_search_scrolls": 6,
+    "resource_read_attempts": 3,
+    "cost_read_attempts": 3,
+    "read_attempt_delay": 0.45,
     "search_region": [
       560,
       100,
       500,
       600
+    ],
+    "list_scroll_swipe": [
+      820,
+      650,
+      820,
+      220,
+      500
     ],
     "coords": {
       "builder_icon": [
@@ -1097,6 +1105,10 @@
       "upgrade_elixir_button": [
         1145,
         700
+      ],
+      "confirm_upgrade_button": [
+        1120,
+        786
       ],
       "confirm_okay_button": [
         972,
@@ -2025,12 +2037,6 @@
             "count": "all",
             "max_taps": 5,
             "delay": 0.12
-          },
-          {
-            "slot": "linh_sk",
-            "count": "all",
-            "max_taps": 60,
-            "delay": 0.04
           }
         ]
       }
@@ -2602,12 +2608,6 @@
             "delay": 0.04
           },
           {
-            "slot": "linh_sk",
-            "count": "all",
-            "max_taps": 65,
-            "delay": 0.02
-          },
-          {
             "slot": "balloon",
             "count": "all",
             "max_taps": 34,
@@ -2616,8 +2616,8 @@
           {
             "slot": "hero",
             "count": "all",
-            "max_taps": 5,
-            "delay": 0.06
+            "max_taps": 10,
+            "delay": 0.05
           }
         ]
       }
