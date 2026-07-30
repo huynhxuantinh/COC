@@ -133,6 +133,11 @@ export function SettingsPage() {
                 onChange={(value) => updatePath(["wall_upgrade", "enabled"], value)}
               />
               <Toggle
+                label="Bật nâng sau số trận"
+                checked={Boolean(wallUpgrade.run_after_attacks_enabled ?? true)}
+                onChange={(value) => updatePath(["wall_upgrade", "run_after_attacks_enabled"], value)}
+              />
+              <Toggle
                 label="Nâng 10 tường mỗi lần"
                 checked={Boolean(wallUpgrade.use_add10)}
                 onChange={(value) => updatePath(["wall_upgrade", "use_add10"], value)}
@@ -194,20 +199,29 @@ export function SettingsPage() {
                   onChange={(event) => updatePath(["wall_upgrade", "reserve_elixir"], numberValue(event.target.value))}
                 />
               </div>
-              <TextInput
-                label="Tối đa lần bấm"
-                type="number"
-                min={1}
-                value={String(wallUpgrade.max_add_rounds ?? 10)}
-                onChange={(event) => updatePath(["wall_upgrade", "max_add_rounds"], numberValue(event.target.value))}
-              />
-              <TextInput
-                label="Nghỉ sau lỗi (trận)"
-                type="number"
-                min={1}
-                value={String(wallUpgrade.retry_backoff_attacks ?? 20)}
-                onChange={(event) => updatePath(["wall_upgrade", "retry_backoff_attacks"], numberValue(event.target.value))}
-              />
+              <div className="grid gap-4 md:grid-cols-3">
+                <TextInput
+                  label="Số lần bấm +1"
+                  type="number"
+                  min={1}
+                  value={String(wallUpgrade.add1_rounds ?? 1)}
+                  onChange={(event) => updatePath(["wall_upgrade", "add1_rounds"], numberValue(event.target.value))}
+                />
+                <TextInput
+                  label="Tối đa lần bấm +10"
+                  type="number"
+                  min={1}
+                  value={String(wallUpgrade.max_add_rounds ?? 10)}
+                  onChange={(event) => updatePath(["wall_upgrade", "max_add_rounds"], numberValue(event.target.value))}
+                />
+                <TextInput
+                  label="Nghỉ sau lỗi (trận)"
+                  type="number"
+                  min={1}
+                  value={String(wallUpgrade.retry_backoff_attacks ?? 10)}
+                  onChange={(event) => updatePath(["wall_upgrade", "retry_backoff_attacks"], numberValue(event.target.value))}
+                />
+              </div>
             </div>
           </Card>
 

@@ -436,6 +436,8 @@ class BotService:
                 raise ValueError("Nâng tường: sức chứa vàng/dầu phải >= 1.")
             if int(wall_upgrade.get("reserve_gold", 0)) < 0 or int(wall_upgrade.get("reserve_elixir", 0)) < 0:
                 raise ValueError("Nâng tường: tài nguyên giữ lại phải >= 0.")
+            if int(wall_upgrade.get("add1_rounds", 1)) < 1:
+                raise ValueError("Nâng tường: số lần bấm +1 phải >= 1.")
             if int(wall_upgrade.get("max_add_rounds", 1)) < 1:
                 raise ValueError("Nâng tường: tối đa lần bấm +10 phải >= 1.")
             if int(wall_upgrade.get("retry_backoff_attacks", 1)) < 1:

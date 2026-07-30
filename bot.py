@@ -841,9 +841,13 @@ class FarmBot:
         if not settings.get("enabled", False):
             return False
 
-        every = int(settings.get("run_every_n_attacks", 20))
-        if every > 0 and self.attacks_since_wall_upgrade >= every:
-            return True
+        if self.attacks_since_wall_upgrade < 0:
+            return False
+
+        if bool(settings.get("run_after_attacks_enabled", True)):
+            every = int(settings.get("run_every_n_attacks", 20))
+            if every > 0 and self.attacks_since_wall_upgrade >= every:
+                return True
 
         resources = self._read_home_resources_stable(settings)
         if not resources:
@@ -931,6 +935,20 @@ class FarmBot:
         use_add10 = bool(settings.get("use_add10", False))
         add_button = coords["add10_button"] if use_add10 else coords["add1_button"]
         add_label = "+10" if use_add10 else "+1"
+        if not use_add10:
+            add1_rounds = max(1, int(settings.get("add1_rounds", 1)))
+            self.log(f"[WALL] Dung nut {add_label}, bam {add1_rounds} lan.")
+            for _ in range(add1_rounds):
+                self.adb.tap(*add_button)
+                self._sleep(0.35)
+            self.log(f"[WALL] Xac nhan nang {add1_rounds} tuong bang {pay_with}.")
+            self.adb.tap(*upgrade_button)
+            self._sleep(1.0)
+            self.adb.tap(*coords["confirm_okay_button"])
+            self._sleep(1.2)
+            self.attacks_since_wall_upgrade = 0
+            return True
+
         max_rounds = max(1, int(settings.get("max_add_rounds", 60))) if use_add10 else 1
         self.log(f"[WALL] Dung nut {add_label}, toi da {max_rounds} lan bam.")
         last_safe_cost = 0

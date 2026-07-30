@@ -56,12 +56,12 @@
     "enabled": true,
     "counts": {
       "dragon": 0,
-      "balloon": 12,
+      "balloon": 8,
       "valkyrie": 25,
       "hero": 4,
       "rage": 5,
       "freeze": 1,
-      "rong": 13
+      "rong": 14
     }
   },
   "game": {
@@ -1051,17 +1051,19 @@
   },
   "wall_upgrade": {
     "enabled": true,
-    "run_every_n_attacks": 3,
+    "run_after_attacks_enabled": false,
+    "run_every_n_attacks": 15,
     "gold_capacity": 26000000,
     "elixir_capacity": 26000000,
-    "trigger_percent": 95,
+    "trigger_percent": 90,
     "pay_with": "auto",
-    "reserve_gold": 800000,
-    "reserve_elixir": 800000,
+    "reserve_gold": 600000,
+    "reserve_elixir": 600000,
     "use_add10": false,
-    "max_add_rounds": 10,
-    "retry_backoff_attacks": 20,
-    "max_wall_search_scrolls": 6,
+    "add1_rounds": 4,
+    "max_add_rounds": 4,
+    "retry_backoff_attacks": 2,
+    "max_wall_search_scrolls": 9,
     "resource_read_attempts": 3,
     "cost_read_attempts": 3,
     "read_attempt_delay": 0.45,
