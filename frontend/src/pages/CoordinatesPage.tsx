@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { Feedback } from "../components/Feedback";
-import { SelectInput } from "../components/FormControls";
+import { SelectInput, TextInput } from "../components/FormControls";
 import { PageHeader } from "../components/PageHeader";
 import { SegmentedControl } from "../components/SegmentedControl";
 import { useConfigEditor } from "../hooks/useConfigEditor";
@@ -43,7 +43,7 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [searchParams] = useSearchParams();
   const initial = parseInitialTarget(searchParams.get("target"));
-  const { config, isDirty: configDirty, reload } = useConfigEditor();
+  const { config, isDirty: configDirty, saving: configSaving, error: configError, savedMessage: configMessage, updatePath, save: saveConfig, reload } = useConfigEditor();
   const [view, setView] = useState(initial.view);
   const [groupIndex, setGroupIndex] = useState(initial.groupIndex);
   const [referenceImages, setReferenceImages] = useState<ReferenceImageItem[]>([]);
@@ -133,7 +133,7 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
   return (
     <div>
       <PageHeader eyebrow="Hiệu chỉnh" title={mode === "spells" ? "Tọa độ thả thuốc" : "Tọa độ thả lính"} subtitle={mode === "spells" ? "Vùng thuốc dùng chung, phân theo nhóm thuốc và bốn góc nhìn." : "Bốn vùng thả quân dùng chung cho mọi combo."} />
-      {error ? <Feedback tone="error" className="mb-5">{error}</Feedback> : message ? <Feedback tone="success" className="mb-5">{message}</Feedback> : null}
+      {(error || configError) ? <Feedback tone="error" className="mb-5">{error || configError}</Feedback> : message ? <Feedback tone="success" className="mb-5">{message}</Feedback> : configMessage ? <Feedback tone="success" className="mb-5">{configMessage}</Feedback> : null}
 
       <Card title="Nguồn ảnh">
         <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_auto_auto] lg:items-end">
@@ -164,6 +164,13 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
         </div>
 
         <aside className="min-w-0 space-y-5">
+          {mode === "spells" ? (
+            <Card title="Quy tắc thả thuốc">
+              <TextInput type="number" min={0} suffix="px" label="Khoảng cách tối thiểu" value={String(config?.attack_timing?.spell_min_point_distance_px ?? 120)} onChange={(event) => updatePath(["attack_timing", "spell_min_point_distance_px"], Number(event.target.value || 0))} />
+              <Button className="mt-4 w-full" variant="success" loading={configSaving} disabled={!configDirty} onClick={saveConfig}>Lưu cấu hình</Button>
+            </Card>
+          ) : null}
+
           <Card title={mode === "spells" ? "Nhóm và góc" : "Góc thả quân"}>
             <div className="space-y-4">
               {mode === "spells" ? (

@@ -1,14 +1,13 @@
-import { Cable, CirclePause, CirclePlay, RefreshCw, Square } from "lucide-react";
+import { CirclePause, CirclePlay, RefreshCw, Square } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
-import { Feedback, LoadingState } from "../components/Feedback";
-import { SelectInput, TextInput, Toggle } from "../components/FormControls";
+import { Feedback } from "../components/Feedback";
 import { LogPanel } from "../components/LogPanel";
 import { PageHeader } from "../components/PageHeader";
 import { StatGrid } from "../components/StatGrid";
 import { StatusBadge } from "../components/StatusBadge";
-import { numberValue, useConfigEditor } from "../hooks/useConfigEditor";
+import { useConfigEditor } from "../hooks/useConfigEditor";
 import { usePolling } from "../hooks/usePolling";
 import { scanAdb, startBot, stopBot, togglePause } from "../services/botApi";
 import { apiErrorMessage } from "../services/http";
@@ -17,16 +16,6 @@ import { getStats } from "../services/statsApi";
 import type { BotStatus, LogEntry, StatsPayload } from "../services/types";
 
 type Props = { status: BotStatus | null; refreshStatus: () => Promise<void> };
-
-const slotLabels: Record<string, string> = {
-  dragon: "Rồng điện",
-  balloon: "Bóng",
-  valkyrie: "Valkyrie",
-  hero: "Tướng",
-  rage: "Nộ",
-  freeze: "Băng",
-  poison: "Độc",
-};
 
 const viewLabels: Record<string, string> = {
   random: "Ngẫu nhiên 4 góc",
@@ -43,18 +32,8 @@ export function DashboardPage({ status, refreshStatus }: Props) {
   const [pollError, setPollError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const afterRef = useRef(0);
-  const { config, loading, saving, error, savedMessage, isDirty, updatePath, save } = useConfigEditor();
-
-  const manualArmy = config?.manual_army ?? { enabled: false, counts: {} };
+  const { config, saving, error, savedMessage, isDirty, save } = useConfigEditor();
   const selectedCombo = config?.farm?.combo ?? "";
-  const comboOptions = Object.keys(config?.combos ?? {}).map((name) => ({ label: name, value: name }));
-  const deploy = selectedCombo && config?.combos?.[selectedCombo]
-    ? (config.combos[selectedCombo].deploy ?? config.combos[selectedCombo])
-    : config?.deploy;
-  const comboSlots = useMemo(() => Array.from(new Set<string>([
-    ...((deploy?.sequence ?? []).map((step: any) => String(step.slot ?? "")).filter(Boolean)),
-    ...((config?.deploy?.spell_groups ?? []).filter((group: any) => group.enabled !== false).flatMap((group: any) => (group.slots ?? []).map(String))),
-  ])), [config?.deploy?.spell_groups, deploy?.sequence]);
 
   const lastError = useMemo(() => [...logs].reverse().find((entry) => /\[(ERROR|WARN)\]/.test(entry.message))?.message ?? "", [logs]);
 
@@ -119,21 +98,17 @@ export function DashboardPage({ status, refreshStatus }: Props) {
 
       <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
         <div className="space-y-5">
-          <Card title="Thiết bị" subtitle="Quét ADB trước khi bắt đầu bot.">
+          <Card title="Điều khiển phiên" action={<StatusBadge status={status} />}>
             <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 px-4 py-3">
               <div className="min-w-0">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">LDPlayer đang chọn</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Thiết bị</p>
                 <p className="mt-1 truncate font-mono text-sm text-white">{status?.active_devices?.[0] ?? config?.adb?.device ?? "Chưa có thiết bị"}</p>
               </div>
-              <StatusBadge status={status} />
+              <Button size="sm" variant="muted" loading={busyAction === "scan"} disabled={Boolean(busyAction) || Boolean(status?.running)} onClick={() => runAction("scan", scanAdb)}>
+                <RefreshCw className="h-4 w-4" />Quét ADB
+              </Button>
             </div>
-            <Button className="mt-4 w-full" variant="primary" loading={busyAction === "scan"} disabled={Boolean(busyAction) || Boolean(status?.running)} onClick={() => runAction("scan", scanAdb)}>
-              <RefreshCw className="h-4 w-4" />Quét ADB
-            </Button>
-          </Card>
-
-          <Card title="Điều khiển bot">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="mt-4 grid grid-cols-3 gap-2">
               <Button variant="success" loading={busyAction === "start" || saving} disabled={Boolean(busyAction) || saving || Boolean(status?.running) || !status?.adb_ready} onClick={() => runAction("start", handleStartBot)}>
                 <CirclePlay className="h-4 w-4" /><span className="hidden sm:inline">Bắt đầu</span><span className="sm:hidden">Chạy</span>
               </Button>
@@ -144,10 +119,7 @@ export function DashboardPage({ status, refreshStatus }: Props) {
                 <Square className="h-4 w-4" />Dừng
               </Button>
             </div>
-          </Card>
-
-          <Card title="Trạng thái phiên">
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-sm">
+            <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 border-t border-white/10 pt-5 text-sm">
               <dt className="text-slate-500">Trạng thái</dt><dd className="text-right font-medium text-white">{status?.status ?? "Đang kết nối..."}</dd>
               <dt className="text-slate-500">Combo</dt><dd className="truncate text-right font-medium text-white">{selectedCombo || "Chưa chọn"}</dd>
               <dt className="text-slate-500">Góc đánh</dt><dd className="text-right font-medium text-white">{viewLabels[config?.farm?.attack_view] ?? config?.farm?.attack_view ?? "Chưa chọn"}</dd>
@@ -159,31 +131,6 @@ export function DashboardPage({ status, refreshStatus }: Props) {
 
         <div className="min-w-0 space-y-5">
           <Card title="Thống kê phiên"><StatGrid stats={stats} /></Card>
-
-          <Card
-            title="Số quân thủ công"
-            subtitle="Số lượng theo combo; vị trí slot vẫn lấy từ nhận diện template."
-            action={<Button variant="success" loading={saving} disabled={loading || !config || !isDirty} onClick={save}>Lưu cấu hình</Button>}
-          >
-            {loading ? <LoadingState /> : (
-              <div className="space-y-4">
-                <Toggle label="Dùng số quân nhập tay" hint="Tắt để bot đọc số lượng trực tiếp trên thanh quân." checked={Boolean(manualArmy.enabled)} disabled={!config} onChange={(value) => updatePath(["manual_army", "enabled"], value)} />
-                {manualArmy.enabled ? (
-                  <>
-                    <SelectInput label="Combo áp dụng" value={selectedCombo} options={comboOptions} disabled={!comboOptions.length} onChange={(event) => updatePath(["farm", "combo"], event.target.value)} />
-                    {comboSlots.length ? (
-                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {comboSlots.map((kind) => (
-                          <TextInput key={kind} type="number" min={0} max={config?.slot_detection?.count_max_by_kind?.[kind] ?? 99} label={slotLabels[kind] ?? kind} value={String(manualArmy.counts?.[kind] ?? 0)} onChange={(event) => updatePath(["manual_army", "counts", kind], numberValue(event.target.value))} />
-                        ))}
-                      </div>
-                    ) : <Feedback tone="warning">Combo này chưa có quân hoặc thuốc.</Feedback>}
-                    {isDirty ? <Feedback tone="warning">Số quân đã thay đổi nhưng chưa lưu.</Feedback> : null}
-                  </>
-                ) : null}
-              </div>
-            )}
-          </Card>
 
           <Card title="Theo dõi chạy tool"><LogPanel logs={logs} onClear={handleClearLogs} /></Card>
         </div>

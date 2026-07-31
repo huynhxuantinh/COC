@@ -4,12 +4,20 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState, Feedback, LoadingState } from "../components/Feedback";
-import { SelectInput, TextInput } from "../components/FormControls";
+import { SelectInput, TextInput, Toggle } from "../components/FormControls";
 import { PageHeader } from "../components/PageHeader";
-import { StatusBadge } from "../components/StatusBadge";
+import { SegmentedControl } from "../components/SegmentedControl";
 import { numberValue, useConfigEditor } from "../hooks/useConfigEditor";
 
-const troopLabels: Record<string, string> = { dragon: "Rồng điện", balloon: "Bóng", valkyrie: "Valkyrie", hero: "Tướng" };
+const troopLabels: Record<string, string> = {
+  dragon: "Rồng điện",
+  balloon: "Bóng",
+  valkyrie: "Valkyrie",
+  hero: "Tướng",
+  rage: "Nộ",
+  freeze: "Băng",
+  poison: "Độc",
+};
 const spellKinds = new Set(["rage", "freeze", "poison"]);
 
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)); }
@@ -80,7 +88,7 @@ export function ComboPage() {
     const next = clone(appConfig.combos ?? {});
     next[name] = { deploy: comboDeployCopy(appConfig.deploy ?? deploy) };
     updateCombos(next);
-    setRunningCombo(name);
+    setSelectedCombo(name);
     setNewComboName("");
   }
 
@@ -179,10 +187,31 @@ export function ComboPage() {
     : pendingDelete
       ? `Lính “${troopLabels[pendingDelete.value] ?? pendingDelete.value}” sẽ bị xóa khỏi ${usedByCombos(pendingDelete.value).length} combo đang tham chiếu và khỏi cấu hình nhận diện.`
       : "";
+  const sharedSpellSlots = (appConfig.deploy?.spell_groups ?? [])
+    .filter((group: any) => group.enabled !== false)
+    .flatMap((group: any) => (group.slots ?? []).map(String));
+  const manualKinds = Array.from(new Set<string>([
+    ...sequence.map((step: any) => String(step.slot ?? "")).filter(Boolean),
+    "hero",
+    ...sharedSpellSlots,
+  ]));
+  const sequenceKinds = new Set(sequence.map((step: any) => String(step.slot ?? "")).filter(Boolean));
+  const supplementalManualKinds = manualKinds.filter((kind) => !sequenceKinds.has(kind));
+  const manualArmy = appConfig.manual_army ?? { enabled: false, counts: {} };
 
   return (
     <div>
-      <PageHeader eyebrow="Đội hình" title="Combo" subtitle="Quản lý loại lính và thứ tự triển khai; vùng thả được cấu hình ở trang Tọa độ." action={<Button variant="success" loading={saving} disabled={!isDirty} onClick={save}>Lưu cấu hình</Button>} />
+      <PageHeader
+        eyebrow="Đội hình"
+        title="Combo"
+        subtitle="Quản lý đội hình, thứ tự thả và cách lấy số lượng quân."
+        action={(
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" disabled={!currentCombo || currentCombo === runningCombo} onClick={() => setRunningCombo(currentCombo)}>Dùng combo</Button>
+            <Button variant="success" loading={saving} disabled={!isDirty} onClick={save}>Lưu cấu hình</Button>
+          </div>
+        )}
+      />
       {error ? <Feedback tone="error" className="mb-5">{error}</Feedback> : savedMessage ? <Feedback tone="success" className="mb-5">{savedMessage}</Feedback> : notice ? <Feedback tone="info" className="mb-5">{notice}</Feedback> : null}
 
       <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -231,29 +260,47 @@ export function ComboPage() {
           <Card
             title={currentCombo || "Chưa chọn combo"}
             subtitle={currentCombo === runningCombo ? "Combo đang được dùng khi chạy bot" : "Đang chỉnh, chưa đặt làm combo chạy"}
-            action={<div className="flex flex-wrap gap-2"><Button size="sm" variant="primary" disabled={!currentCombo || currentCombo === runningCombo} onClick={() => setRunningCombo(currentCombo)}>Dùng combo</Button><Button size="sm" onClick={copyCombo}><Copy className="h-4 w-4" />Copy</Button><Button size="sm" variant="danger" disabled={comboNames.length <= 1} onClick={() => setPendingDelete({ type: "combo", value: currentCombo })}><Trash2 className="h-4 w-4" />Xóa</Button></div>}
+            action={<div className="flex flex-wrap gap-2"><Button size="sm" onClick={copyCombo}><Copy className="h-4 w-4" />Copy</Button><Button size="sm" variant="danger" disabled={comboNames.length <= 1} onClick={() => setPendingDelete({ type: "combo", value: currentCombo })}><Trash2 className="h-4 w-4" />Xóa</Button></div>}
           >
             <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
               <TextInput label="Tên combo" value={comboNameDraft} onChange={(event) => setComboNameDraft(event.target.value)} />
               <Button variant="muted" disabled={!cleanName(comboNameDraft) || comboNameDraft === currentCombo} onClick={renameCombo}>Đổi tên</Button>
             </div>
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <Toggle label="Tự áp dụng combo khi bắt đầu" checked={Boolean(appConfig.game?.change_combo_on_start)} onChange={(value) => updatePath(["game", "change_combo_on_start"], value)} />
+            </div>
           </Card>
 
-          <Card title="Sequence thả quân" subtitle="Thực hiện từ trên xuống dưới.">
+          <Card title="Quân trong combo">
+            <div className="mb-5">
+              <SegmentedControl
+                value={manualArmy.enabled ? "manual" : "auto"}
+                columns={2}
+                options={[
+                  { value: "auto", label: "Tự nhận diện" },
+                  { value: "manual", label: "Nhập thủ công" },
+                ]}
+                onChange={(value) => {
+                  updatePath(["manual_army", "enabled"], value === "manual");
+                  updatePath(["slot_detection", "enabled"], true);
+                }}
+              />
+            </div>
             {sequence.length ? (
               <div className="overflow-x-auto rounded-lg border border-white/10">
-                <table className="w-full min-w-[760px] table-fixed text-left text-sm">
+                <table className={`w-full ${manualArmy.enabled ? "min-w-[900px]" : "min-w-[760px]"} table-fixed text-left text-sm`}>
                   <thead className="bg-black/30 text-xs uppercase tracking-wide text-slate-500">
-                    <tr><th className="w-20 px-3 py-3">Thứ tự</th><th className="w-48 px-3 py-3">Loại quân</th><th className="w-32 px-3 py-3">Số lượng</th><th className="w-32 px-3 py-3">Tối đa tap</th><th className="w-28 px-3 py-3">Delay</th><th className="w-36 px-3 py-3 text-right">Thao tác</th></tr>
+                    <tr><th className="w-20 px-3 py-3">Thứ tự</th><th className="w-48 px-3 py-3">Loại quân</th>{manualArmy.enabled ? <th className="w-36 px-3 py-3">Quân hiện có</th> : null}<th className="w-32 px-3 py-3">Số lượng thả</th><th className="w-32 px-3 py-3">Tối đa tap</th><th className="w-28 px-3 py-3">Delay</th><th className="w-36 px-3 py-3 text-right">Thao tác</th></tr>
                   </thead>
                   <tbody>
                     {sequence.map((step: any, index: number) => (
                       <tr key={`${step.slot}-${index}`} className="border-t border-white/10 bg-ink-900/60 align-top">
                         <td className="px-3 py-3 font-mono text-slate-400">{index + 1}</td>
                         <td className="px-3 py-3"><SelectInput label="" aria-label="Loại quân" value={step.slot ?? ""} options={troopOptions} onChange={(event) => updateStep(index, "slot", event.target.value)} /></td>
-                        <td className="px-3 py-3"><TextInput label="" aria-label="Số lượng" value={String(step.count ?? "all")} onChange={(event) => updateStep(index, "count", event.target.value.trim().toLowerCase() === "all" ? "all" : numberValue(event.target.value))} /></td>
+                        {manualArmy.enabled ? <td className="px-3 py-3"><TextInput label="" aria-label={`Số ${troopLabels[step.slot] ?? step.slot} hiện có`} type="number" min={0} max={appConfig.slot_detection?.count_max_by_kind?.[step.slot] ?? 99} value={String(manualArmy.counts?.[step.slot] ?? 0)} onChange={(event) => updatePath(["manual_army", "counts", step.slot], numberValue(event.target.value))} /></td> : null}
+                        <td className="px-3 py-3"><TextInput label="" aria-label="Số lượng thả" value={String(step.count ?? "all")} onChange={(event) => updateStep(index, "count", event.target.value.trim().toLowerCase() === "all" ? "all" : numberValue(event.target.value))} /></td>
                         <td className="px-3 py-3"><TextInput label="" aria-label="Tối đa tap" type="number" min={0} value={String(step.max_taps ?? 0)} onChange={(event) => updateStep(index, "max_taps", numberValue(event.target.value))} /></td>
-                        <td className="px-3 py-3"><TextInput label="" aria-label="Delay" type="number" min={0} step={0.01} suffix="s" value={String(step.delay ?? 0)} onChange={(event) => updateStep(index, "delay", Number(event.target.value || 0))} /></td>
+                        <td className="px-3 py-3"><TextInput label="" aria-label="Delay tính bằng giây" type="number" min={0} step={0.01} value={String(step.delay ?? 0)} onChange={(event) => updateStep(index, "delay", Number(event.target.value || 0))} /></td>
                         <td className="px-3 py-3"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" disabled={index === 0} aria-label="Đưa lên" onClick={() => moveStep(index, -1)}><ArrowUp className="h-4 w-4" /></Button><Button size="sm" variant="ghost" disabled={index === sequence.length - 1} aria-label="Đưa xuống" onClick={() => moveStep(index, 1)}><ArrowDown className="h-4 w-4" /></Button><Button size="sm" variant="ghost" aria-label="Xóa dòng" onClick={() => removeStep(index)}><Trash2 className="h-4 w-4 text-rose-300" /></Button></div></td>
                       </tr>
                     ))}
@@ -262,6 +309,23 @@ export function ComboPage() {
               </div>
             ) : <EmptyState title="Sequence đang trống" description="Thêm ít nhất một dòng quân trước khi chạy combo." />}
             <Button className="mt-4" variant="primary" onClick={addStep}><Plus className="h-4 w-4" />Thêm dòng quân</Button>
+            {manualArmy.enabled && supplementalManualKinds.length ? (
+              <div className="mt-5 border-t border-white/10 pt-5">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {supplementalManualKinds.map((kind) => (
+                    <TextInput
+                      key={kind}
+                      type="number"
+                      min={0}
+                      max={appConfig.slot_detection?.count_max_by_kind?.[kind] ?? 99}
+                      label={troopLabels[kind] ?? kind}
+                      value={String(manualArmy.counts?.[kind] ?? 0)}
+                      onChange={(event) => updatePath(["manual_army", "counts", kind], numberValue(event.target.value))}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </Card>
         </div>
       </div>

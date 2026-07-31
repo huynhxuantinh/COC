@@ -11,6 +11,7 @@ import { FarmPage } from "./pages/FarmPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SlotDetectionPage } from "./pages/SlotDetectionPage";
 import { SurrenderPage } from "./pages/SurrenderPage";
+import { WallUpgradePage } from "./pages/WallUpgradePage";
 import { getBotStatus } from "./services/botApi";
 import { apiErrorMessage } from "./services/http";
 import type { BotStatus } from "./services/types";
@@ -53,6 +54,7 @@ export function App() {
             <Route path="/coordinates/spells" element={<SpellCoordinatesPage />} />
             <Route path="/slots" element={<SlotDetectionPage />} />
             <Route path="/surrender" element={<SurrenderPage />} />
+            <Route path="/wall-upgrade" element={<WallUpgradePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Feedback tone="warning">Trang bạn mở không tồn tại.</Feedback>} />
           </Route>
