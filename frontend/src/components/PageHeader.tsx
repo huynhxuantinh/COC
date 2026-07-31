@@ -9,13 +9,13 @@ type Props = {
 
 export function PageHeader({ eyebrow, title, subtitle, action }: Props) {
   return (
-    <header className="mb-5 flex flex-col gap-4 rounded-2xl border border-white/10 bg-ink-850/80 p-5 shadow-panel lg:flex-row lg:items-center lg:justify-between">
-      <div>
+    <header className="mb-6 flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
         {eyebrow ? <p className="text-xs font-bold uppercase tracking-[0.22em] text-cobalt">{eyebrow}</p> : null}
-        <h1 className="mt-1 text-2xl font-black text-white">{title}</h1>
+        <h1 className="mt-1 text-2xl font-bold text-white">{title}</h1>
         {subtitle ? <p className="mt-2 max-w-3xl text-sm text-slate-400">{subtitle}</p> : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="flex shrink-0 flex-wrap gap-2">{action}</div> : null}
     </header>
   );
 }

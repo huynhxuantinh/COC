@@ -109,7 +109,7 @@ class ADBClient:
 
     def _run(self, args: list[str], timeout: float = 15) -> subprocess.CompletedProcess:
         try:
-            return subprocess.run(
+            result = subprocess.run(
                 [self.adb_path, *args],
                 capture_output=True,
                 timeout=timeout,
@@ -119,6 +119,12 @@ class ADBClient:
             raise ADBError(f"ADB timeout: {' '.join(args)}") from exc
         except OSError as exc:
             raise ADBError(f"Khong chay duoc ADB: {exc}") from exc
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="ignore").strip()
+            stdout = result.stdout.decode("utf-8", errors="ignore").strip()
+            detail = stderr or stdout or f"exit code {result.returncode}"
+            raise ADBError(f"ADB command failed: {' '.join(args)} | {detail}")
+        return result
 
     def connect(self) -> None:
         self.log(f"[ADB] connect {self.device}")
@@ -162,6 +168,10 @@ class ADBClient:
         self.shell("input", "tap", str(x), str(y), timeout=8)
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300) -> None:
+        x1 = min(self.max_x, max(0, int(x1)))
+        y1 = min(self.max_y, max(0, int(y1)))
+        x2 = min(self.max_x, max(0, int(x2)))
+        y2 = min(self.max_y, max(0, int(y2)))
         self.shell(
             "input",
             "swipe",

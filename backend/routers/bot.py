@@ -24,7 +24,10 @@ def scan_adb() -> StatusPayload:
 
 @router.post("/start", response_model=StatusPayload)
 def start_bot() -> StatusPayload:
-    return StatusPayload(**bot_service.start_bot())
+    try:
+        return StatusPayload(**bot_service.start_bot())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/pause-toggle", response_model=StatusPayload)

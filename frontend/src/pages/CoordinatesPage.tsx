@@ -1,85 +1,53 @@
+import { Camera, Crosshair, Image as ImageIcon, RotateCcw, Save, Trash2, Undo2 } from "lucide-react";
 import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
-import { PageHeader } from "../components/PageHeader";
+import { Feedback } from "../components/Feedback";
 import { SelectInput } from "../components/FormControls";
+import { PageHeader } from "../components/PageHeader";
+import { SegmentedControl } from "../components/SegmentedControl";
 import { useConfigEditor } from "../hooks/useConfigEditor";
-import {
-  captureScreenshot,
-  listReferenceImages,
-  loadReferenceImage,
-  saveCoordinatePoints,
-  testTap,
-} from "../services/coordinatesApi";
+import { captureScreenshot, listReferenceImages, loadReferenceImage, saveCoordinatePoints, testTap } from "../services/coordinatesApi";
 import { apiErrorMessage } from "../services/http";
 import type { AppConfig, ReferenceImageItem, ScreenshotPayload } from "../services/types";
 
 type CoordinateMode = "troops" | "spells";
 
-type TargetOption = {
-  label: string;
-  value: string;
-};
-
-const troopTargets: TargetOption[] = [
-  { label: "Vùng thả trên phải", value: "zone_trenbenphai" },
-  { label: "Vùng thả trên trái", value: "zone_trenbentrai" },
-  { label: "Vùng thả dưới phải", value: "zone_duoibenphai" },
-  { label: "Vùng thả dưới trái", value: "zone_duoibentrai" },
+const views = [
+  { value: "trenbenphai", label: "Trên phải" },
+  { value: "trenbentrai", label: "Trên trái" },
+  { value: "duoibenphai", label: "Dưới phải" },
+  { value: "duoibentrai", label: "Dưới trái" },
 ];
 
-const viewTargets = [
-  { label: "trên phải", value: "trenbenphai" },
-  { label: "trên trái", value: "trenbentrai" },
-  { label: "dưới phải", value: "duoibenphai" },
-  { label: "dưới trái", value: "duoibentrai" },
-];
+function targetFor(mode: CoordinateMode, view: string, groupIndex: number): string {
+  return mode === "spells" ? `spell_group_${groupIndex}_zone_${view}` : `zone_${view}`;
+}
 
-function readPoints(config: AppConfig | null, target: string): number[][] {
+function readPoints(config: AppConfig | null, mode: CoordinateMode, view: string, groupIndex: number): number[][] {
   const deploy = config?.deploy ?? {};
-  if (target === "zone_trenbenphai") return deploy.deploy_zones?.trenbenphai ?? [];
-  if (target === "zone_trenbentrai") return deploy.deploy_zones?.trenbentrai ?? [];
-  if (target === "zone_duoibenphai") return deploy.deploy_zones?.duoibenphai ?? [];
-  if (target === "zone_duoibentrai") return deploy.deploy_zones?.duoibentrai ?? [];
-  const match = target.match(/^spell_group_(\d+)_zone_(.+)$/);
-  if (match) {
-    const index = Number(match[1]);
-    const view = match[2];
-    return deploy.spell_groups?.[index]?.zones?.[view] ?? [];
-  }
-  return [];
+  if (mode === "troops") return deploy.deploy_zones?.[view] ?? [];
+  return deploy.spell_groups?.[groupIndex]?.zones?.[view] ?? [];
 }
 
-function defaultTarget(mode: CoordinateMode): string {
-  return mode === "spells" ? "spell_group_0_zone_trenbenphai" : "zone_trenbenphai";
-}
-
-function spellTargetOptions(config: AppConfig | null): TargetOption[] {
-  const groups = config?.deploy?.spell_groups ?? [];
-  return groups.flatMap((group: any, index: number) => {
-    const label = group?.name || `Nhóm thuốc ${index + 1}`;
-    return viewTargets.map((view) => ({
-      label: `${label} - ${view.label}`,
-      value: `spell_group_${index}_zone_${view.value}`,
-    }));
-  });
-}
-
-function allowedTargets(mode: CoordinateMode, config: AppConfig | null): TargetOption[] {
-  if (mode === "troops") return troopTargets;
-  const spellTargets = spellTargetOptions(config);
-  return spellTargets.length ? spellTargets : [{ label: "Chưa có nhóm thuốc", value: defaultTarget(mode) }];
+function parseInitialTarget(raw: string | null): { view: string; groupIndex: number } {
+  const troop = raw?.match(/^zone_(.+)$/);
+  if (troop && views.some((item) => item.value === troop[1])) return { view: troop[1], groupIndex: 0 };
+  const spell = raw?.match(/^spell_group_(\d+)_zone_(.+)$/);
+  if (spell && views.some((item) => item.value === spell[2])) return { view: spell[2], groupIndex: Number(spell[1]) };
+  return { view: "trenbenphai", groupIndex: 0 };
 }
 
 function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [searchParams] = useSearchParams();
-  const { config, isDirty, reload } = useConfigEditor();
-  const targets = useMemo(() => allowedTargets(mode, config), [mode, config]);
+  const initial = parseInitialTarget(searchParams.get("target"));
+  const { config, isDirty: configDirty, reload } = useConfigEditor();
+  const [view, setView] = useState(initial.view);
+  const [groupIndex, setGroupIndex] = useState(initial.groupIndex);
   const [referenceImages, setReferenceImages] = useState<ReferenceImageItem[]>([]);
   const [referenceName, setReferenceName] = useState("");
-  const [target, setTarget] = useState(searchParams.get("target") || defaultTarget(mode));
   const [image, setImage] = useState<ScreenshotPayload | null>(null);
   const [imageSourceLabel, setImageSourceLabel] = useState("");
   const [points, setPoints] = useState<number[][]>([]);
@@ -88,85 +56,50 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const queryTarget = searchParams.get("target");
-    if (queryTarget && targets.some((item) => item.value === queryTarget)) {
-      setTarget(queryTarget);
-      return;
-    }
-    if (!targets.some((item) => item.value === target)) {
-      setTarget(defaultTarget(mode));
-    }
-  }, [mode, searchParams, target, targets]);
+  const spellGroups = config?.deploy?.spell_groups ?? [];
+  const safeGroupIndex = Math.min(groupIndex, Math.max(0, spellGroups.length - 1));
+  const target = targetFor(mode, view, safeGroupIndex);
+  const savedPoints = readPoints(config, mode, view, safeGroupIndex);
+  const localDirty = JSON.stringify(points) !== JSON.stringify(savedPoints);
+  const selectedPoint = selectedIndex === null ? null : points[selectedIndex] ?? null;
+  const imageSrc = image ? `data:image/png;base64,${image.image_base64}` : "";
+
+  const groupOptions = spellGroups.map((group: any, index: number) => ({ label: group?.name || `Nhóm thuốc ${index + 1}`, value: String(index) }));
+  const referenceOptions = referenceImages.map((item) => ({ label: `${item.label} (${item.width}x${item.height})`, value: item.name }));
 
   useEffect(() => {
-    listReferenceImages()
-      .then((images) => {
-        setReferenceImages(images);
-        if (images.length > 0) setReferenceName(images[0].name);
-      })
-      .catch((err) => setError(apiErrorMessage(err)));
+    listReferenceImages().then((items) => {
+      setReferenceImages(items);
+      if (items.length) setReferenceName(items[0].name);
+    }).catch((err) => setError(apiErrorMessage(err)));
   }, []);
 
   useEffect(() => {
-    setPoints(readPoints(config, target));
+    setPoints(readPoints(config, mode, view, safeGroupIndex));
     setSelectedIndex(null);
-  }, [config, target]);
-
-  const imageSrc = image ? `data:image/png;base64,${image.image_base64}` : "";
-  const selectedPoint = useMemo(() => {
-    if (selectedIndex === null) return null;
-    return points[selectedIndex] ?? null;
-  }, [points, selectedIndex]);
-
-  const referenceOptions = referenceImages.map((item) => ({
-    label: `${item.label} (${item.width}x${item.height})`,
-    value: item.name,
-  }));
-
-  function targetLabel(targetValue: string): string {
-    return [...troopTargets, ...targets].find((item) => item.value === targetValue)?.label ?? targetValue;
-  }
-  const pageTitle = mode === "spells" ? "Tọa độ thả thuốc" : "Tọa độ thả lính";
-  const pageSubtitle =
-    mode === "spells"
-      ? "Thiết lập vùng polygon thả Nộ/Băng riêng cho 4 góc nhìn."
-      : "Thiết lập 4 vùng polygon để bot random điểm thả quân trong vùng.";
-  const isZoneTarget = mode === "spells" || target.startsWith("zone_");
+  }, [config, mode, safeGroupIndex, view]);
 
   async function run(name: string, action: () => Promise<void>) {
-    setBusy(name);
-    setError("");
-    setMessage("");
-    try {
-      await action();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    } finally {
-      setBusy("");
-    }
+    if (busy) return;
+    setBusy(name); setError(""); setMessage("");
+    try { await action(); } catch (err) { setError(apiErrorMessage(err)); } finally { setBusy(""); }
   }
 
   async function handleCapture() {
     await run("capture", async () => {
       const payload = await captureScreenshot();
-      setImage(payload);
-      setImageSourceLabel("Ảnh chụp ADB hiện tại");
-      setMessage("Đã chụp màn hình. Click lên ảnh để thêm tọa độ.");
+      setImage(payload); setImageSourceLabel("Ảnh chụp ADB hiện tại");
+      setMessage("Đã chụp màn hình. Click lên ảnh để thêm điểm polygon.");
     });
   }
 
   async function handleLoadReference() {
-    if (!referenceName) {
-      setError("Chưa có ảnh mẫu trong thư mục img.");
-      return;
-    }
+    if (!referenceName) { setError("Chưa có ảnh mẫu trong thư mục img."); return; }
     await run("reference", async () => {
       const payload = await loadReferenceImage(referenceName);
-      const item = referenceImages.find((imageItem) => imageItem.name === referenceName);
-      setImage(payload);
-      setImageSourceLabel(item?.label ?? referenceName);
-      setMessage(`Đã tải ảnh mẫu: ${item?.label ?? referenceName}. Click lên ảnh để lấy tọa độ.`);
+      const item = referenceImages.find((entry) => entry.name === referenceName);
+      setImage(payload); setImageSourceLabel(item?.label ?? referenceName);
+      setMessage(`Đã tải ảnh mẫu ${item?.label ?? referenceName}.`);
     });
   }
 
@@ -175,184 +108,88 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
     const rect = imageRef.current.getBoundingClientRect();
     const x = Math.round(((event.clientX - rect.left) / rect.width) * image.width);
     const y = Math.round(((event.clientY - rect.top) / rect.height) * image.height);
-    const clamped = [
-      Math.max(0, Math.min(image.width - 1, x)),
-      Math.max(0, Math.min(image.height - 1, y)),
-    ];
-    setPoints((current) => [...current, clamped]);
+    const point = [Math.max(0, Math.min(image.width - 1, x)), Math.max(0, Math.min(image.height - 1, y))];
+    setPoints((current) => [...current, point]);
     setSelectedIndex(points.length);
   }
 
   async function handleSave() {
-    if (isDirty) {
-      setError("Đang có thay đổi cấu hình chưa lưu. Bấm Lưu cấu hình trước rồi hãy lưu tọa độ.");
-      return;
-    }
+    if (points.length < 3) { setError("Polygon cần ít nhất 3 điểm trước khi lưu."); return; }
+    if (configDirty) { setError("Cấu hình chung đang có thay đổi chưa lưu. Hãy lưu cấu hình trước khi lưu tọa độ."); return; }
     await run("save", async () => {
       await saveCoordinatePoints(target, points);
       await reload();
-      setMessage(`Đã lưu ${points.length} tọa độ vào ${targetLabel(target)}.`);
+      setMessage(`Đã lưu ${points.length} điểm cho góc ${views.find((item) => item.value === view)?.label}.`);
     });
   }
 
   async function handleTestTap() {
-    if (!selectedPoint) {
-      setError("Chọn 1 tọa độ trong danh sách trước khi test tap.");
-      return;
-    }
-    await run("tap", async () => {
-      await testTap(selectedPoint[0], selectedPoint[1]);
-      setMessage(`Đã test tap ${selectedPoint[0]},${selectedPoint[1]}.`);
-    });
+    if (!selectedPoint) { setError("Chọn một điểm trước khi test tap."); return; }
+    await run("tap", async () => { await testTap(selectedPoint[0], selectedPoint[1]); setMessage(`Đã test tap ${selectedPoint[0]},${selectedPoint[1]}.`); });
   }
 
-  function undoPoint() {
-    setPoints((current) => current.slice(0, -1));
-    setSelectedIndex(null);
-  }
+  function resetSaved() { setPoints(savedPoints); setSelectedIndex(null); setMessage("Đã tải lại polygon đang lưu."); setError(""); }
 
   return (
     <div>
-      <PageHeader eyebrow="Hiệu chỉnh" title={pageTitle} subtitle={pageSubtitle} />
-
-      {(error || message) && (
-        <div className={`mb-5 rounded-lg px-4 py-3 text-sm ${error ? "border border-danger/30 bg-danger/10 text-rose-200" : "border border-limewash/30 bg-limewash/10 text-lime-200"}`}>
-          {error || message}
-        </div>
-      )}
+      <PageHeader eyebrow="Hiệu chỉnh" title={mode === "spells" ? "Tọa độ thả thuốc" : "Tọa độ thả lính"} subtitle={mode === "spells" ? "Vùng thuốc dùng chung, phân theo nhóm thuốc và bốn góc nhìn." : "Bốn vùng thả quân dùng chung cho mọi combo."} />
+      {error ? <Feedback tone="error" className="mb-5">{error}</Feedback> : message ? <Feedback tone="success" className="mb-5">{message}</Feedback> : null}
 
       <Card title="Nguồn ảnh">
-        <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto]">
-          <SelectInput
-            label="Ảnh mẫu trong COC/img"
-            value={referenceName}
-            options={referenceOptions.length ? referenceOptions : [{ label: "Chưa có ảnh mẫu", value: "" }]}
-            onChange={(event) => setReferenceName(event.target.value)}
-          />
-          <div className="flex items-end">
-            <Button className="w-full" variant="primary" disabled={busy !== "" || !referenceName} onClick={handleLoadReference}>
-              {busy === "reference" ? "Đang tải..." : "Dùng ảnh mẫu"}
-            </Button>
-          </div>
-          <div className="flex items-end">
-            <Button className="w-full" variant="muted" disabled={busy !== ""} onClick={handleCapture}>
-              {busy === "capture" ? "Đang chụp..." : "Chụp từ ADB"}
-            </Button>
-          </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_auto_auto] lg:items-end">
+          <SelectInput label="Ảnh mẫu trong COC/img" value={referenceName} options={referenceOptions.length ? referenceOptions : [{ label: "Chưa có ảnh mẫu", value: "" }]} onChange={(event) => setReferenceName(event.target.value)} />
+          <Button variant="primary" loading={busy === "reference"} disabled={Boolean(busy) || !referenceName} onClick={handleLoadReference}><ImageIcon className="h-4 w-4" />Dùng ảnh mẫu</Button>
+          <Button variant="muted" loading={busy === "capture"} disabled={Boolean(busy)} onClick={handleCapture}><Camera className="h-4 w-4" />Chụp từ ADB</Button>
         </div>
       </Card>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_340px]">
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 overflow-hidden rounded-lg border border-white/10 bg-black/30">
           {imageSrc ? (
             <div className="relative">
-              <div className="absolute left-3 top-3 z-10 rounded-full bg-black/65 px-3 py-1 text-xs font-semibold text-white">
-                {imageSourceLabel || "Ảnh tọa độ"} · {image?.width}x{image?.height}
-              </div>
-              <img ref={imageRef} src={imageSrc} alt="Ảnh tọa độ" onClick={handleImageClick} className="block w-full cursor-crosshair select-none" draggable={false} />
-              {image && isZoneTarget && points.length >= 2 ? (
-                <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox={`0 0 ${image.width} ${image.height}`} preserveAspectRatio="none">
-                  <polyline
-                    points={[...points, ...(points.length >= 3 ? [points[0]] : [])].map(([x, y]) => `${x},${y}`).join(" ")}
-                    fill={points.length >= 3 ? "rgba(56, 189, 248, 0.16)" : "none"}
-                    stroke="rgb(56, 189, 248)"
-                    strokeWidth="4"
-                  />
+              <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-lg bg-black/75 px-3 py-1.5 text-xs font-semibold text-white">{imageSourceLabel} · {image?.width}x{image?.height}</div>
+              <img ref={imageRef} src={imageSrc} alt="Ảnh thiết lập tọa độ" onClick={handleImageClick} className="block h-auto w-full cursor-crosshair select-none" draggable={false} />
+              {image && points.length >= 2 ? (
+                <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox={`0 0 ${image.width} ${image.height}`}>
+                  <polygon points={points.map(([x, y]) => `${x},${y}`).join(" ")} fill={points.length >= 3 ? "rgba(56,189,248,.16)" : "none"} stroke="#38bdf8" strokeWidth="4" vectorEffect="non-scaling-stroke" />
                 </svg>
               ) : null}
-              {image &&
-                points.map(([x, y], index) => (
-                  <button
-                    key={`${x}-${y}-${index}`}
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedIndex(index);
-                    }}
-                    className={`absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 text-[10px] font-black ${
-                      selectedIndex === index ? "border-pink-300 bg-pink-500 text-white" : "border-white bg-sky-400 text-slate-950"
-                    }`}
-                    style={{
-                      left: `${(x / image.width) * 100}%`,
-                      top: `${(y / image.height) * 100}%`,
-                    }}
-                  >
-                    {index + 1}
-                  </button>
-                ))}
+              {image && points.map(([x, y], index) => (
+                <button key={`${x}-${y}-${index}`} type="button" aria-label={`Điểm ${index + 1}`} onClick={(event) => { event.stopPropagation(); setSelectedIndex(index); }} className={`absolute grid h-6 w-6 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 text-[10px] font-bold ${selectedIndex === index ? "border-white bg-pink-500 text-white" : "border-white bg-sky-400 text-slate-950"}`} style={{ left: `${(x / image.width) * 100}%`, top: `${(y / image.height) * 100}%` }}>{index + 1}</button>
+              ))}
             </div>
           ) : (
-            <div className="flex aspect-video items-center justify-center p-8 text-center text-sm text-slate-500">
-              Chưa có ảnh. Chọn ảnh mẫu hoặc chụp từ ADB.
-            </div>
+            <div className="flex aspect-video items-center justify-center p-8 text-center text-sm text-slate-500">Chọn ảnh mẫu hoặc chụp từ ADB để bắt đầu.</div>
           )}
         </div>
 
-        <aside className="space-y-4">
-          <Card title={mode === "spells" ? "Nhóm thuốc" : "Vùng thả quân"}>
-            <div className="grid grid-cols-2 gap-2">
-              {targets.map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  onClick={() => setTarget(item.value)}
-                  className={`rounded-lg border px-3 py-2 text-left text-xs font-semibold transition ${
-                    target === item.value
-                      ? mode === "spells"
-                        ? "border-pink-300 bg-pink-500 text-white"
-                        : "border-sky-300 bg-sky-400 text-slate-950"
-                      : "border-white/10 bg-ink-900 text-slate-300 hover:border-sky-400/50"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          <Card title="Lưu tọa độ">
+        <aside className="min-w-0 space-y-5">
+          <Card title={mode === "spells" ? "Nhóm và góc" : "Góc thả quân"}>
             <div className="space-y-4">
-              <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-sm text-slate-300">
-                Dùng chung cho tất cả combo.
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-sm text-slate-300">
-                Đang chọn: <span className="font-semibold text-white">{targetLabel(target)}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="success" disabled={busy !== ""} onClick={handleSave}>
-                  Lưu điểm
-                </Button>
-                <Button variant="muted" disabled={points.length === 0 || busy !== ""} onClick={undoPoint}>
-                  Xóa điểm cuối
-                </Button>
-                <Button variant="danger" disabled={points.length === 0 || busy !== ""} onClick={() => setPoints([])}>
-                  Xóa hết
-                </Button>
-                <Button variant="muted" disabled={!selectedPoint || busy !== ""} onClick={handleTestTap}>
-                  Test tap
-                </Button>
-              </div>
+              {mode === "spells" ? (
+                groupOptions.length ? <SelectInput label="Nhóm thuốc" value={String(safeGroupIndex)} options={groupOptions} onChange={(event) => setGroupIndex(Number(event.target.value))} /> : <Feedback tone="warning">Chưa có spell group trong cấu hình.</Feedback>
+              ) : null}
+              <div><p className="mb-2 text-sm font-medium text-slate-300">Góc nhìn</p><SegmentedControl value={view} columns={2} options={views} onChange={setView} /></div>
+              <p className="text-xs text-slate-500">Dùng chung cho tất cả combo.</p>
             </div>
           </Card>
 
-          <Card title="Danh sách điểm">
-            <div className="max-h-[360px] space-y-2 overflow-auto pr-1 font-mono text-xs">
-              {points.length === 0 ? (
-                <p className="font-sans text-slate-500">Chưa có điểm.</p>
-              ) : (
-                points.map(([x, y], index) => (
-                  <button
-                    key={`${x}-${y}-${index}`}
-                    type="button"
-                    onClick={() => setSelectedIndex(index)}
-                    className={`block w-full rounded-lg border px-3 py-2 text-left ${
-                      selectedIndex === index ? "border-pink-400 bg-pink-500/15 text-pink-100" : "border-white/10 bg-ink-900 text-slate-200"
-                    }`}
-                  >
-                    {index + 1}. [{x}, {y}]
-                  </button>
-                ))
-              )}
+          <Card title="Điểm polygon" action={<span className={`rounded-full px-2.5 py-1 text-xs font-bold ${localDirty ? "bg-amber-400/15 text-amber-200" : "bg-limewash/15 text-lime-200"}`}>{localDirty ? "Chưa lưu" : "Đã lưu"}</span>}>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="success" loading={busy === "save"} disabled={Boolean(busy) || points.length < 3 || !localDirty} onClick={handleSave}><Save className="h-4 w-4" />Lưu</Button>
+              <Button variant="muted" disabled={Boolean(busy) || !points.length} onClick={() => { setPoints((current) => current.slice(0, -1)); setSelectedIndex(null); }}><Undo2 className="h-4 w-4" />Hoàn tác</Button>
+              <Button variant="muted" disabled={Boolean(busy) || !localDirty} onClick={resetSaved}><RotateCcw className="h-4 w-4" />Tải lại</Button>
+              <Button variant="danger" disabled={Boolean(busy) || !points.length} onClick={() => { setPoints([]); setSelectedIndex(null); }}><Trash2 className="h-4 w-4" />Xóa hết</Button>
+              <Button className="col-span-2" variant="ghost" loading={busy === "tap"} disabled={Boolean(busy) || !selectedPoint} onClick={handleTestTap}><Crosshair className="h-4 w-4" />Test điểm đang chọn</Button>
+            </div>
+            {points.length > 0 && points.length < 3 ? <Feedback tone="warning" className="mt-4">Cần thêm {3 - points.length} điểm để tạo polygon.</Feedback> : null}
+          </Card>
+
+          <Card title={`Danh sách điểm (${points.length})`}>
+            <div className="max-h-72 space-y-2 overflow-auto pr-1 font-mono text-xs">
+              {points.length ? points.map(([x, y], index) => (
+                <button key={`${x}-${y}-${index}`} type="button" onClick={() => setSelectedIndex(index)} className={`block w-full rounded-lg border px-3 py-2 text-left ${selectedIndex === index ? "border-pink-400 bg-pink-500/10 text-pink-100" : "border-white/10 bg-ink-900 text-slate-300"}`}>{index + 1}. [{x}, {y}]</button>
+              )) : <p className="py-4 text-center font-sans text-slate-500">Chưa có điểm.</p>}
             </div>
           </Card>
         </aside>
@@ -361,10 +198,5 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
   );
 }
 
-export function TroopCoordinatesPage() {
-  return <CoordinateToolPage mode="troops" />;
-}
-
-export function SpellCoordinatesPage() {
-  return <CoordinateToolPage mode="spells" />;
-}
+export function TroopCoordinatesPage() { return <CoordinateToolPage mode="troops" />; }
+export function SpellCoordinatesPage() { return <CoordinateToolPage mode="spells" />; }

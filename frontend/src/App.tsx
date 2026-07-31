@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
+import { Feedback } from "./components/Feedback";
 import { ConfigEditorProvider } from "./hooks/useConfigEditor";
 import { usePolling } from "./hooks/usePolling";
 import { SpellCoordinatesPage, TroopCoordinatesPage } from "./pages/CoordinatesPage";
@@ -39,9 +40,7 @@ export function App() {
               element={
                 <>
                   {backendError && (
-                    <div className="mb-5 rounded-2xl border border-danger/30 bg-danger/10 p-4 text-sm text-rose-200">
-                      Không kết nối được backend: {backendError}
-                    </div>
+                    <Feedback tone="error" className="mb-5">Không kết nối được backend: {backendError}</Feedback>
                   )}
                   <DashboardPage status={status} refreshStatus={refreshStatus} />
                 </>
@@ -55,6 +54,7 @@ export function App() {
             <Route path="/slots" element={<SlotDetectionPage />} />
             <Route path="/surrender" element={<SurrenderPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<Feedback tone="warning">Trang bạn mở không tồn tại.</Feedback>} />
           </Route>
         </Routes>
       </BrowserRouter>

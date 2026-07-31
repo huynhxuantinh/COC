@@ -38,9 +38,11 @@ class BotService:
             return copy.deepcopy(self.config_data)
 
     def save_config_data(self, config: dict[str, Any]) -> dict[str, Any]:
-        normalized = normalize_config(config)
-        self._validate_config(normalized)
         with self.lock:
+            if self._bot_running_locked():
+                raise ValueError("Hãy dừng bot trước khi lưu cấu hình.")
+            normalized = normalize_config(config)
+            self._validate_config(normalized)
             self.config_data = copy.deepcopy(normalized)
             save_config(self.config_data)
             self.adb_ready = False
@@ -118,6 +120,7 @@ class BotService:
                 self._log("[ADB] Bấm Quét ADB trước. Kết nối OK rồi mới Bắt đầu.")
                 return self.get_status()
 
+            self._validate_config(self.config_data)
             save_config(self.config_data)
             self.stop_event.clear()
             self.pause_event.clear()
@@ -237,18 +240,24 @@ class BotService:
         spell_match = re.fullmatch(r"spell_group_(\d+)_zone_(trenbenphai|trenbentrai|duoibenphai|duoibentrai)", target)
         normalized = [[int(point[0]), int(point[1])] for point in points]
         with self.lock:
+            if self._bot_running_locked():
+                raise ValueError("Hãy dừng bot trước khi lưu tọa độ.")
+            candidate = copy.deepcopy(self.config_data)
             if target in allowed:
                 path = allowed[target]
             elif spell_match:
                 group_index = int(spell_match.group(1))
                 view = spell_match.group(2)
-                groups = self.config_data.get("deploy", {}).get("spell_groups", [])
+                groups = candidate.get("deploy", {}).get("spell_groups", [])
                 if group_index < 0 or group_index >= len(groups):
                     raise ValueError("Nhóm thuốc không hợp lệ.")
                 path = ["deploy", "spell_groups", str(group_index), "zones", view]
             else:
                 raise ValueError("Target tọa độ không hợp lệ.")
-            self._set_config_path(self.config_data, path, normalized)
+            self._set_config_path(candidate, path, normalized)
+            candidate = normalize_config(candidate)
+            self._validate_config(candidate)
+            self.config_data = candidate
             save_config(self.config_data)
         self._log(f"[COORD] Saved {len(normalized)} point(s) to {target} | global deploy.")
         return self.get_config()
@@ -391,14 +400,22 @@ class BotService:
             raise ValueError("Zoom out ở làng chính phải >= 0.")
         if int(game.get("ldplayer_index", 0)) < 0:
             raise ValueError("LDPlayer index phải >= 0.")
+        if float(game.get("result_wait_seconds", 0)) <= 0:
+            raise ValueError("Thời gian chờ màn hình kết quả phải > 0.")
         if int(farm.get("max_next", 0)) < 1:
             raise ValueError("Max Next phải >= 1.")
+        if int(farm.get("max_ocr_restarts", 0)) < 1:
+            raise ValueError("Số lần restart OCR loot phải >= 1.")
         if int(surrender.get("time_min_seconds", 0)) > int(surrender.get("time_max_seconds", 0)):
             raise ValueError("Thời gian đầu hàng tối thiểu phải <= tối đa.")
         if int(surrender.get("destruction_min_percent", 0)) > int(surrender.get("destruction_max_percent", 0)):
             raise ValueError("% phá hủy tối thiểu phải <= tối đa.")
         if int(surrender.get("damage_unknown_restart_seconds", 0)) < 0:
             raise ValueError("Thời gian restart khi damage không đọc được phải >= 0.")
+        if int(surrender.get("max_damage_ocr_restarts", 0)) < 1:
+            raise ValueError("Số lần restart OCR damage phải >= 1.")
+        if int(surrender.get("damage_stall_seconds", 0)) < 0:
+            raise ValueError("Thời gian damage đứng im phải >= 0.")
         timing_ranges = [
             ("freeze_random_min_ms", "freeze_random_max_ms", "Thả băng"),
             ("rage_random_min_ms", "rage_random_max_ms", "Thả nộ"),

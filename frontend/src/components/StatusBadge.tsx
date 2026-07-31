@@ -13,5 +13,5 @@ export function StatusBadge({ status }: { status: BotStatus | null }) {
       ? "bg-sky-400/15 text-sky-300 ring-sky-400/30"
       : "bg-slate-500/15 text-slate-300 ring-slate-400/20";
 
-  return <span className={`rounded-full px-3 py-1 text-xs font-bold ring-1 ${color}`}>{label}</span>;
+  return <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ring-1 ${color}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{label}</span>;
 }

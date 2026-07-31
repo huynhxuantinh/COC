@@ -945,74 +945,74 @@
         "zones": {
           "trenbenphai": [
             [
-              819,
-              183
+              615,
+              331
             ],
             [
-              631,
-              360
+              777,
+              216
             ],
             [
-              973,
-              633
+              1148,
+              469
             ],
             [
-              1115,
-              462
+              1006,
+              582
             ]
           ],
           "trenbentrai": [
             [
-              775,
-              234
+              372,
+              520
             ],
             [
-              940,
-              442
+              732,
+              271
             ],
             [
-              640,
-              631
+              934,
+              399
             ],
             [
-              457,
-              437
+              522,
+              654
             ]
           ],
           "duoibenphai": [
             [
-              662,
-              396
+              574,
+              399
             ],
             [
-              816,
-              540
+              851,
+              537
             ],
             [
-              1119,
-              316
+              1178,
+              313
             ],
             [
-              882,
-              187
+              954,
+              167
             ]
           ],
           "duoibentrai": [
             [
-              440,
-              300
+              395,
+              276
             ],
             [
-              761,
-              547
+              598,
+              117
             ],
             [
-              917,
-              407
+              962,
+              343
             ],
             [
-              619,
-              183
+              777,
+              516
             ]
           ]
         }
@@ -1062,7 +1062,7 @@
     "max_add_rounds": 4,
     "temporary_retry_backoff_attacks": 1,
     "retry_backoff_attacks": 2,
-    "max_wall_search_scrolls": 9,
+    "max_wall_search_scrolls": 8,
     "resource_read_attempts": 3,
     "cost_read_attempts": 3,
     "read_attempt_delay": 0.45,

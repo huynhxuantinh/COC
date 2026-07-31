@@ -1,140 +1,85 @@
+import { ArrowDown, ArrowUp, Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
-import { PageHeader } from "../components/PageHeader";
+import { ConfirmModal } from "../components/ConfirmModal";
+import { EmptyState, Feedback, LoadingState } from "../components/Feedback";
 import { SelectInput, TextInput } from "../components/FormControls";
+import { PageHeader } from "../components/PageHeader";
+import { StatusBadge } from "../components/StatusBadge";
 import { numberValue, useConfigEditor } from "../hooks/useConfigEditor";
 
-const troopLabels: Record<string, string> = {
-  dragon: "Rồng điện",
-  balloon: "Bóng",
-  valkyrie: "Valkyrie",
-  hero: "Tướng",
-};
-
+const troopLabels: Record<string, string> = { dragon: "Rồng điện", balloon: "Bóng", valkyrie: "Valkyrie", hero: "Tướng" };
 const spellKinds = new Set(["rage", "freeze", "poison"]);
 
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function cleanName(value: string): string {
-  return value.trim().replace(/\s+/g, " ");
-}
-
+function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)); }
+function cleanName(value: string): string { return value.trim().replace(/\s+/g, " "); }
 function cleanKind(value: string): string {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "d")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-  return normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return value.trim().toLowerCase().replace(/đ/g, "d").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
-
-function deployFromCombo(combo: any, fallbackDeploy: any) {
-  return combo?.deploy ?? combo ?? fallbackDeploy ?? {};
-}
-
-function deployUsesKind(deploy: any, kind: string): boolean {
-  const sequence = Array.isArray(deploy?.sequence) ? deploy.sequence : [];
-  const spellGroups = Array.isArray(deploy?.spell_groups) ? deploy.spell_groups : [];
-  return sequence.some((step: any) => step?.slot === kind) || spellGroups.some((group: any) => Array.isArray(group?.slots) && group.slots.includes(kind));
-}
-
-function remapDeployKind(deploy: any, oldKind: string, newKind: string) {
-  const nextDeploy = clone(deploy ?? {});
-  const sequence = Array.isArray(nextDeploy.sequence) ? nextDeploy.sequence : [];
-  nextDeploy.sequence = sequence.map((step: any) => (step?.slot === oldKind ? { ...step, slot: newKind } : step));
-  const spellGroups = Array.isArray(nextDeploy.spell_groups) ? nextDeploy.spell_groups : [];
-  nextDeploy.spell_groups = spellGroups.map((group: any) => {
-    const slots = Array.isArray(group?.slots) ? group.slots : [];
-    return { ...group, slots: slots.map((slot: string) => (slot === oldKind ? newKind : slot)) };
-  });
-  return nextDeploy;
-}
-
-function removeDeployKind(deploy: any, kind: string) {
-  const nextDeploy = clone(deploy ?? {});
-  const sequence = Array.isArray(nextDeploy.sequence) ? nextDeploy.sequence : [];
-  nextDeploy.sequence = sequence.filter((step: any) => step?.slot !== kind);
-  const spellGroups = Array.isArray(nextDeploy.spell_groups) ? nextDeploy.spell_groups : [];
-  nextDeploy.spell_groups = spellGroups.map((group: any) => {
-    const slots = Array.isArray(group?.slots) ? group.slots : [];
-    return { ...group, slots: slots.filter((slot: string) => slot !== kind) };
-  });
-  return nextDeploy;
-}
-
+function deployFromCombo(combo: any, fallbackDeploy: any) { return combo?.deploy ?? combo ?? fallbackDeploy ?? {}; }
 function comboDeployCopy(deploy: any) {
-  const nextDeploy = clone(deploy ?? {});
-  delete nextDeploy.deploy_zones;
-  delete nextDeploy.spell_groups;
-  return nextDeploy;
+  const next = clone(deploy ?? {});
+  delete next.deploy_zones;
+  delete next.spell_groups;
+  return next;
 }
+function remapDeployKind(deploy: any, oldKind: string, newKind: string) {
+  const next = clone(deploy ?? {});
+  next.sequence = (next.sequence ?? []).map((step: any) => step?.slot === oldKind ? { ...step, slot: newKind } : step);
+  next.spell_groups = (next.spell_groups ?? []).map((group: any) => ({ ...group, slots: (group.slots ?? []).map((slot: string) => slot === oldKind ? newKind : slot) }));
+  return next;
+}
+function removeDeployKind(deploy: any, kind: string) {
+  const next = clone(deploy ?? {});
+  next.sequence = (next.sequence ?? []).filter((step: any) => step?.slot !== kind);
+  next.spell_groups = (next.spell_groups ?? []).map((group: any) => ({ ...group, slots: (group.slots ?? []).filter((slot: string) => slot !== kind) }));
+  return next;
+}
+
+type PendingDelete = { type: "combo" | "troop"; value: string } | null;
 
 export function ComboPage() {
-  const { config, loading, saving, error, savedMessage, updatePath, save } = useConfigEditor();
+  const { config, loading, saving, error, savedMessage, isDirty, updatePath, save } = useConfigEditor();
   const comboNames = useMemo(() => Object.keys(config?.combos ?? {}), [config]);
   const runningCombo = config?.farm?.combo ?? "";
-  const activeCombo = "";
   const [selectedCombo, setSelectedCombo] = useState("");
-  const currentCombo = selectedCombo || runningCombo || comboNames[0] || activeCombo;
+  const currentCombo = selectedCombo || runningCombo || comboNames[0] || "";
   const [newComboName, setNewComboName] = useState("");
   const [comboNameDraft, setComboNameDraft] = useState("");
   const [newKindName, setNewKindName] = useState("");
   const [editingKind, setEditingKind] = useState("");
   const [kindNameDraft, setKindNameDraft] = useState("");
   const [notice, setNotice] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
 
-  useEffect(() => {
-    setComboNameDraft(currentCombo);
-  }, [currentCombo]);
-
-  if (loading) {
-    return <Card title="Combo">Đang tải cấu hình...</Card>;
-  }
-  if (!config) {
-    return <Card title="Combo">{error || "Không tải được cấu hình."}</Card>;
-  }
+  useEffect(() => setComboNameDraft(currentCombo), [currentCombo]);
+  if (loading) return <LoadingState label="Đang tải danh sách combo..." />;
+  if (!config) return <Feedback tone="error">{error || "Không tải được cấu hình."}</Feedback>;
 
   const appConfig = config;
-  const combo = appConfig.combos?.[currentCombo] ?? null;
-  const deploy = deployFromCombo(combo, appConfig.deploy);
+  const deploy = deployFromCombo(appConfig.combos?.[currentCombo], appConfig.deploy);
   const sequence = Array.isArray(deploy.sequence) ? deploy.sequence : [];
-  const allKinds = appConfig.slot_detection?.kinds ?? ["dragon", "balloon", "valkyrie", "hero", "rage", "freeze"];
-  const troopKinds = allKinds.filter((kind: string) => !spellKinds.has(kind));
-  const troopOptions = troopKinds.map((kind: string) => ({ label: troopLabels[kind] ?? kind, value: kind }));
-  const comboOptions = comboNames.map((name) => ({ label: name, value: name }));
+  const allKinds: string[] = appConfig.slot_detection?.kinds ?? [];
+  const troopKinds = allKinds.filter((kind) => !spellKinds.has(kind));
+  const troopOptions = troopKinds.map((kind) => ({ label: troopLabels[kind] ?? kind, value: kind }));
+  const usedByCombos = (kind: string) => comboNames.filter((name) => (deployFromCombo(appConfig.combos[name], appConfig.deploy).sequence ?? []).some((step: any) => step.slot === kind));
 
-  function setInfo(message: string) {
-    setNotice(message);
-  }
-
-  function updateCombos(nextCombos: Record<string, any>) {
-    setNotice("");
-    updatePath(["combos"], nextCombos);
-  }
-
+  function updateCombos(next: Record<string, any>) { setNotice(""); updatePath(["combos"], next); }
   function updateDeploy(nextDeploy: any) {
     if (!currentCombo) return;
     const nextCombos = clone(appConfig.combos ?? {});
     nextCombos[currentCombo] = { ...(nextCombos[currentCombo] ?? {}), deploy: nextDeploy };
     updateCombos(nextCombos);
   }
-
-  function setRunningCombo(name: string) {
-    setSelectedCombo(name);
-    updatePath(["farm", "combo"], name);
-  }
+  function setRunningCombo(name: string) { setSelectedCombo(name); updatePath(["farm", "combo"], name); }
 
   function createCombo() {
     const name = cleanName(newComboName);
     if (!name || appConfig.combos?.[name]) return;
-    const nextCombos = clone(appConfig.combos ?? {});
-    nextCombos[name] = { deploy: comboDeployCopy(appConfig.deploy ?? deploy) };
-    updateCombos(nextCombos);
+    const next = clone(appConfig.combos ?? {});
+    next[name] = { deploy: comboDeployCopy(appConfig.deploy ?? deploy) };
+    updateCombos(next);
     setRunningCombo(name);
     setNewComboName("");
   }
@@ -142,14 +87,11 @@ export function ComboPage() {
   function renameCombo() {
     const name = cleanName(comboNameDraft);
     if (!currentCombo || !name || name === currentCombo) return;
-    if (appConfig.combos?.[name]) {
-      setInfo("Tên combo đã tồn tại.");
-      return;
-    }
-    const nextCombos = clone(appConfig.combos ?? {});
-    nextCombos[name] = nextCombos[currentCombo];
-    delete nextCombos[currentCombo];
-    updateCombos(nextCombos);
+    if (appConfig.combos?.[name]) { setNotice("Tên combo đã tồn tại."); return; }
+    const next = clone(appConfig.combos ?? {});
+    next[name] = next[currentCombo];
+    delete next[currentCombo];
+    updateCombos(next);
     if (runningCombo === currentCombo) updatePath(["farm", "combo"], name);
     setSelectedCombo(name);
   }
@@ -158,27 +100,21 @@ export function ComboPage() {
     if (!currentCombo) return;
     let copyName = `${currentCombo} Copy`;
     let index = 2;
-    while (appConfig.combos?.[copyName]) {
-      copyName = `${currentCombo} Copy ${index}`;
-      index += 1;
-    }
-    const nextCombos = clone(appConfig.combos ?? {});
-    nextCombos[copyName] = clone(nextCombos[currentCombo]);
-    if (nextCombos[copyName]?.deploy) {
-      delete nextCombos[copyName].deploy.deploy_zones;
-      delete nextCombos[copyName].deploy.spell_groups;
-    }
-    updateCombos(nextCombos);
-    setRunningCombo(copyName);
+    while (appConfig.combos?.[copyName]) { copyName = `${currentCombo} Copy ${index}`; index += 1; }
+    const next = clone(appConfig.combos ?? {});
+    next[copyName] = { ...clone(next[currentCombo]), deploy: comboDeployCopy(deployFromCombo(next[currentCombo], appConfig.deploy)) };
+    updateCombos(next);
+    setSelectedCombo(copyName);
   }
 
-  function deleteCombo() {
-    if (!currentCombo || comboNames.length <= 1) return;
-    const nextCombos = clone(appConfig.combos ?? {});
-    delete nextCombos[currentCombo];
-    const fallback = Object.keys(nextCombos)[0] ?? "";
-    updateCombos(nextCombos);
-    setRunningCombo(fallback);
+  function deleteCombo(name: string) {
+    if (!name || comboNames.length <= 1) return;
+    const next = clone(appConfig.combos ?? {});
+    delete next[name];
+    const fallback = Object.keys(next)[0] ?? "";
+    updateCombos(next);
+    if (runningCombo === name) updatePath(["farm", "combo"], fallback);
+    setSelectedCombo(fallback);
   }
 
   function createTroopKind() {
@@ -186,222 +122,151 @@ export function ComboPage() {
     if (!kind || allKinds.includes(kind)) return;
     updatePath(["slot_detection", "kinds"], [...allKinds, kind]);
     updatePath(["slot_detection", "count_max_by_kind", kind], 99);
-    updatePath(["manual_army", "counts", kind], appConfig.manual_army?.counts?.[kind] ?? 0);
+    updatePath(["manual_army", "counts", kind], 0);
     setNewKindName("");
   }
 
   function renameTroopKind(oldKind: string) {
-    const newKind = cleanKind(kindNameDraft);
-    if (!newKind || newKind === oldKind) {
-      setEditingKind("");
-      return;
-    }
-    if (allKinds.includes(newKind)) {
-      setInfo("Tên lính đã tồn tại.");
-      return;
-    }
-
-    const nextKinds = allKinds.map((kind: string) => (kind === oldKind ? newKind : kind));
-    const nextMaxByKind = clone(appConfig.slot_detection?.count_max_by_kind ?? {});
-    nextMaxByKind[newKind] = nextMaxByKind[oldKind] ?? 99;
-    delete nextMaxByKind[oldKind];
-
-    const nextManualCounts = clone(appConfig.manual_army?.counts ?? {});
-    nextManualCounts[newKind] = nextManualCounts[oldKind] ?? 0;
-    delete nextManualCounts[oldKind];
-
-    const nextCoordsSlots = clone(appConfig.coords?.slots ?? {});
-    if (nextCoordsSlots[oldKind]) {
-      nextCoordsSlots[newKind] = nextCoordsSlots[oldKind];
-      delete nextCoordsSlots[oldKind];
-    }
-
+    const nextKind = cleanKind(kindNameDraft);
+    if (!nextKind || nextKind === oldKind) { setEditingKind(""); return; }
+    if (allKinds.includes(nextKind)) { setNotice("Tên lính đã tồn tại."); return; }
+    const maxByKind = clone(appConfig.slot_detection?.count_max_by_kind ?? {});
+    maxByKind[nextKind] = maxByKind[oldKind] ?? 99; delete maxByKind[oldKind];
+    const manualCounts = clone(appConfig.manual_army?.counts ?? {});
+    manualCounts[nextKind] = manualCounts[oldKind] ?? 0; delete manualCounts[oldKind];
+    const coordsSlots = clone(appConfig.coords?.slots ?? {});
+    if (coordsSlots[oldKind]) { coordsSlots[nextKind] = coordsSlots[oldKind]; delete coordsSlots[oldKind]; }
     const nextCombos = clone(appConfig.combos ?? {});
-    for (const name of Object.keys(nextCombos)) {
-      nextCombos[name] = { ...(nextCombos[name] ?? {}), deploy: remapDeployKind(deployFromCombo(nextCombos[name], appConfig.deploy), oldKind, newKind) };
-    }
-
-    updatePath(["slot_detection", "kinds"], nextKinds);
-    updatePath(["slot_detection", "count_max_by_kind"], nextMaxByKind);
-    updatePath(["manual_army", "counts"], nextManualCounts);
-    updatePath(["coords", "slots"], nextCoordsSlots);
-    updatePath(["deploy"], remapDeployKind(appConfig.deploy, oldKind, newKind));
+    for (const name of Object.keys(nextCombos)) nextCombos[name] = { ...(nextCombos[name] ?? {}), deploy: remapDeployKind(deployFromCombo(nextCombos[name], appConfig.deploy), oldKind, nextKind) };
+    updatePath(["slot_detection", "kinds"], allKinds.map((kind) => kind === oldKind ? nextKind : kind));
+    updatePath(["slot_detection", "count_max_by_kind"], maxByKind);
+    updatePath(["manual_army", "counts"], manualCounts);
+    updatePath(["coords", "slots"], coordsSlots);
+    updatePath(["deploy"], remapDeployKind(appConfig.deploy, oldKind, nextKind));
     updateCombos(nextCombos);
-    setEditingKind("");
-    setKindNameDraft("");
+    setEditingKind(""); setKindNameDraft("");
   }
 
   function deleteTroopKind(kind: string) {
-    const nextKinds = allKinds.filter((item: string) => item !== kind);
-    const nextMaxByKind = clone(appConfig.slot_detection?.count_max_by_kind ?? {});
-    const nextManualCounts = clone(appConfig.manual_army?.counts ?? {});
-    const nextCoordsSlots = clone(appConfig.coords?.slots ?? {});
+    const maxByKind = clone(appConfig.slot_detection?.count_max_by_kind ?? {});
+    const manualCounts = clone(appConfig.manual_army?.counts ?? {});
+    const coordsSlots = clone(appConfig.coords?.slots ?? {});
+    delete maxByKind[kind]; delete manualCounts[kind]; delete coordsSlots[kind];
     const nextCombos = clone(appConfig.combos ?? {});
-    delete nextMaxByKind[kind];
-    delete nextManualCounts[kind];
-    delete nextCoordsSlots[kind];
-    for (const name of Object.keys(nextCombos)) {
-      nextCombos[name] = { ...(nextCombos[name] ?? {}), deploy: removeDeployKind(deployFromCombo(nextCombos[name], appConfig.deploy), kind) };
-    }
-
-    updatePath(["slot_detection", "kinds"], nextKinds);
-    updatePath(["slot_detection", "count_max_by_kind"], nextMaxByKind);
-    updatePath(["manual_army", "counts"], nextManualCounts);
-    updatePath(["coords", "slots"], nextCoordsSlots);
+    for (const name of Object.keys(nextCombos)) nextCombos[name] = { ...(nextCombos[name] ?? {}), deploy: removeDeployKind(deployFromCombo(nextCombos[name], appConfig.deploy), kind) };
+    updatePath(["slot_detection", "kinds"], allKinds.filter((item) => item !== kind));
+    updatePath(["slot_detection", "count_max_by_kind"], maxByKind);
+    updatePath(["manual_army", "counts"], manualCounts);
+    updatePath(["coords", "slots"], coordsSlots);
     updatePath(["deploy"], removeDeployKind(appConfig.deploy, kind));
     updateCombos(nextCombos);
-    setEditingKind("");
-    setInfo(`Đã xóa lính ${troopLabels[kind] ?? kind}.`);
-  }
-
-  function updateSequence(nextSequence: any[]) {
-    updateDeploy({ ...deploy, sequence: nextSequence });
+    setNotice(`Đã xóa lính ${troopLabels[kind] ?? kind} khỏi cấu hình.`);
   }
 
   function updateStep(index: number, key: string, value: unknown) {
-    const nextSequence = clone(sequence);
-    nextSequence[index] = { ...nextSequence[index], [key]: value };
-    updateSequence(nextSequence);
+    const next = clone(sequence); next[index] = { ...next[index], [key]: value }; updateDeploy({ ...deploy, sequence: next });
+  }
+  function addStep() { updateDeploy({ ...deploy, sequence: [...sequence, { slot: troopKinds[0] ?? "dragon", count: "all", max_taps: 10, delay: 0.08 }] }); }
+  function removeStep(index: number) { updateDeploy({ ...deploy, sequence: sequence.filter((_: unknown, i: number) => i !== index) }); }
+  function moveStep(index: number, offset: number) {
+    const target = index + offset;
+    if (target < 0 || target >= sequence.length) return;
+    const next = clone(sequence); [next[index], next[target]] = [next[target], next[index]]; updateDeploy({ ...deploy, sequence: next });
   }
 
-  function addStep() {
-    updateSequence([
-      ...sequence,
-      {
-        slot: troopKinds[0] ?? "dragon",
-        count: "all",
-        max_taps: 10,
-        delay: 0.08,
-      },
-    ]);
-  }
-
-  function removeStep(index: number) {
-    updateSequence(sequence.filter((_: unknown, itemIndex: number) => itemIndex !== index));
-  }
+  const deleteDescription = pendingDelete?.type === "combo"
+    ? `Combo “${pendingDelete.value}” và sequence của combo sẽ bị xóa. Vùng thả dùng chung không bị ảnh hưởng.`
+    : pendingDelete
+      ? `Lính “${troopLabels[pendingDelete.value] ?? pendingDelete.value}” sẽ bị xóa khỏi ${usedByCombos(pendingDelete.value).length} combo đang tham chiếu và khỏi cấu hình nhận diện.`
+      : "";
 
   return (
     <div>
-      <PageHeader
-        eyebrow="Combo"
-        title="Thiết lập đội hình"
-        subtitle="Tạo combo, thêm lính, chọn thứ tự thả quân."
-        action={
-          <Button variant="success" disabled={saving} onClick={save}>
-            {saving ? "Đang lưu..." : "Lưu cấu hình"}
-          </Button>
-        }
-      />
+      <PageHeader eyebrow="Đội hình" title="Combo" subtitle="Quản lý loại lính và thứ tự triển khai; vùng thả được cấu hình ở trang Tọa độ." action={<Button variant="success" loading={saving} disabled={!isDirty} onClick={save}>Lưu cấu hình</Button>} />
+      {error ? <Feedback tone="error" className="mb-5">{error}</Feedback> : savedMessage ? <Feedback tone="success" className="mb-5">{savedMessage}</Feedback> : notice ? <Feedback tone="info" className="mb-5">{notice}</Feedback> : null}
 
-      {(error || savedMessage || notice) && (
-        <div className={`mb-5 rounded-lg px-4 py-3 text-sm ${error ? "border border-danger/30 bg-danger/10 text-rose-200" : "border border-limewash/30 bg-limewash/10 text-lime-200"}`}>
-          {error || savedMessage || notice}
-        </div>
-      )}
-
-      <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
+      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-5">
-          <Card title="1. Combo">
-            <div className="space-y-4">
-              <SelectInput label="Chọn combo" value={currentCombo} options={comboOptions} onChange={(event) => setSelectedCombo(event.target.value)} />
-              <TextInput label="Tên combo" value={comboNameDraft} onChange={(event) => setComboNameDraft(event.target.value)} />
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="primary" disabled={!currentCombo || currentCombo === runningCombo} onClick={() => setRunningCombo(currentCombo)}>
-                  Dùng
-                </Button>
-                <Button variant="success" disabled={!currentCombo || !cleanName(comboNameDraft) || comboNameDraft === currentCombo} onClick={renameCombo}>
-                  Đổi tên
-                </Button>
-                <Button variant="muted" disabled={!currentCombo} onClick={copyCombo}>
-                  Copy
-                </Button>
-                <Button variant="danger" disabled={!currentCombo || comboNames.length <= 1} onClick={deleteCombo}>
-                  Xóa
-                </Button>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-                <TextInput label="Combo mới" value={newComboName} onChange={(event) => setNewComboName(event.target.value)} />
-                <Button className="mt-3 w-full" variant="success" disabled={!cleanName(newComboName) || Boolean(appConfig.combos?.[cleanName(newComboName)])} onClick={createCombo}>
-                  Tạo combo
-                </Button>
-              </div>
+          <Card title="Danh sách combo" subtitle={`${comboNames.length} combo`}>
+            <div className="space-y-2">
+              {comboNames.map((name) => (
+                <button key={name} type="button" onClick={() => setSelectedCombo(name)} className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left text-sm transition ${currentCombo === name ? "border-sky-400 bg-sky-400/10 text-white" : "border-white/10 bg-ink-900 text-slate-300 hover:border-white/20"}`}>
+                  <span className="min-w-0 truncate font-semibold">{name}</span>
+                  {runningCombo === name ? <span className="shrink-0 rounded-full bg-limewash/15 px-2 py-0.5 text-[10px] font-bold text-lime-300">Đang dùng</span> : null}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <TextInput label="Tên combo mới" value={newComboName} onChange={(event) => setNewComboName(event.target.value)} />
+              <Button className="mt-3 w-full" variant="primary" disabled={!cleanName(newComboName) || Boolean(appConfig.combos?.[cleanName(newComboName)])} onClick={createCombo}><Plus className="h-4 w-4" />Tạo combo</Button>
             </div>
           </Card>
 
-          <Card title="2. Lính">
-            <div className="space-y-3">
-              <TextInput label="Tên lính mới" value={newKindName} onChange={(event) => setNewKindName(event.target.value)} />
-              <Button className="w-full" variant="success" disabled={!cleanKind(newKindName) || allKinds.includes(cleanKind(newKindName))} onClick={createTroopKind}>
-                Thêm lính
-              </Button>
-
-              <div className="space-y-2">
-                {troopKinds.map((kind: string) => {
-                  const isEditing = editingKind === kind;
-                  return (
-                    <div key={kind} className="rounded-xl border border-white/10 bg-black/25 p-3">
-                      {isEditing ? (
-                        <div className="space-y-3">
-                          <TextInput label="Tên mới" value={kindNameDraft} onChange={(event) => setKindNameDraft(event.target.value)} />
-                          <div className="grid grid-cols-2 gap-2">
-                            <Button variant="success" disabled={!cleanKind(kindNameDraft)} onClick={() => renameTroopKind(kind)}>
-                              Lưu
-                            </Button>
-                            <Button variant="muted" onClick={() => setEditingKind("")}>
-                              Hủy
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-white">{troopLabels[kind] ?? kind}</span>
-                          <div className="flex gap-2">
-                            <Button
-                              className="px-3 py-1.5"
-                              variant="muted"
-                              onClick={() => {
-                                setEditingKind(kind);
-                                setKindNameDraft(kind);
-                              }}
-                            >
-                              Sửa
-                            </Button>
-                            <Button className="px-3 py-1.5" variant="danger" onClick={() => deleteTroopKind(kind)}>
-                              Xóa
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+          <details className="rounded-lg border border-white/10 bg-ink-850/90 p-5">
+            <summary className="cursor-pointer text-sm font-semibold text-white">Quản lý loại lính</summary>
+            <div className="mt-5 space-y-4 border-t border-white/10 pt-5">
+              <div>
+                <TextInput label="Tên lính mới" value={newKindName} onChange={(event) => setNewKindName(event.target.value)} />
+                <Button className="mt-3 w-full" variant="primary" disabled={!cleanKind(newKindName) || allKinds.includes(cleanKind(newKindName))} onClick={createTroopKind}><Plus className="h-4 w-4" />Thêm lính</Button>
+              </div>
+              <div className="max-h-[380px] space-y-2 overflow-auto pr-1">
+                {troopKinds.map((kind) => editingKind === kind ? (
+                  <div key={kind} className="rounded-lg border border-sky-400/30 bg-black/20 p-3">
+                    <TextInput label="Tên mới" hint="Tên sẽ được cập nhật trong mọi combo và cấu hình liên quan." value={kindNameDraft} onChange={(event) => setKindNameDraft(event.target.value)} />
+                    <div className="mt-3 grid grid-cols-2 gap-2"><Button variant="success" onClick={() => renameTroopKind(kind)}>Lưu</Button><Button onClick={() => setEditingKind("")}>Hủy</Button></div>
+                  </div>
+                ) : (
+                  <div key={kind} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-2 pl-3">
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white">{troopLabels[kind] ?? kind}</span>
+                    <Button size="sm" variant="ghost" aria-label={`Sửa ${kind}`} onClick={() => { setEditingKind(kind); setKindNameDraft(kind); }}><Pencil className="h-4 w-4" /></Button>
+                    <Button size="sm" variant="ghost" aria-label={`Xóa ${kind}`} onClick={() => setPendingDelete({ type: "troop", value: kind })}><Trash2 className="h-4 w-4 text-rose-300" /></Button>
+                  </div>
+                ))}
               </div>
             </div>
-          </Card>
+          </details>
         </div>
 
-        <Card title="3. Quân trong combo">
-          <div className="space-y-3">
-            {sequence.length === 0 ? <p className="text-sm text-slate-500">Combo này chưa có quân.</p> : null}
-            {sequence.map((step: any, index: number) => (
-              <div key={`${step.slot}-${index}`} className="rounded-xl border border-white/10 bg-black/25 p-3">
-                <div className="grid gap-3 md:grid-cols-[1.2fr_1fr_1fr_1fr_auto] md:items-end">
-                  <SelectInput label="Loại" value={step.slot ?? ""} options={troopOptions} onChange={(event) => updateStep(index, "slot", event.target.value)} />
-                  <TextInput label="Số lượng" value={String(step.count ?? "all")} onChange={(event) => updateStep(index, "count", event.target.value.trim() === "all" ? "all" : numberValue(event.target.value))} />
-                  <TextInput label="Tối đa" type="number" min={0} value={String(step.max_taps ?? 0)} onChange={(event) => updateStep(index, "max_taps", numberValue(event.target.value))} />
-                  <TextInput label="Delay" type="number" min={0} step={0.01} value={String(step.delay ?? 0)} onChange={(event) => updateStep(index, "delay", Number(event.target.value || 0))} />
-                  <Button variant="danger" onClick={() => removeStep(index)}>
-                    Xóa
-                  </Button>
-                </div>
+        <div className="min-w-0 space-y-5">
+          <Card
+            title={currentCombo || "Chưa chọn combo"}
+            subtitle={currentCombo === runningCombo ? "Combo đang được dùng khi chạy bot" : "Đang chỉnh, chưa đặt làm combo chạy"}
+            action={<div className="flex flex-wrap gap-2"><Button size="sm" variant="primary" disabled={!currentCombo || currentCombo === runningCombo} onClick={() => setRunningCombo(currentCombo)}>Dùng combo</Button><Button size="sm" onClick={copyCombo}><Copy className="h-4 w-4" />Copy</Button><Button size="sm" variant="danger" disabled={comboNames.length <= 1} onClick={() => setPendingDelete({ type: "combo", value: currentCombo })}><Trash2 className="h-4 w-4" />Xóa</Button></div>}
+          >
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+              <TextInput label="Tên combo" value={comboNameDraft} onChange={(event) => setComboNameDraft(event.target.value)} />
+              <Button variant="muted" disabled={!cleanName(comboNameDraft) || comboNameDraft === currentCombo} onClick={renameCombo}>Đổi tên</Button>
+            </div>
+          </Card>
+
+          <Card title="Sequence thả quân" subtitle="Thực hiện từ trên xuống dưới.">
+            {sequence.length ? (
+              <div className="overflow-x-auto rounded-lg border border-white/10">
+                <table className="w-full min-w-[760px] table-fixed text-left text-sm">
+                  <thead className="bg-black/30 text-xs uppercase tracking-wide text-slate-500">
+                    <tr><th className="w-20 px-3 py-3">Thứ tự</th><th className="w-48 px-3 py-3">Loại quân</th><th className="w-32 px-3 py-3">Số lượng</th><th className="w-32 px-3 py-3">Tối đa tap</th><th className="w-28 px-3 py-3">Delay</th><th className="w-36 px-3 py-3 text-right">Thao tác</th></tr>
+                  </thead>
+                  <tbody>
+                    {sequence.map((step: any, index: number) => (
+                      <tr key={`${step.slot}-${index}`} className="border-t border-white/10 bg-ink-900/60 align-top">
+                        <td className="px-3 py-3 font-mono text-slate-400">{index + 1}</td>
+                        <td className="px-3 py-3"><SelectInput label="" aria-label="Loại quân" value={step.slot ?? ""} options={troopOptions} onChange={(event) => updateStep(index, "slot", event.target.value)} /></td>
+                        <td className="px-3 py-3"><TextInput label="" aria-label="Số lượng" value={String(step.count ?? "all")} onChange={(event) => updateStep(index, "count", event.target.value.trim().toLowerCase() === "all" ? "all" : numberValue(event.target.value))} /></td>
+                        <td className="px-3 py-3"><TextInput label="" aria-label="Tối đa tap" type="number" min={0} value={String(step.max_taps ?? 0)} onChange={(event) => updateStep(index, "max_taps", numberValue(event.target.value))} /></td>
+                        <td className="px-3 py-3"><TextInput label="" aria-label="Delay" type="number" min={0} step={0.01} suffix="s" value={String(step.delay ?? 0)} onChange={(event) => updateStep(index, "delay", Number(event.target.value || 0))} /></td>
+                        <td className="px-3 py-3"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" disabled={index === 0} aria-label="Đưa lên" onClick={() => moveStep(index, -1)}><ArrowUp className="h-4 w-4" /></Button><Button size="sm" variant="ghost" disabled={index === sequence.length - 1} aria-label="Đưa xuống" onClick={() => moveStep(index, 1)}><ArrowDown className="h-4 w-4" /></Button><Button size="sm" variant="ghost" aria-label="Xóa dòng" onClick={() => removeStep(index)}><Trash2 className="h-4 w-4 text-rose-300" /></Button></div></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
-            <Button variant="primary" onClick={addStep}>
-              Thêm quân
-            </Button>
-          </div>
-        </Card>
+            ) : <EmptyState title="Sequence đang trống" description="Thêm ít nhất một dòng quân trước khi chạy combo." />}
+            <Button className="mt-4" variant="primary" onClick={addStep}><Plus className="h-4 w-4" />Thêm dòng quân</Button>
+          </Card>
+        </div>
       </div>
+
+      <ConfirmModal open={Boolean(pendingDelete)} title={pendingDelete?.type === "combo" ? "Xóa combo?" : "Xóa loại lính?"} description={deleteDescription} onClose={() => setPendingDelete(null)} onConfirm={() => { if (pendingDelete?.type === "combo") deleteCombo(pendingDelete.value); else if (pendingDelete) deleteTroopKind(pendingDelete.value); setPendingDelete(null); }} />
     </div>
   );
 }

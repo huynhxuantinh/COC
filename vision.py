@@ -174,6 +174,17 @@ class Vision:
         damage_region = self.config["ocr"]["regions"].get("damage_panel", [1320, 615, 260, 120])
         return self._has_dark_damage_panel(image, damage_region) and not self._has_orange_button(image, next_region)
 
+    def has_return_home_button(self, png: bytes) -> bool:
+        if not self.available:
+            return False
+        image = self.image_from_png(png)
+        region = self.config["ocr"]["regions"].get("return_home_button", [650, 700, 300, 160])
+        if self._has_green_button(image, region):
+            return True
+        text = self.read_text(image, region)
+        compact = "".join(ch for ch in text if ch.isalpha())
+        return "returnhome" in compact
+
     def slot_looks_available(self, png: bytes, center: list[int], size: list[int] | None = None) -> bool:
         if not self.available:
             return True
@@ -330,6 +341,18 @@ class Vision:
             if r >= 180 and 70 <= g <= 170 and b <= 80:
                 orange += 1
         return (orange / len(pixels)) >= 0.08
+
+    def _has_green_button(self, image, region: list[int]) -> bool:
+        if image is None:
+            return False
+        x, y, w, h = region
+        crop = image.crop((x, y, x + w, y + h)).convert("RGB")
+        pixels = list(crop.getdata())
+        if not pixels:
+            return False
+        green = sum(1 for r, g, b in pixels if g >= 115 and g >= r * 1.15 and g >= b * 1.2)
+        dark = sum(1 for r, g, b in pixels if r <= 70 and g <= 80 and b <= 70)
+        return (green / len(pixels)) >= 0.15 and (dark / len(pixels)) >= 0.12
 
     def _has_dark_damage_panel(self, image, region: list[int]) -> bool:
         if image is None:

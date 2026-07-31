@@ -39,7 +39,7 @@ type ConfigEditorContextValue = {
   savedMessage: string;
   isDirty: boolean;
   updatePath: (path: string[], value: unknown) => void;
-  save: () => Promise<void>;
+  save: () => Promise<boolean>;
   reload: () => Promise<void>;
 };
 
@@ -81,7 +81,7 @@ export function ConfigEditorProvider({ children }: { children: ReactNode }) {
 
   const save = useCallback(async () => {
     if (!config) {
-      return;
+      return false;
     }
     setError("");
     setSavedMessage("");
@@ -93,8 +93,10 @@ export function ConfigEditorProvider({ children }: { children: ReactNode }) {
       setSavedSignature(configSignature(saved));
       setOptions(optionsPayload);
       setSavedMessage("Đã lưu cấu hình. Cần quét ADB lại trước khi chạy.");
+      return true;
     } catch (err) {
       setError(apiErrorMessage(err));
+      return false;
     } finally {
       setSaving(false);
     }

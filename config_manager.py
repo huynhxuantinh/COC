@@ -67,13 +67,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "periodic_restart_game": False,
         "periodic_restart_min_seconds": 3600,
         "periodic_restart_max_seconds": 5400,
-        "donate_when_farming": False,
         "change_combo_on_start": False,
         "resource_stats": True,
         "restart_if_attack_missing": True,
         "attack_missing_retries": 3,
         "max_home_restart_failures": 3,
         "restart_wait_seconds": 18,
+        "result_wait_seconds": 15,
         "max_consecutive_cycle_errors": 8,
         "home_zoom_out_keyevents": 3,
         "ldplayer_index": 0,
@@ -81,8 +81,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "farm": {
         "village": "main",
         "combo": "Rồng Điện",
-        "deploy_mode": "polygon",
-        "attack_edge": "top",
         "attack_view": "random",
         "threshold_mode": "any",
         "gold_min": 900000,
@@ -93,6 +91,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_next": 80,
         "search_delay_seconds": 3.0,
         "ocr_fail_restart_seconds": 30,
+        "max_ocr_restarts": 3,
     },
     "surrender": {
         "by_time": True,
@@ -109,6 +108,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "damage_jump_max_pending_reads": 3,
         "damage_stall_seconds": 20,
         "damage_unknown_restart_seconds": 20,
+        "max_damage_ocr_restarts": 3,
     },
     "ocr": {
         "enabled": True,
@@ -124,6 +124,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "next_button": [1325, 575, 250, 130],
             "damage_panel": [1320, 615, 260, 120],
             "home_attack_button": [20, 715, 170, 160],
+            "return_home_button": [650, 700, 300, 160],
             "home_gold": [1305, 25, 250, 45],
             "home_elixir": [1320, 103, 220, 45],
         },
@@ -459,6 +460,16 @@ def migrate_slot_detection_config(config: dict[str, Any]) -> None:
         slot_detection.pop("cluster_padding", None)
 
 
+def migrate_dead_legacy_options(config: dict[str, Any]) -> None:
+    game = config.get("game", {})
+    if isinstance(game, dict):
+        game.pop("donate_when_farming", None)
+    farm = config.get("farm", {})
+    if isinstance(farm, dict):
+        farm.pop("deploy_mode", None)
+        farm.pop("attack_edge", None)
+
+
 def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
     merged = deep_merge(DEFAULT_CONFIG, data)
     if "combos" not in data:
@@ -472,6 +483,7 @@ def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
     migrate_global_deploy_zones(merged)
     migrate_single_adb_device(merged)
     migrate_slot_detection_config(merged)
+    migrate_dead_legacy_options(merged)
     return merged
 
 

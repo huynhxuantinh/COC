@@ -12,9 +12,14 @@ export function usePolling(callback: () => void | Promise<void>, intervalMs: num
       return;
     }
     let cancelled = false;
+    let running = false;
     const run = async () => {
-      if (!cancelled) {
+      if (cancelled || running) return;
+      running = true;
+      try {
         await savedCallback.current();
+      } finally {
+        running = false;
       }
     };
     run();

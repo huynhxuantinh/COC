@@ -1,9 +1,12 @@
+import { Camera, Image as ImageIcon, RotateCcw, ScanSearch, Trash2 } from "lucide-react";
 import { PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { ConfirmModal } from "../components/ConfirmModal";
+import { EmptyState, Feedback } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { SelectInput, TextInput } from "../components/FormControls";
-import { captureScreenshot } from "../services/coordinatesApi";
+import { captureScreenshot, listReferenceImages, loadReferenceImage } from "../services/coordinatesApi";
 import { apiErrorMessage } from "../services/http";
 import {
   deleteSlotTemplate,
@@ -13,7 +16,7 @@ import {
   type SlotDetectionItem,
   type SlotTemplatesPayload,
 } from "../services/slotsApi";
-import type { ScreenshotPayload } from "../services/types";
+import type { ReferenceImageItem, ScreenshotPayload } from "../services/types";
 
 const kindLabels: Record<string, string> = {
   dragon: "Rồng điện",
@@ -40,6 +43,9 @@ function templateImageSrc(filename: string, imageBase64: string): string {
 export function SlotDetectionPage() {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [templates, setTemplates] = useState<SlotTemplatesPayload | null>(null);
+  const [referenceImages, setReferenceImages] = useState<ReferenceImageItem[]>([]);
+  const [referenceName, setReferenceName] = useState("");
+  const [imageSourceLabel, setImageSourceLabel] = useState("");
   const [kind, setKind] = useState("dragon");
   const [cropSize, setCropSize] = useState(76);
   const [image, setImage] = useState<ScreenshotPayload | null>(null);
@@ -51,12 +57,22 @@ export function SlotDetectionPage() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<{ kind: string; filename: string } | null>(null);
 
   useEffect(() => {
     getSlotTemplates()
       .then((payload) => {
         setTemplates(payload);
         if (payload.kinds.length) setKind(payload.kinds[0]);
+      })
+      .catch((err) => setError(apiErrorMessage(err)));
+  }, []);
+
+  useEffect(() => {
+    listReferenceImages()
+      .then((items) => {
+        setReferenceImages(items);
+        if (items.length) setReferenceName(items[0].name);
       })
       .catch((err) => setError(apiErrorMessage(err)));
   }, []);
@@ -101,6 +117,7 @@ export function SlotDetectionPage() {
     () => (templates?.kinds ?? ["dragon", "balloon", "valkyrie", "hero", "rage", "freeze"]).map((value) => ({ label: kindLabels[value] ?? value, value })),
     [templates],
   );
+  const referenceOptions = referenceImages.map((item) => ({ label: `${item.label} (${item.width}x${item.height})`, value: item.name }));
 
   async function run(name: string, action: () => Promise<void>) {
     setBusy(name);
@@ -119,12 +136,32 @@ export function SlotDetectionPage() {
     await run("capture", async () => {
       const payload = await captureScreenshot();
       setImage(payload);
+      setImageSourceLabel("Ảnh chụp ADB hiện tại");
       setSelectedPoint(null);
       setCropRegion(null);
       setDragStart(null);
       setDragCurrent(null);
       setDetections([]);
       setMessage("Đã chụp. Chọn loại icon rồi kéo chuột khoanh vùng icon trên thanh quân.");
+    });
+  }
+
+  async function handleLoadReference() {
+    if (!referenceName) {
+      setError("Chưa có ảnh mẫu trong thư mục img.");
+      return;
+    }
+    await run("reference", async () => {
+      const payload = await loadReferenceImage(referenceName);
+      const item = referenceImages.find((entry) => entry.name === referenceName);
+      setImage(payload);
+      setImageSourceLabel(item?.label ?? referenceName);
+      setSelectedPoint(null);
+      setCropRegion(null);
+      setDragStart(null);
+      setDragCurrent(null);
+      setDetections([]);
+      setMessage(`Đã tải ảnh mẫu ${item?.label ?? referenceName}.`);
     });
   }
 
@@ -189,7 +226,6 @@ export function SlotDetectionPage() {
   }
 
   async function handleDeleteTemplate(templateKind: string, filename: string) {
-    if (!window.confirm(`Xóa template ${templateKind}/${filename}?`)) return;
     await run(`delete-${templateKind}-${filename}`, async () => {
       const payload = await deleteSlotTemplate(templateKind, filename);
       setTemplates(payload);
@@ -211,23 +247,23 @@ export function SlotDetectionPage() {
         eyebrow="Hiệu chỉnh"
         title="Nhận diện slot"
         subtitle="Chụp màn hình trận, khoanh icon quân/phép, lưu mẫu rồi test nhận diện."
-        action={
-          <Button variant="primary" disabled={busy !== ""} onClick={handleCapture}>
-            {busy === "capture" ? "Đang chụp..." : "Chụp từ ADB"}
-          </Button>
-        }
       />
 
-      {(error || message) && (
-        <div className={`mb-5 rounded-lg px-4 py-3 text-sm ${error ? "border border-danger/30 bg-danger/10 text-rose-200" : "border border-limewash/30 bg-limewash/10 text-lime-200"}`}>
-          {error || message}
-        </div>
-      )}
+      {error ? <Feedback tone="error" className="mb-5">{error}</Feedback> : message ? <Feedback tone="success" className="mb-5">{message}</Feedback> : null}
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+      <Card title="Nguồn ảnh">
+        <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_auto_auto] lg:items-end">
+          <SelectInput label="Ảnh mẫu trong COC/img" value={referenceName} options={referenceOptions.length ? referenceOptions : [{ label: "Chưa có ảnh mẫu", value: "" }]} onChange={(event) => setReferenceName(event.target.value)} />
+          <Button variant="primary" loading={busy === "reference"} disabled={busy !== "" || !referenceName} onClick={handleLoadReference}><ImageIcon className="h-4 w-4" />Dùng ảnh mẫu</Button>
+          <Button variant="muted" loading={busy === "capture"} disabled={busy !== ""} onClick={handleCapture}><Camera className="h-4 w-4" />Chụp từ ADB</Button>
+        </div>
+      </Card>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 overflow-hidden rounded-lg border border-white/10 bg-black/30">
           {imageSrc ? (
             <div className="relative">
+              <div className="absolute left-3 top-3 z-20 max-w-[calc(100%-1.5rem)] truncate rounded-lg bg-black/75 px-3 py-1.5 text-xs font-semibold text-white">{imageSourceLabel} · {image?.width}x{image?.height}</div>
               <img
                 ref={imageRef}
                 src={imageSrc}
@@ -235,7 +271,7 @@ export function SlotDetectionPage() {
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
-                className="block w-full cursor-crosshair select-none"
+                className="block h-auto w-full cursor-crosshair select-none"
                 draggable={false}
               />
               {selectedPoint ? (
@@ -268,13 +304,13 @@ export function SlotDetectionPage() {
             </div>
           ) : (
             <div className="flex aspect-video items-center justify-center p-8 text-center text-sm text-slate-500">
-              Bấm Chụp từ ADB khi đang ở màn hình trận đấu có thanh quân.
+              Chọn ảnh mẫu hoặc chụp từ ADB khi đang ở màn hình trận đấu có thanh quân.
             </div>
           )}
         </div>
 
         <aside className="space-y-4">
-          <Card title="Lưu mẫu icon">
+          <Card title="Crop và lưu mẫu">
             <div className="space-y-3">
               <SelectInput label="Loại icon" value={kind} options={kindOptions} onChange={(event) => setKind(event.target.value)} />
               <TextInput
@@ -309,8 +345,8 @@ export function SlotDetectionPage() {
                   Phóng to
                 </Button>
               </div>
-              <Button className="w-full" variant="muted" disabled={!cropRegion} onClick={() => setCropRegion(null)}>
-                Bỏ vùng tự cắt
+              <Button className="w-full" variant="muted" disabled={!cropRegion && !selectedPoint} onClick={() => { setCropRegion(null); setSelectedPoint(null); setDragStart(null); setDragCurrent(null); }}>
+                <RotateCcw className="h-4 w-4" />Reset crop
               </Button>
               <div className="rounded-lg border border-white/10 bg-ink-900 px-3 py-2 text-xs text-slate-400">
                 {cropRegion ? `Vùng crop: [${cropRegion.join(", ")}]` : "Chưa có vùng tự cắt."}
@@ -319,13 +355,14 @@ export function SlotDetectionPage() {
                 Lưu mẫu
               </Button>
               <Button className="w-full" variant="muted" disabled={busy !== ""} onClick={handleDetect}>
-                Test nhận diện
+                <ScanSearch className="h-4 w-4" />Test nhận diện
               </Button>
             </div>
           </Card>
 
           <Card title="Mẫu hiện có">
-            <div className="max-h-96 space-y-3 overflow-auto text-sm text-slate-300">
+            <div className="max-h-96 space-y-3 overflow-auto pr-1 text-sm text-slate-300">
+              {(templates?.items ?? []).length === 0 ? <EmptyState title="Chưa có template" description="Crop một icon rồi lưu mẫu." /> : null}
               {(templates?.items ?? []).map((item) => (
                 <div key={item.kind} className="rounded-lg bg-ink-900 px-3 py-2">
                   <div className="mb-2 flex items-center justify-between">
@@ -350,9 +387,9 @@ export function SlotDetectionPage() {
                             className="px-3 py-1.5"
                             variant="danger"
                             disabled={busy !== ""}
-                            onClick={() => handleDeleteTemplate(item.kind, file.filename)}
+                            onClick={() => setPendingDelete({ kind: item.kind, filename: file.filename })}
                           >
-                            Xóa
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       ))
@@ -366,11 +403,12 @@ export function SlotDetectionPage() {
           <Card title="Kết quả test">
             <div className="max-h-64 space-y-2 overflow-auto text-xs text-slate-300">
               {detections.length === 0 ? (
-                <p className="text-slate-500">Chưa có kết quả.</p>
+                <EmptyState title="Chưa có kết quả" description="Bấm Test nhận diện sau khi có template." />
               ) : (
                 detections.map((item, index) => (
                   <div key={`${item.kind}-${index}`} className="rounded-lg bg-ink-900 px-3 py-2">
-                    {kindLabels[item.kind] ?? item.kind} x{item.count >= 0 ? item.count : "?"} [{item.center.join(", ")}] score {item.score}
+                    <div className="flex items-center justify-between gap-3"><span className="font-semibold text-white">{kindLabels[item.kind] ?? item.kind} x{item.count >= 0 ? item.count : "?"}</span><span className="font-mono text-sky-300">{item.score.toFixed(4)}</span></div>
+                    <p className="mt-1 font-mono text-slate-500">[{item.center.join(", ")}] · {item.template}</p>
                   </div>
                 ))
               )}
@@ -378,6 +416,19 @@ export function SlotDetectionPage() {
           </Card>
         </aside>
       </div>
+
+      <ConfirmModal
+        open={Boolean(pendingDelete)}
+        title="Xóa template?"
+        description={pendingDelete ? `Template ${kindLabels[pendingDelete.kind] ?? pendingDelete.kind}/${pendingDelete.filename} sẽ không còn được dùng để nhận diện slot.` : ""}
+        busy={busy.startsWith("delete-")}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          await handleDeleteTemplate(pendingDelete.kind, pendingDelete.filename);
+          setPendingDelete(null);
+        }}
+      />
     </div>
   );
 }
