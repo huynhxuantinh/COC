@@ -596,7 +596,6 @@ class COCFarmApp(tk.Tk):
                 self.config_data["adb"]["path"] = adb_path.get().strip()
                 devices = self._parse_device_list(device.get())
                 self.config_data["adb"]["device"] = devices[0]
-                self.config_data["adb"]["devices"] = []
                 self.config_data["ocr"]["tesseract_path"] = tess_path.get().strip()
                 self.config_data["farm"]["max_next"] = int(max_next.get().replace(",", "").strip())
                 save_config(self.config_data)

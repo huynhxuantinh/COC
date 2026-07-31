@@ -66,8 +66,7 @@ class Vision:
         gray = self.ImageOps.grayscale(crop)
         whitelist = "0123456789%" if allow_percent else "0123456789"
         if allow_percent:
-            gray = gray.point(lambda p: 255 if p > 145 else 0)
-            return self._ocr_digits(gray, whitelist, psm=7)
+            return self._read_percent_from_candidates(crop, gray, whitelist)
 
         white_mask = self._white_digit_mask(crop)
         fast_candidates = [
@@ -99,6 +98,27 @@ class Vision:
         if values:
             return max(values, key=lambda value: (values[value] * len(str(value)), values[value], len(str(value)), value))
         return -1
+
+    def _read_percent_from_candidates(self, crop, gray, whitelist: str) -> int:
+        white_mask = self._white_digit_mask(crop)
+        candidates = [
+            (gray.point(lambda p: 255 if p > 145 else 0), 7),
+            (gray.point(lambda p: 255 if p > 130 else 0), 7),
+            (gray.point(lambda p: 255 if p > 160 else 0), 7),
+            (white_mask, 7),
+            (white_mask, 8),
+            (self.ImageEnhance.Contrast(gray).enhance(2.2), 7),
+            (gray, 7),
+            (gray, 8),
+        ]
+        values: Counter[int] = Counter()
+        for candidate, psm in candidates:
+            value = self._ocr_digits(candidate, whitelist, psm)
+            if 0 <= value <= 100:
+                values[value] += 1
+        if not values:
+            return -1
+        return max(values, key=lambda value: (values[value], len(str(value)), value))
 
     def _ocr_digits(self, image, whitelist: str, psm: int) -> int:
         config = f"--psm {psm} -c tessedit_char_whitelist={whitelist}"

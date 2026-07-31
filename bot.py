@@ -132,8 +132,9 @@ class FarmBot:
                 return
             self.attacks_since_wall_upgrade += 1
             if self._wall_upgrade_due():
-                if not self._upgrade_walls():
-                    self._backoff_wall_upgrade()
+                wall_result = self._upgrade_walls()
+                if not wall_result["success"]:
+                    self._backoff_wall_upgrade(str(wall_result["reason"]))
 
     def _too_many_cycle_errors(self, cycle_errors: int, max_cycle_errors: int) -> bool:
         if max_cycle_errors <= 0 or cycle_errors < max_cycle_errors:
@@ -346,8 +347,18 @@ class FarmBot:
         self._scan_runtime_slots()
 
         attack_start = time.time()
-        if not self._deploy_troops():
-            self.log("[ATTACK] Không thả được lính vì thiếu vùng polygon. End battle.")
+        deploy_result = self._deploy_troops()
+        if not deploy_result["deployed"]:
+            reason = deploy_result["reason"]
+            if reason == "missing_zone":
+                self.log("[ATTACK] Không thả được lính vì thiếu vùng polygon. End battle.")
+            elif reason == "unknown_counts":
+                self.log("[ATTACK] Không thả được lính vì không đọc được số quân/slot. End battle.")
+                self._dump_debug_png("deploy-slot-count-unknown")
+            elif reason == "empty_slots":
+                self.log("[ATTACK] Không thả được lính vì các slot đều hết hoặc bằng 0. End battle.")
+            else:
+                self.log("[ATTACK] Không thả được lính. End battle.")
             self._tap_coord("end_battle")
             self._sleep(1)
             self._tap_coord("end_battle_okay")
@@ -490,6 +501,8 @@ class FarmBot:
     def _manual_detection_count(self, kind: str, remaining: dict[str, int]) -> int:
         count = max(0, int(remaining.get(kind, 0)))
         if count <= 0:
+            if kind != "hero" and self.manual_slot_counts.get(kind, 0) > 0:
+                self.log(f"[SLOT] Bỏ qua slot {kind} trùng/ngoài số lượng thủ công.")
             return 0
         if kind == "hero":
             remaining[kind] = count - 1
@@ -497,17 +510,23 @@ class FarmBot:
         remaining[kind] = 0
         return count
 
-    def _deploy_troops(self) -> bool:
+    def _deploy_troops(self) -> dict[str, Any]:
         points = self._deploy_points()
         if not points:
             self.log("[ATTACK] Chưa có vùng thả lính hợp lệ, skip thả lính.")
-            return False
+            return {"deployed": False, "reason": "missing_zone"}
         slot_counts = self._read_deploy_slot_counts()
         deployed_any = False
+        unknown_slots: list[str] = []
+        zero_slots: list[str] = []
         for step in self.active_deploy["sequence"]:
             slot = step["slot"]
+            if slot_counts.get(slot, -1) < 0 and self.active_deploy.get("strict_slot_counts", True):
+                unknown_slots.append(slot)
             count = self._deploy_count_for_step(step, slot_counts)
             if count <= 0:
+                if slot not in unknown_slots:
+                    zero_slots.append(slot)
                 self.log(f"[ATTACK] Skip {slot}, slot empty or count unknown.")
                 continue
             label = "all" if self._is_all(step.get("count")) else str(count)
@@ -516,6 +535,7 @@ class FarmBot:
             if not select_each_tap:
                 self._tap_slot(slot)
             delay = self._troop_delay_seconds(float(step.get("delay", 0.2)))
+            deployed_for_step = 0
             for i in range(count):
                 if self._slot_check_due(step, i) and not self._slot_available(slot):
                     self.log(f"[ATTACK] Slot {slot} looks empty, stop deploy.")
@@ -526,9 +546,19 @@ class FarmBot:
                 self.adb.tap(x, y)
                 self._consume_runtime_slot(slot)
                 deployed_any = True
+                deployed_for_step += 1
                 self._optimized_action_pause()
                 self._sleep(delay)
-        return deployed_any
+            if slot_counts.get(slot, -1) > 0:
+                slot_counts[slot] = max(0, int(slot_counts[slot]) - deployed_for_step)
+        if deployed_any:
+            return {"deployed": True, "reason": ""}
+        if unknown_slots:
+            self.log(f"[ATTACK] Slot không đọc được số lượng: {', '.join(unknown_slots)}.")
+            return {"deployed": False, "reason": "unknown_counts"}
+        if zero_slots:
+            return {"deployed": False, "reason": "empty_slots"}
+        return {"deployed": False, "reason": "no_sequence"}
 
     def _read_deploy_slot_counts(self) -> dict[str, int]:
         if self._manual_army_enabled():
@@ -859,15 +889,16 @@ class FarmBot:
         elixir_full = resources.get("elixir", -1) >= threshold * elixir_capacity
         return gold_full or elixir_full
 
-    def _wall_upgrade_budget(self) -> tuple[str, int]:
+    def _wall_upgrade_budget(self) -> tuple[str, int, str]:
         settings = self.config.get("wall_upgrade", {})
         resources = self._read_home_resources_stable(settings)
         if not resources:
-            return "", 0
+            return "", 0, "read_resources_failed"
         selected = self._select_wall_payment_from_resources(settings, resources)
         if not selected:
-            return "", 0
-        return selected
+            return "", 0, "budget_unavailable"
+        pay_with, budget = selected
+        return pay_with, budget, ""
 
     def _select_wall_payment_from_resources(
         self,
@@ -900,19 +931,24 @@ class FarmBot:
             return kind, budget
         return None
 
-    def _backoff_wall_upgrade(self) -> None:
-        settings = self.config.get("wall_upgrade", {})
-        retry_after = max(1, int(settings.get("retry_backoff_attacks", 20)))
-        self.attacks_since_wall_upgrade = -retry_after
-        self.log(f"[WALL] Nang tuong that bai, nghi thu lai sau {retry_after} tran.")
+    def _wall_result(self, success: bool, reason: str = "") -> dict[str, Any]:
+        return {"success": success, "reason": reason}
 
-    def _upgrade_walls(self) -> bool:
+    def _backoff_wall_upgrade(self, reason: str) -> None:
+        settings = self.config.get("wall_upgrade", {})
+        temporary_reasons = {"read_cost_failed", "rollback_read_failed", "read_resources_failed"}
+        key = "temporary_retry_backoff_attacks" if reason in temporary_reasons else "retry_backoff_attacks"
+        retry_after = max(1, int(settings.get(key, 20)))
+        self.attacks_since_wall_upgrade = -retry_after
+        self.log(f"[WALL] Nang tuong that bai ({reason or 'unknown'}), nghi thu lai sau {retry_after} tran.")
+
+    def _upgrade_walls(self) -> dict[str, Any]:
         settings = self.config.get("wall_upgrade", {})
         coords = settings.get("coords", {})
-        pay_with, budget = self._wall_upgrade_budget()
+        pay_with, budget, budget_reason = self._wall_upgrade_budget()
         if not pay_with or budget <= 0:
             self.log("[WALL] Khong du ngan sach sau khi tru du tru, bo qua.")
-            return False
+            return self._wall_result(False, budget_reason or "budget_unavailable")
 
         self.log(f"[WALL] Bat dau nang tuong. Ngan sach: {budget:,} {pay_with}.")
         self.adb.tap(*coords["builder_icon"])
@@ -922,7 +958,7 @@ class FarmBot:
         if not wall_pos:
             self.log("[WALL] Khong tim thay dong Wall trong danh sach nang cap.")
             self._close_wall_popup()
-            return False
+            return self._wall_result(False, "wall_not_found")
 
         self.log(f"[WALL] Chon dong Wall tai {wall_pos[0]},{wall_pos[1]}.")
         self.adb.tap(int(wall_pos[0]), int(wall_pos[1]))
@@ -935,26 +971,14 @@ class FarmBot:
         use_add10 = bool(settings.get("use_add10", False))
         add_button = coords["add10_button"] if use_add10 else coords["add1_button"]
         add_label = "+10" if use_add10 else "+1"
-        if not use_add10:
-            add1_rounds = max(1, int(settings.get("add1_rounds", 1)))
-            self.log(f"[WALL] Dung nut {add_label}, bam {add1_rounds} lan.")
-            for _ in range(add1_rounds):
-                self.adb.tap(*add_button)
-                self._sleep(0.35)
-            self.log(f"[WALL] Xac nhan nang {add1_rounds} tuong bang {pay_with}.")
-            self.adb.tap(*upgrade_button)
-            self._sleep(1.0)
-            self.adb.tap(*coords["confirm_okay_button"])
-            self._sleep(1.2)
-            self.attacks_since_wall_upgrade = 0
-            return True
-
-        max_rounds = max(1, int(settings.get("max_add_rounds", 60))) if use_add10 else 1
+        max_rounds = max(
+            1,
+            int(settings.get("max_add_rounds" if use_add10 else "add1_rounds", 60 if use_add10 else 1)),
+        )
         self.log(f"[WALL] Dung nut {add_label}, toi da {max_rounds} lan bam.")
         last_safe_cost = 0
         last_add_increment = 0
         rounds = 0
-        selected_pay_with = pay_with
         while rounds < max_rounds and not self.stop_event.is_set():
             if last_safe_cost > 0 and last_add_increment > 0 and last_safe_cost + last_add_increment > budget:
                 self.log(
@@ -968,14 +992,14 @@ class FarmBot:
             if cost < 0:
                 self.log("[WALL] Khong doc duoc gia nang tuong, huy de tranh tieu nham.")
                 self._close_wall_popup()
-                return False
+                return self._wall_result(False, "read_cost_failed")
             if cost > budget:
                 self.log(f"[WALL] Gia {cost:,} vuot ngan sach {budget:,}, lui lai.")
                 cost = self._rollback_wall_selection_to_budget(settings, coords, upgrade_button, budget, use_add10)
                 if cost <= 0:
                     self.log("[WALL] Khong xac nhan duoc gia sau khi lui, huy de tranh tieu nham.")
                     self._close_wall_popup()
-                    return False
+                    return self._wall_result(False, "rollback_read_failed")
                 last_safe_cost = cost
                 break
             if cost > last_safe_cost:
@@ -983,27 +1007,29 @@ class FarmBot:
             last_safe_cost = cost
             rounds += 1
 
-        selected = self._select_wall_upgrade_payment(settings, coords)
-        if selected:
-            selected_pay_with, upgrade_button, last_safe_cost, budget = selected
-
         if last_safe_cost <= 0:
             self.log("[WALL] Khong du tai nguyen de nang tuong, huy.")
             self._close_wall_popup()
-            return False
+            return self._wall_result(False, "budget_unavailable")
 
         if last_safe_cost > budget:
-            self.log(f"[WALL] Gia {last_safe_cost:,} vuot ngan sach {budget:,} {selected_pay_with}, huy.")
+            self.log(f"[WALL] Gia {last_safe_cost:,} vuot ngan sach {budget:,} {pay_with}, huy.")
             self._close_wall_popup()
-            return False
+            return self._wall_result(False, "cost_over_budget")
 
-        self.log(f"[WALL] Xac nhan nang tuong: {last_safe_cost:,} {selected_pay_with}.")
+        if settings.get("dry_run", False):
+            self.log(f"[WALL] Dry-run: se nang tuong {last_safe_cost:,} {pay_with}, khong bam xac nhan.")
+            self._close_wall_popup()
+            self.attacks_since_wall_upgrade = 0
+            return self._wall_result(True)
+
+        self.log(f"[WALL] Xac nhan nang tuong: {last_safe_cost:,} {pay_with}.")
         self.adb.tap(*upgrade_button)
         self._sleep(1.0)
         self.adb.tap(*coords["confirm_okay_button"])
         self._sleep(1.2)
         self.attacks_since_wall_upgrade = 0
-        return True
+        return self._wall_result(True)
 
     def _select_wall_upgrade_payment(
         self,
@@ -1048,26 +1074,6 @@ class FarmBot:
                 self.adb.swipe(*scroll_swipe)
                 self._sleep(0.9)
         return None
-
-    def _upgrade_single_wall(self, coords: dict[str, Any], pay_with: str, budget: int) -> None:
-        upgrade_button = coords["upgrade_gold_button"] if pay_with == "gold" else coords["upgrade_elixir_button"]
-        confirm_button = coords.get("confirm_upgrade_button", [1120, 786])
-        cost = self._read_wall_cost_stable(self.config.get("wall_upgrade", {}), upgrade_button)
-        if cost < 0:
-            self.log("[WALL] Khong doc duoc gia nang 1 tuong, huy de tranh tieu nham.")
-            self._close_wall_popup()
-            return
-        if cost > budget:
-            self.log(f"[WALL] Gia 1 tuong {cost:,} vuot ngan sach {budget:,}, huy.")
-            self._close_wall_popup()
-            return
-
-        self.log(f"[WALL] Nang 1 tuong: {cost:,} {pay_with}.")
-        self.adb.tap(*upgrade_button)
-        self._sleep(1.2)
-        self.adb.tap(*confirm_button)
-        self._sleep(1.2)
-        self.attacks_since_wall_upgrade = 0
 
     def _read_home_resources_stable(self, settings: dict[str, Any]) -> dict[str, int] | None:
         if not self.vision.available:
@@ -1155,7 +1161,18 @@ class FarmBot:
         return png, self.vision.read_loot(png)
 
     def _loot_is_valid(self, loot: dict[str, int]) -> bool:
-        return loot["gold"] >= 0 and loot["elixir"] >= 0
+        if loot["gold"] < 0 or loot["elixir"] < 0:
+            return False
+        farm = self.config.get("farm", {})
+        gold_max = int(farm.get("loot_gold_max", 0))
+        elixir_max = int(farm.get("loot_elixir_max", 0))
+        if gold_max > 0 and loot["gold"] > gold_max:
+            self.log(f"[SEARCH] Gold OCR {loot['gold']:,} vượt cap {gold_max:,}, bỏ qua base.")
+            return False
+        if elixir_max > 0 and loot["elixir"] > elixir_max:
+            self.log(f"[SEARCH] Elixir OCR {loot['elixir']:,} vượt cap {elixir_max:,}, bỏ qua base.")
+            return False
+        return True
 
     def _should_attack(self, loot: dict[str, int]) -> bool:
         if not self._loot_is_valid(loot):

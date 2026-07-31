@@ -21,7 +21,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "adb": {
         "path": "",
         "device": "127.0.0.1:5555",
-        "devices": [],
         "package": "com.supercell.clashofclans",
         "connect_on_start": True,
         "deep_scan": False,
@@ -36,8 +35,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "bar_region": [80, 720, 1220, 180],
         "template_size": [76, 76],
         "kinds": ["dragon", "balloon", "valkyrie", "hero", "rage", "freeze"],
-        "cluster_kinds": ["hero"],
-        "cluster_padding": 430,
         "count_max_by_kind": {
             "dragon": 16,
             "balloon": 40,
@@ -91,6 +88,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "gold_min": 900000,
         "elixir_min": 900000,
         "total_min": 1700000,
+        "loot_gold_max": 3000000,
+        "loot_elixir_max": 3000000,
         "max_next": 80,
         "search_delay_seconds": 3.0,
         "ocr_fail_restart_seconds": 30,
@@ -312,6 +311,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "wall_upgrade": {
         "enabled": False,
+        "dry_run": False,
         "run_after_attacks_enabled": True,
         "run_every_n_attacks": 20,
         "gold_capacity": 6000000,
@@ -323,6 +323,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "use_add10": False,
         "add1_rounds": 1,
         "max_add_rounds": 10,
+        "temporary_retry_backoff_attacks": 2,
         "retry_backoff_attacks": 10,
         "max_wall_search_scrolls": 9,
         "resource_read_attempts": 3,
@@ -371,6 +372,23 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
         else:
             merged[key] = value
     return merged
+
+
+def normalize_combo_deploys(config: dict[str, Any]) -> None:
+    default_deploy = config.get("deploy", DEFAULT_CONFIG["deploy"])
+    combos = config.get("combos", {})
+    if not isinstance(combos, dict):
+        config["combos"] = {}
+        return
+    for name, combo in list(combos.items()):
+        if not isinstance(combo, dict):
+            combos[name] = {"deploy": copy.deepcopy(default_deploy)}
+            continue
+        deploy = combo.get("deploy")
+        if not isinstance(deploy, dict):
+            combo["deploy"] = copy.deepcopy(default_deploy)
+            continue
+        combo["deploy"] = deep_merge(default_deploy, deploy)
 
 
 def migrate_fast_attack_delays(config: dict[str, Any]) -> None:
@@ -428,13 +446,20 @@ def migrate_global_deploy_zones(config: dict[str, Any]) -> None:
             deploy.pop("spell_groups", None)
 
 
-def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
-    if not path.exists():
-        save_config(DEFAULT_CONFIG, path)
-        return copy.deepcopy(DEFAULT_CONFIG)
+def migrate_single_adb_device(config: dict[str, Any]) -> None:
+    adb = config.get("adb", {})
+    if isinstance(adb, dict):
+        adb.pop("devices", None)
 
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
+
+def migrate_slot_detection_config(config: dict[str, Any]) -> None:
+    slot_detection = config.get("slot_detection", {})
+    if isinstance(slot_detection, dict):
+        slot_detection.pop("cluster_kinds", None)
+        slot_detection.pop("cluster_padding", None)
+
+
+def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
     merged = deep_merge(DEFAULT_CONFIG, data)
     if "combos" not in data:
         merged["combos"] = {
@@ -442,9 +467,22 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
                 "deploy": copy.deepcopy(merged["deploy"]),
             },
         }
+    normalize_combo_deploys(merged)
     migrate_fast_attack_delays(merged)
     migrate_global_deploy_zones(merged)
+    migrate_single_adb_device(merged)
+    migrate_slot_detection_config(merged)
     return merged
+
+
+def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
+    if not path.exists():
+        save_config(DEFAULT_CONFIG, path)
+        return copy.deepcopy(DEFAULT_CONFIG)
+
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    return normalize_config(data)
 
 
 def save_config(config: dict[str, Any], path: Path = CONFIG_PATH) -> None:

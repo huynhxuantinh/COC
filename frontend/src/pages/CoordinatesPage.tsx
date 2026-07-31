@@ -36,54 +36,50 @@ const viewTargets = [
   { label: "dưới trái", value: "duoibentrai" },
 ];
 
-const spellGroups = [
-  { label: "Nhóm Nộ/Băng", value: "spell_group", read: (deploy: any, view: string) => deploy.spell_groups?.[0]?.zones?.[view] ?? [] },
-];
-
-const spellTargets: TargetOption[] = spellGroups.flatMap((spell) =>
-  viewTargets.map((view) => ({
-    label: `${spell.label} - ${view.label}`,
-    value: `${spell.value}_zone_${view.value}`,
-  })),
-);
-
-const allTargets = [...troopTargets, ...spellTargets];
-
 function readPoints(config: AppConfig | null, target: string): number[][] {
   const deploy = config?.deploy ?? {};
   if (target === "zone_trenbenphai") return deploy.deploy_zones?.trenbenphai ?? [];
   if (target === "zone_trenbentrai") return deploy.deploy_zones?.trenbentrai ?? [];
   if (target === "zone_duoibenphai") return deploy.deploy_zones?.duoibenphai ?? [];
   if (target === "zone_duoibentrai") return deploy.deploy_zones?.duoibentrai ?? [];
-  for (const spell of spellGroups) {
-    for (const view of viewTargets) {
-      if (target === `${spell.value}_zone_${view.value}`) return spell.read(deploy, view.value);
-    }
+  const match = target.match(/^spell_group_(\d+)_zone_(.+)$/);
+  if (match) {
+    const index = Number(match[1]);
+    const view = match[2];
+    return deploy.spell_groups?.[index]?.zones?.[view] ?? [];
   }
   return [];
 }
 
-function targetLabel(target: string): string {
-  return allTargets.find((item) => item.value === target)?.label ?? target;
-}
-
 function defaultTarget(mode: CoordinateMode): string {
-  return mode === "spells" ? "spell_group_zone_trenbenphai" : "zone_trenbenphai";
+  return mode === "spells" ? "spell_group_0_zone_trenbenphai" : "zone_trenbenphai";
 }
 
-function allowedTargets(mode: CoordinateMode): TargetOption[] {
-  return mode === "spells" ? spellTargets : troopTargets;
+function spellTargetOptions(config: AppConfig | null): TargetOption[] {
+  const groups = config?.deploy?.spell_groups ?? [];
+  return groups.flatMap((group: any, index: number) => {
+    const label = group?.name || `Nhóm thuốc ${index + 1}`;
+    return viewTargets.map((view) => ({
+      label: `${label} - ${view.label}`,
+      value: `spell_group_${index}_zone_${view.value}`,
+    }));
+  });
+}
+
+function allowedTargets(mode: CoordinateMode, config: AppConfig | null): TargetOption[] {
+  if (mode === "troops") return troopTargets;
+  const spellTargets = spellTargetOptions(config);
+  return spellTargets.length ? spellTargets : [{ label: "Chưa có nhóm thuốc", value: defaultTarget(mode) }];
 }
 
 function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [searchParams] = useSearchParams();
-  const { config, options, isDirty, reload } = useConfigEditor();
-  const targets = allowedTargets(mode);
+  const { config, isDirty, reload } = useConfigEditor();
+  const targets = useMemo(() => allowedTargets(mode, config), [mode, config]);
   const [referenceImages, setReferenceImages] = useState<ReferenceImageItem[]>([]);
   const [referenceName, setReferenceName] = useState("");
   const [target, setTarget] = useState(searchParams.get("target") || defaultTarget(mode));
-  const [comboName, setComboName] = useState("");
   const [image, setImage] = useState<ScreenshotPayload | null>(null);
   const [imageSourceLabel, setImageSourceLabel] = useState("");
   const [points, setPoints] = useState<number[][]>([]);
@@ -117,11 +113,6 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
     setSelectedIndex(null);
   }, [config, target]);
 
-  useEffect(() => {
-    const activeCombo = config?.farm?.combo ?? "";
-    if (activeCombo && !comboName) setComboName(activeCombo);
-  }, [config, comboName]);
-
   const imageSrc = image ? `data:image/png;base64,${image.image_base64}` : "";
   const selectedPoint = useMemo(() => {
     if (selectedIndex === null) return null;
@@ -132,22 +123,16 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
     label: `${item.label} (${item.width}x${item.height})`,
     value: item.name,
   }));
-  const comboNames = Object.keys(config?.combos ?? {});
-  const comboSource = comboNames.length ? comboNames : options?.combos ?? [];
-  const comboOptions = [
-    ...comboSource.map((name) => ({ label: `Combo: ${name}`, value: name })),
-    { label: "Tất cả combo", value: "__all__" },
-    { label: "Chỉ deploy mặc định", value: "__global__" },
-  ];
 
+  function targetLabel(targetValue: string): string {
+    return [...troopTargets, ...targets].find((item) => item.value === targetValue)?.label ?? targetValue;
+  }
   const pageTitle = mode === "spells" ? "Tọa độ thả thuốc" : "Tọa độ thả lính";
   const pageSubtitle =
     mode === "spells"
       ? "Thiết lập vùng polygon thả Nộ/Băng riêng cho 4 góc nhìn."
       : "Thiết lập 4 vùng polygon để bot random điểm thả quân trong vùng.";
   const isZoneTarget = mode === "spells" || target.startsWith("zone_");
-  const isTroopZoneTarget = target.startsWith("zone_");
-  const isGlobalTarget = isTroopZoneTarget || target.startsWith("spell_group_zone_");
 
   async function run(name: string, action: () => Promise<void>) {
     setBusy(name);
@@ -204,7 +189,7 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
       return;
     }
     await run("save", async () => {
-      await saveCoordinatePoints(target, points, isGlobalTarget ? "" : comboName || config?.farm?.combo || "");
+      await saveCoordinatePoints(target, points);
       await reload();
       setMessage(`Đã lưu ${points.length} tọa độ vào ${targetLabel(target)}.`);
     });
@@ -327,13 +312,9 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
 
           <Card title="Lưu tọa độ">
             <div className="space-y-4">
-              {isGlobalTarget ? (
-                <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-sm text-slate-300">
-                  Dùng chung cho tất cả combo.
-                </div>
-              ) : (
-                <SelectInput label="Lưu cho combo" value={comboName || config?.farm?.combo || ""} options={comboOptions} onChange={(event) => setComboName(event.target.value)} />
-              )}
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-sm text-slate-300">
+                Dùng chung cho tất cả combo.
+              </div>
               <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-sm text-slate-300">
                 Đang chọn: <span className="font-semibold text-white">{targetLabel(target)}</span>
               </div>

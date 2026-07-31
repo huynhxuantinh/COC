@@ -2,7 +2,6 @@
   "adb": {
     "path": "D:\\LDPlayer\\LDPlayer9\\adb.exe",
     "device": "127.0.0.1:5555",
-    "devices": [],
     "package": "com.supercell.clashofclans",
     "connect_on_start": true,
     "deep_scan": false
@@ -33,10 +32,6 @@
       "freeze",
       "rong"
     ],
-    "cluster_kinds": [
-      "hero"
-    ],
-    "cluster_padding": 430,
     "count_max_by_kind": {
       "dragon": 16,
       "balloon": 40,
@@ -97,6 +92,8 @@
     "gold_min": 1000000,
     "elixir_min": 1000000,
     "total_min": 1700000,
+    "loot_gold_max": 3000000,
+    "loot_elixir_max": 3000000,
     "max_next": 80,
     "search_delay_seconds": 3,
     "ocr_fail_restart_seconds": 30
@@ -1051,6 +1048,7 @@
   },
   "wall_upgrade": {
     "enabled": true,
+    "dry_run": false,
     "run_after_attacks_enabled": false,
     "run_every_n_attacks": 15,
     "gold_capacity": 26000000,
@@ -1062,6 +1060,7 @@
     "use_add10": false,
     "add1_rounds": 4,
     "max_add_rounds": 4,
+    "temporary_retry_backoff_attacks": 1,
     "retry_backoff_attacks": 2,
     "max_wall_search_scrolls": 9,
     "resource_read_attempts": 3,

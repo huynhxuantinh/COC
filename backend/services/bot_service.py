@@ -4,6 +4,7 @@ import copy
 import base64
 import json
 import queue
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any
 
 from adb_client import ADBClient
 from bot_runtime import STAT_KEYS, scan_adb_connection, start_farm_threads
-from config_manager import load_config, save_config
+from config_manager import load_config, normalize_config, save_config
 from slot_detector import SlotDetector
 from vision import Vision
 
@@ -37,9 +38,10 @@ class BotService:
             return copy.deepcopy(self.config_data)
 
     def save_config_data(self, config: dict[str, Any]) -> dict[str, Any]:
-        self._validate_config(config)
+        normalized = normalize_config(config)
+        self._validate_config(normalized)
         with self.lock:
-            self.config_data = copy.deepcopy(config)
+            self.config_data = copy.deepcopy(normalized)
             save_config(self.config_data)
             self.adb_ready = False
             self.status = "Đã lưu. Quét ADB lại."
@@ -232,42 +234,23 @@ class BotService:
             "zone_duoibentrai": ["deploy", "deploy_zones", "duoibentrai"],
         }
         allowed = dict(deploy_zone_targets)
-        global_targets = set(deploy_zone_targets)
-        spell_targets = {
-            "spell_group": ["deploy", "spell_groups", "0", "zones"],
-        }
-        for prefix, base_path in spell_targets.items():
-            for view in ("trenbenphai", "trenbentrai", "duoibenphai", "duoibentrai"):
-                allowed[f"{prefix}_zone_{view}"] = [*base_path, view]
-                global_targets.add(f"{prefix}_zone_{view}")
-        if target not in allowed:
-            raise ValueError("Target tọa độ không hợp lệ.")
+        spell_match = re.fullmatch(r"spell_group_(\d+)_zone_(trenbenphai|trenbentrai|duoibenphai|duoibentrai)", target)
         normalized = [[int(point[0]), int(point[1])] for point in points]
         with self.lock:
-            self._set_config_path(self.config_data, allowed[target], normalized)
-            combos = self.config_data.get("combos", {})
-            selected_combo = combo_name or self.config_data.get("farm", {}).get("combo", "")
-            combo_path = allowed[target][1:] if allowed[target][0] == "deploy" else allowed[target]
-            updated_combos: list[str] = []
-
-            if target in global_targets:
-                selected_combo = "__global__"
-            elif selected_combo == "__global__":
-                updated_combos = []
-            elif selected_combo == "__all__":
-                for name, combo in combos.items():
-                    combo_deploy = combo.setdefault("deploy", copy.deepcopy(self.config_data.get("deploy", {})))
-                    self._set_config_path(combo_deploy, combo_path, normalized)
-                    updated_combos.append(str(name))
-            elif selected_combo:
-                if selected_combo not in combos:
-                    raise ValueError(f"Combo không hợp lệ: {selected_combo}")
-                combo_deploy = combos[selected_combo].setdefault("deploy", copy.deepcopy(self.config_data.get("deploy", {})))
-                self._set_config_path(combo_deploy, combo_path, normalized)
-                updated_combos.append(selected_combo)
+            if target in allowed:
+                path = allowed[target]
+            elif spell_match:
+                group_index = int(spell_match.group(1))
+                view = spell_match.group(2)
+                groups = self.config_data.get("deploy", {}).get("spell_groups", [])
+                if group_index < 0 or group_index >= len(groups):
+                    raise ValueError("Nhóm thuốc không hợp lệ.")
+                path = ["deploy", "spell_groups", str(group_index), "zones", view]
+            else:
+                raise ValueError("Target tọa độ không hợp lệ.")
+            self._set_config_path(self.config_data, path, normalized)
             save_config(self.config_data)
-        combo_label = "global deploy" if target in global_targets else (", ".join(updated_combos) if updated_combos else "global deploy")
-        self._log(f"[COORD] Saved {len(normalized)} point(s) to {target} | {combo_label}.")
+        self._log(f"[COORD] Saved {len(normalized)} point(s) to {target} | global deploy.")
         return self.get_config()
 
     def slot_templates(self) -> dict[str, Any]:
@@ -440,6 +423,8 @@ class BotService:
                 raise ValueError("Nâng tường: số lần bấm +1 phải >= 1.")
             if int(wall_upgrade.get("max_add_rounds", 1)) < 1:
                 raise ValueError("Nâng tường: tối đa lần bấm +10 phải >= 1.")
+            if int(wall_upgrade.get("temporary_retry_backoff_attacks", 1)) < 1:
+                raise ValueError("Nâng tường: số trận nghỉ lỗi tạm thời phải >= 1.")
             if int(wall_upgrade.get("retry_backoff_attacks", 1)) < 1:
                 raise ValueError("Nâng tường: số trận nghỉ sau lỗi phải >= 1.")
             if str(wall_upgrade.get("pay_with", "auto")) not in {"auto", "gold", "elixir"}:
@@ -449,6 +434,95 @@ class BotService:
             for kind, value in counts.items():
                 if int(value) < 0:
                     raise ValueError(f"Số quân {kind} phải >= 0.")
+        self._validate_coords(config)
+        self._validate_deploys(config)
+
+    def _validate_point(self, point: Any, label: str, resolution: tuple[int, int]) -> None:
+        if not isinstance(point, list) or len(point) < 2:
+            raise ValueError(f"{label}: tọa độ phải là [x, y].")
+        x, y = int(point[0]), int(point[1])
+        width, height = resolution
+        if x < 0 or y < 0 or x >= width or y >= height:
+            raise ValueError(f"{label}: tọa độ {x},{y} nằm ngoài màn hình {width}x{height}.")
+
+    def _validate_region(self, region: Any, label: str, resolution: tuple[int, int]) -> None:
+        if not isinstance(region, list) or len(region) < 4:
+            raise ValueError(f"{label}: vùng phải là [x, y, w, h].")
+        x, y, width, height = (int(region[0]), int(region[1]), int(region[2]), int(region[3]))
+        screen_w, screen_h = resolution
+        if width <= 0 or height <= 0:
+            raise ValueError(f"{label}: w/h phải > 0.")
+        if x < 0 or y < 0 or x + width > screen_w or y + height > screen_h:
+            raise ValueError(f"{label}: vùng nằm ngoài màn hình {screen_w}x{screen_h}.")
+
+    def _validate_polygon(self, points: Any, label: str, resolution: tuple[int, int]) -> None:
+        if points in (None, []):
+            return
+        if not isinstance(points, list):
+            raise ValueError(f"{label}: polygon phải là danh sách tọa độ.")
+        if 0 < len(points) < 3:
+            raise ValueError(f"{label}: polygon phải có ít nhất 3 điểm.")
+        for index, point in enumerate(points, start=1):
+            self._validate_point(point, f"{label} điểm {index}", resolution)
+
+    def _validate_coords(self, config: dict[str, Any]) -> None:
+        resolution = tuple(config.get("game", {}).get("resolution", [1600, 900]))
+        coords = config.get("coords", {})
+        required = ["home_attack", "find_match", "my_army_attack", "next", "end_battle", "end_battle_okay", "return_home"]
+        for name in required:
+            if name not in coords:
+                raise ValueError(f"Thiếu tọa độ bắt buộc: coords.{name}.")
+            self._validate_point(coords[name], f"coords.{name}", resolution)
+        slots = coords.get("slots", {})
+        if not isinstance(slots, dict):
+            raise ValueError("coords.slots phải là object.")
+        for name, point in slots.items():
+            self._validate_point(point, f"coords.slots.{name}", resolution)
+        for name, region in config.get("ocr", {}).get("regions", {}).items():
+            self._validate_region(region, f"ocr.regions.{name}", resolution)
+        wall_coords = config.get("wall_upgrade", {}).get("coords", {})
+        if isinstance(wall_coords, dict):
+            for name, point in wall_coords.items():
+                self._validate_point(point, f"wall_upgrade.coords.{name}", resolution)
+
+    def _validate_deploys(self, config: dict[str, Any]) -> None:
+        resolution = tuple(config.get("game", {}).get("resolution", [1600, 900]))
+        known_kinds = set(str(kind) for kind in config.get("slot_detection", {}).get("kinds", []))
+
+        def validate_deploy(deploy: dict[str, Any], label: str, include_global_fields: bool) -> None:
+            if not isinstance(deploy, dict):
+                raise ValueError(f"{label}: deploy phải là object.")
+            for index, step in enumerate(deploy.get("sequence", []), start=1):
+                slot = str(step.get("slot", ""))
+                if not slot:
+                    raise ValueError(f"{label}.sequence[{index}]: thiếu slot.")
+                if known_kinds and slot not in known_kinds:
+                    raise ValueError(f"{label}.sequence[{index}]: slot '{slot}' chưa có trong slot_detection.kinds.")
+                if int(step.get("max_taps", 0)) < 0:
+                    raise ValueError(f"{label}.sequence[{index}]: max_taps phải >= 0.")
+                if float(step.get("delay", 0)) < 0:
+                    raise ValueError(f"{label}.sequence[{index}]: delay phải >= 0.")
+                count = step.get("count", 0)
+                if count != "all" and int(count) < 0:
+                    raise ValueError(f"{label}.sequence[{index}]: count phải là 'all' hoặc >= 0.")
+            if not include_global_fields:
+                return
+            for view, points in deploy.get("deploy_zones", {}).items():
+                self._validate_polygon(points, f"{label}.deploy_zones.{view}", resolution)
+            for index, group in enumerate(deploy.get("spell_groups", []), start=1):
+                for slot in group.get("slots", []):
+                    if known_kinds and str(slot) not in known_kinds:
+                        raise ValueError(f"{label}.spell_groups[{index}]: slot '{slot}' chưa có trong slot_detection.kinds.")
+                if int(group.get("max_casts", 0)) < 0:
+                    raise ValueError(f"{label}.spell_groups[{index}]: max_casts phải >= 0.")
+                if float(group.get("delay_after_deploy", 0)) < 0 or float(group.get("delay_between_casts", 0)) < 0:
+                    raise ValueError(f"{label}.spell_groups[{index}]: delay phải >= 0.")
+                for view, points in group.get("zones", {}).items():
+                    self._validate_polygon(points, f"{label}.spell_groups[{index}].zones.{view}", resolution)
+
+        validate_deploy(config.get("deploy", {}), "deploy", True)
+        for name, combo in config.get("combos", {}).items():
+            validate_deploy(combo.get("deploy", {}), f"combos.{name}.deploy", False)
 
     def _set_config_path(self, root: dict[str, Any], path: list[str], value: Any) -> None:
         cursor: Any = root

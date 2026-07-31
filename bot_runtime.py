@@ -63,7 +63,6 @@ def scan_adb_connection(config: dict[str, Any], log: Callable[[str], None]) -> S
 
             adb_config["path"] = path
             adb_config["device"] = device
-            adb_config["devices"] = []
             log(f"[ADB] OK: {path} | {device}")
             return ScanADBResult(path=path, device=device, path_count=len(paths))
 

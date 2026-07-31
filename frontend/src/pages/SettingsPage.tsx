@@ -133,6 +133,11 @@ export function SettingsPage() {
                 onChange={(value) => updatePath(["wall_upgrade", "enabled"], value)}
               />
               <Toggle
+                label="Mô phỏng nâng tường"
+                checked={Boolean(wallUpgrade.dry_run)}
+                onChange={(value) => updatePath(["wall_upgrade", "dry_run"], value)}
+              />
+              <Toggle
                 label="Bật nâng sau số trận"
                 checked={Boolean(wallUpgrade.run_after_attacks_enabled ?? true)}
                 onChange={(value) => updatePath(["wall_upgrade", "run_after_attacks_enabled"], value)}
@@ -199,7 +204,7 @@ export function SettingsPage() {
                   onChange={(event) => updatePath(["wall_upgrade", "reserve_elixir"], numberValue(event.target.value))}
                 />
               </div>
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-4">
                 <TextInput
                   label="Số lần bấm +1"
                   type="number"
@@ -213,6 +218,13 @@ export function SettingsPage() {
                   min={1}
                   value={String(wallUpgrade.max_add_rounds ?? 10)}
                   onChange={(event) => updatePath(["wall_upgrade", "max_add_rounds"], numberValue(event.target.value))}
+                />
+                <TextInput
+                  label="Nghỉ lỗi tạm thời"
+                  type="number"
+                  min={1}
+                  value={String(wallUpgrade.temporary_retry_backoff_attacks ?? 2)}
+                  onChange={(event) => updatePath(["wall_upgrade", "temporary_retry_backoff_attacks"], numberValue(event.target.value))}
                 />
                 <TextInput
                   label="Nghỉ sau lỗi (trận)"
