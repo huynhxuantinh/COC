@@ -117,6 +117,12 @@
   "ocr": {
     "enabled": true,
     "tesseract_path": "",
+    "result_stats": {
+      "read_attempts": 3,
+      "read_delay_seconds": 0.3,
+      "gold_max": 10000000,
+      "elixir_max": 10000000
+    },
     "regions": {
       "loot_panel": [
         76,
@@ -1467,6 +1473,13 @@
       "star_bonus_wait_seconds": 1.5,
       "restart_after_state_failures": 2,
       "max_state_failures": 5
+    },
+    "result_stats": {
+      "read_attempts": 3,
+      "read_delay_seconds": 0.3,
+      "damage_max": 200,
+      "gold_max": 2000000,
+      "trophies_max": 100
     },
     "ocr_regions": {
       "top_state": [
