@@ -52,15 +52,15 @@ export function App() {
             />
             <Route path="/farm" element={<FarmPage />} />
             <Route path="/combos" element={<ComboPage />} />
-            <Route path="/coordinates" element={<TroopCoordinatesPage />} />
-            <Route path="/coordinates/troops" element={<TroopCoordinatesPage />} />
-            <Route path="/coordinates/spells" element={<SpellCoordinatesPage />} />
+            <Route path="/coordinates" element={<TroopCoordinatesPage status={status} />} />
+            <Route path="/coordinates/troops" element={<TroopCoordinatesPage status={status} />} />
+            <Route path="/coordinates/spells" element={<SpellCoordinatesPage status={status} />} />
             <Route path="/slots" element={<SlotDetectionPage />} />
             <Route path="/surrender" element={<SurrenderPage />} />
             <Route path="/wall-upgrade" element={<WallUpgradePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/builder/strategy" element={<BuilderStrategyPage />} />
-            <Route path="/builder/coordinates" element={<BuilderCoordinatesPage />} />
+            <Route path="/builder/coordinates" element={<BuilderCoordinatesPage status={status} />} />
             <Route path="/builder/wall-upgrade" element={<BuilderWallUpgradePage />} />
             <Route path="*" element={<Feedback tone="warning">Trang bạn mở không tồn tại.</Feedback>} />
           </Route>

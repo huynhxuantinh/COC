@@ -285,6 +285,9 @@ export function ComboPage() {
                   updatePath(["slot_detection", "enabled"], true);
                 }}
               />
+              {manualArmy.enabled ? (
+                <p className="mt-3 text-xs text-slate-400">Số quân mới có hiệu lực từ lần Start tiếp theo.</p>
+              ) : null}
             </div>
             {sequence.length ? (
               <div className="overflow-x-auto rounded-lg border border-white/10">

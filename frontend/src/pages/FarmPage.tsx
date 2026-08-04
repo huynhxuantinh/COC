@@ -21,10 +21,14 @@ export function FarmPage() {
 
   const game = config.game;
   const farm = config.farm;
+  const thresholdMode = farm.threshold_mode ?? "any";
+  const thresholds = [Number(farm.gold_min ?? 0), Number(farm.elixir_min ?? 0), Number(farm.total_min ?? 0)];
+  const invalidThresholds = thresholdMode === "total" ? thresholds[2] <= 0 : !thresholds.some((value) => value > 0);
   return (
     <div>
-      <PageHeader eyebrow="Farm" title="Cấu hình tìm nhà" subtitle="Điều kiện tài nguyên, góc đánh và giới hạn tìm trận." action={<Button variant="success" loading={saving} onClick={save}>Lưu cấu hình</Button>} />
+      <PageHeader eyebrow="Farm" title="Cấu hình tìm nhà" subtitle="Điều kiện tài nguyên, góc đánh và giới hạn tìm trận." action={<Button variant="success" loading={saving} disabled={invalidThresholds} onClick={save}>Lưu cấu hình</Button>} />
       {error ? <Feedback tone="error" className="mb-5">{error}</Feedback> : savedMessage ? <Feedback tone="success" className="mb-5">{savedMessage}</Feedback> : null}
+      {invalidThresholds ? <Feedback tone="warning" className="mb-5">{thresholdMode === "total" ? "Chế độ Chỉ xét tổng cần Tổng vàng + dầu lớn hơn 0." : "Hãy bật ít nhất một ngưỡng tài nguyên lớn hơn 0."}</Feedback> : null}
 
       <div className="space-y-5">
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]">
@@ -37,7 +41,7 @@ export function FarmPage() {
               </div>
               <div className="mt-5">
                 <p className="mb-2 text-sm font-medium text-slate-300">Cách xét ngưỡng</p>
-                <SegmentedControl value={farm.threshold_mode ?? "any"} columns={3} options={[
+                <SegmentedControl value={thresholdMode} columns={3} options={[
                   { value: "any", label: "Một điều kiện" },
                   { value: "all", label: "Tất cả điều kiện" },
                   { value: "total", label: "Chỉ xét tổng" },

@@ -8,7 +8,7 @@ import { SegmentedControl } from "../components/SegmentedControl";
 import { useConfigEditor } from "../hooks/useConfigEditor";
 import { captureScreenshot, saveCoordinatePoints, testTap } from "../services/coordinatesApi";
 import { apiErrorMessage } from "../services/http";
-import type { ScreenshotPayload } from "../services/types";
+import type { BotStatus, ScreenshotPayload } from "../services/types";
 
 type Stage = "stage1" | "stage2";
 
@@ -21,7 +21,7 @@ function savedZone(config: Record<string, any> | null, stage: Stage): number[][]
   return config?.builder_base?.deploy?.[`${stage}_zone`] ?? [];
 }
 
-export function BuilderCoordinatesPage() {
+export function BuilderCoordinatesPage({ status }: { status: BotStatus | null }) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const { config, isDirty: configDirty, error: configError, reload } = useConfigEditor();
   const [stage, setStage] = useState<Stage>("stage1");
@@ -91,6 +91,10 @@ export function BuilderCoordinatesPage() {
 
   async function handleTestTap() {
     if (!selectedPoint) return;
+    if (status?.running) {
+      setError("Hãy dừng bot trước khi Test Tap.");
+      return;
+    }
     await run("tap", async () => {
       await testTap(selectedPoint[0], selectedPoint[1]);
       setMessage(`Đã test tap ${selectedPoint[0]},${selectedPoint[1]}.`);
@@ -133,7 +137,7 @@ export function BuilderCoordinatesPage() {
               <Button variant="muted" disabled={Boolean(busy) || !points.length} onClick={() => { setPoints((current) => current.slice(0, -1)); setSelectedIndex(null); }}><Undo2 className="h-4 w-4" />Hoàn tác</Button>
               <Button variant="muted" disabled={Boolean(busy) || !localDirty} onClick={() => { setPoints(storedPoints); setSelectedIndex(null); }}><RotateCcw className="h-4 w-4" />Tải lại</Button>
               <Button variant="danger" disabled={Boolean(busy) || !points.length} onClick={() => { setPoints([]); setSelectedIndex(null); }}><Trash2 className="h-4 w-4" />Xóa hết</Button>
-              <Button className="col-span-2" variant="ghost" loading={busy === "tap"} disabled={Boolean(busy) || !selectedPoint} onClick={handleTestTap}><Crosshair className="h-4 w-4" />Test điểm đang chọn</Button>
+              <Button className="col-span-2" variant="ghost" loading={busy === "tap"} disabled={Boolean(busy) || !selectedPoint || Boolean(status?.running)} onClick={handleTestTap}><Crosshair className="h-4 w-4" />Test điểm đang chọn</Button>
             </div>
           </Card>
 

@@ -12,20 +12,12 @@ from typing import Any
 from adb_client import ADBClient, ADBError
 from builder_vision import BuilderBaseVision, BuilderScreen
 from slot_detector import SlotDetector
+from stats_store import STAT_KEYS, load_total_stats, merge_existing_stats
 from vision import Vision
 
 
 class FarmBot:
-    STAT_KEYS = (
-        "attacks",
-        "next",
-        "gold_seen",
-        "elixir_seen",
-        "builder_attacks",
-        "builder_gold",
-        "builder_trophies",
-        "builder_damage",
-    )
+    STAT_KEYS = STAT_KEYS
 
     def __init__(
         self,
@@ -34,6 +26,7 @@ class FarmBot:
         stop_event: threading.Event,
         pause_event: threading.Event,
         stats_callback=None,
+        lifecycle_callback=None,
     ) -> None:
         self.config = config
         self.log = log
@@ -46,6 +39,7 @@ class FarmBot:
         self.slot_detector = SlotDetector(config, log)
         self.stats = {key: 0 for key in self.STAT_KEYS}
         self.stats_callback = stats_callback or (lambda stats: None)
+        self.lifecycle_callback = lifecycle_callback or (lambda event, detail="": None)
         self.stats_path = Path(config.get("runtime", {}).get("stats_path", "stats.json"))
         self.safe_device = self._safe_name(config["adb"]["device"])
         self.debug_dir = Path("debug")
@@ -69,6 +63,9 @@ class FarmBot:
             if self.config["adb"]["connect_on_start"]:
                 self.adb.connect()
             if not self._ocr_ready_or_stop():
+                self._notify_lifecycle("error", "OCR chưa sẵn sàng.")
+                return
+            if not self._slot_inputs_ready_or_stop():
                 return
             self.log(f"[COMBO] Đang dùng: {self.active_combo}.")
             if not self.config["game"]["skip_restart_game"]:
@@ -78,6 +75,7 @@ class FarmBot:
 
             self._publish_stats()
             self.log("[INFO] Bot started.")
+            self._notify_lifecycle("running")
             self.run_started_at = time.time()
             auto_stop_after = self._auto_stop_after_seconds()
             self.auto_stop_at = self.run_started_at + auto_stop_after if auto_stop_after > 0 else 0.0
@@ -114,11 +112,20 @@ class FarmBot:
                 self._sleep(self.config["timing"]["loop_sleep"])
         except ADBError as exc:
             self.log(f"[ERROR] {exc}")
+            self._notify_lifecycle("error", str(exc))
         except Exception as exc:
             self.log(f"[ERROR] Bot stopped by error: {exc}")
+            self._notify_lifecycle("error", str(exc))
         finally:
             self._publish_stats()
             self.log("[INFO] Bot stopped.")
+            self._notify_lifecycle("stopped")
+
+    def _notify_lifecycle(self, event: str, detail: str = "") -> None:
+        try:
+            self.lifecycle_callback(event, detail)
+        except Exception:
+            pass
 
     def _run_cycle(self) -> None:
         if not self._ensure_main_village():
@@ -242,6 +249,7 @@ class FarmBot:
             f"[ERROR] Quá nhiều lỗi cycle liên tiếp ({cycle_errors}/{max_cycle_errors}). "
             "Tự động dừng bot."
         )
+        self._notify_lifecycle("error", "Quá nhiều lỗi cycle liên tiếp.")
         self.stop_event.set()
         return True
 
@@ -378,6 +386,7 @@ class FarmBot:
         )
         if max_failures > 0 and self.home_restart_failures >= max_failures:
             self.log("[ERROR] Quá nhiều lần restart home thất bại. Tự động dừng bot.")
+            self._notify_lifecycle("error", "Quá nhiều lần restart home thất bại.")
             self.stop_event.set()
         return False
 
@@ -421,6 +430,7 @@ class FarmBot:
                         self.log(
                             f"[ERROR] OCR loot loi lien tiep {self.search_ocr_restarts}/{max_restarts} lan. Dung bot."
                         )
+                        self._notify_lifecycle("error", "OCR loot lỗi liên tiếp.")
                         self.stop_event.set()
                         return False
                     self.log("[SEARCH] OCR failed too long. Restart game.")
@@ -534,7 +544,7 @@ class FarmBot:
         if not active_kinds:
             self.log("[SLOT] Combo hiện tại không có kind slot nào cần detect.")
             return
-        if not detector.has_templates(active_kinds):
+        if not detector.has_any_template(active_kinds):
             self.log(f"[SLOT] Chưa có mẫu icon cho combo {self.active_combo}: {', '.join(active_kinds)}.")
             return
 
@@ -607,6 +617,43 @@ class FarmBot:
             for slot in group.get("slots", []):
                 add(str(slot))
         return wanted
+
+    def _slot_inputs_ready_or_stop(self) -> bool:
+        detection_enabled = bool(self.config.get("slot_detection", {}).get("enabled", False))
+        fallback_slots = self.config.get("coords", {}).get("slots", {})
+        required: list[str] = []
+
+        def add(kind: str) -> None:
+            if kind and kind not in required:
+                required.append(kind)
+
+        for step in self.active_deploy.get("sequence", []):
+            if self._tap_limit(step.get("count", 0), int(step.get("max_taps", 0))) > 0:
+                add(str(step.get("slot", "")))
+        for group in self.config.get("deploy", {}).get("spell_groups", []):
+            if not group.get("enabled", True) or int(group.get("max_casts", 0)) <= 0:
+                continue
+            for slot in group.get("slots", []):
+                add(str(slot))
+
+        missing: list[str] = []
+        for kind in required:
+            coords = fallback_slots.get(kind) if isinstance(fallback_slots, dict) else None
+            has_fallback = isinstance(coords, list) and len(coords) >= 2
+            has_template = detection_enabled and self.slot_detector.has_usable_template(kind)
+            if not has_fallback and not has_template:
+                missing.append(kind)
+        if not missing:
+            return True
+
+        details = ", ".join(missing)
+        self.log(
+            f"[ERROR] Combo {self.active_combo} thiếu cách chọn slot: {details}. "
+            "Mỗi slot cần template nhận diện hợp lệ hoặc tọa độ fallback."
+        )
+        self._notify_lifecycle("error", f"Thiếu template/tọa độ slot: {details}.")
+        self.stop_event.set()
+        return False
 
     def _manual_army_counts(self) -> dict[str, int]:
         if not self._manual_army_enabled():
@@ -913,6 +960,7 @@ class FarmBot:
                             f"[ERROR] Damage OCR loi lien tiep "
                             f"{self.damage_ocr_restarts}/{max_damage_ocr_restarts} lan. Dung bot."
                         )
+                        self._notify_lifecycle("error", "Damage OCR lỗi liên tiếp.")
                         self.stop_event.set()
                         return "stopped"
                     self._restart_game_from_search()
@@ -989,10 +1037,12 @@ class FarmBot:
         if raw_damage - baseline > max_jump:
             pending_value = int(pending_damage.get("value", -1))
             pending_reads = int(pending_damage.get("reads", 0))
-            if pending_value >= 0 and abs(raw_damage - pending_value) <= 5:
+            same_cluster = pending_value >= 0 and abs(raw_damage - pending_value) <= 5
+            if same_cluster:
+                pending_reads += 1
                 self.log(f"[BATTLE] Confirm OCR damage jump {best_damage}% -> {raw_damage}%.")
                 return raw_damage, {"value": -1, "reads": 0}
-            pending_reads = pending_reads + 1 if pending_value >= 0 else 1
+            pending_reads = 1
             if max_pending_reads > 0 and pending_reads >= max_pending_reads:
                 self.log(
                     f"[BATTLE] Accept OCR damage jump after hold "
@@ -1045,17 +1095,9 @@ class FarmBot:
     def _record_result_loot(self, png: bytes = b"") -> None:
         if not self.vision.available or not self.config.get("game", {}).get("resource_stats", True):
             return
-        if not png:
-            try:
-                png = self.adb.screencap_png()
-            except ADBError as exc:
-                self.log(f"[RESULT] Không chụp được màn hình kết quả để thống kê: {exc}")
-                return
-        loot = self.vision.read_result_loot(png)
-        gold = int(loot.get("gold", -1))
-        elixir = int(loot.get("elixir", -1))
+        gold, elixir = self._read_result_loot_stable(png)
         if gold < 0 and elixir < 0:
-            self.log("[RESULT] Không đọc được vàng/dầu trên màn hình kết quả.")
+            self.log("[RESULT] Kết quả OCR không ổn định, bỏ qua thống kê trận này.")
             return
         self.stats["gold_seen"] += max(gold, 0)
         self.stats["elixir_seen"] += max(elixir, 0)
@@ -1063,6 +1105,43 @@ class FarmBot:
         gold_label = "?" if gold < 0 else f"{gold:,}"
         elixir_label = "?" if elixir < 0 else f"{elixir:,}"
         self.log(f"[RESULT] Loot thực nhận: gold={gold_label} | elixir={elixir_label}.")
+
+    def _read_result_loot_stable(self, png: bytes = b"") -> tuple[int, int]:
+        settings = self.config.get("ocr", {}).get("result_stats", {})
+        attempts = max(2, int(settings.get("read_attempts", 3)))
+        delay = max(0.0, float(settings.get("read_delay_seconds", 0.3)))
+        samples: list[dict[str, int]] = []
+
+        for attempt in range(attempts):
+            if self.stop_event.is_set():
+                break
+            try:
+                current_png = png if attempt == 0 and png else self.adb.screencap_png()
+            except ADBError as exc:
+                self.log(f"[RESULT] Chụp mẫu OCR lỗi ({attempt + 1}/{attempts}): {exc}")
+                continue
+            loot = self.vision.read_result_loot(current_png)
+            samples.append(
+                {
+                    "gold": int(loot.get("gold", -1)),
+                    "elixir": int(loot.get("elixir", -1)),
+                }
+            )
+            if attempt < attempts - 1:
+                self._sleep(delay)
+
+        gold = self._stable_number([sample["gold"] for sample in samples])
+        elixir = self._stable_number([sample["elixir"] for sample in samples])
+        gold_max = max(1, int(settings.get("gold_max", 10_000_000)))
+        elixir_max = max(1, int(settings.get("elixir_max", 10_000_000)))
+
+        if gold > gold_max:
+            self.log(f"[RESULT][WARN] OCR vàng vượt cap: {gold:,} > {gold_max:,}; bỏ qua.")
+            gold = -1
+        if elixir > elixir_max:
+            self.log(f"[RESULT][WARN] OCR dầu vượt cap: {elixir:,} > {elixir_max:,}; bỏ qua.")
+            elixir = -1
+        return gold, elixir
 
     def _wall_upgrade_due(self) -> bool:
         settings = self.config.get("wall_upgrade", {})
@@ -1138,6 +1217,8 @@ class FarmBot:
             "read_cost_failed",
             "rollback_read_failed",
             "read_resources_failed",
+            "confirmation_read_failed",
+            "confirmation_mismatch",
             "upgrade_verify_failed",
         }
         key = "temporary_retry_backoff_attacks" if reason in temporary_reasons else "retry_backoff_attacks"
@@ -1229,6 +1310,30 @@ class FarmBot:
         self.log(f"[WALL] Xac nhan nang tuong: {last_safe_cost:,} {pay_with}.")
         self.adb.tap(*upgrade_button)
         self._sleep(1.0)
+        try:
+            confirmation_png = self.adb.screencap_png()
+        except ADBError as exc:
+            self.log(f"[WALL] Khong chup duoc hop xac nhan: {exc}")
+            self.adb.tap(*coords["confirm_cancel_button"])
+            self._sleep(0.4)
+            self._close_wall_popup()
+            return self._wall_result(False, "confirmation_read_failed")
+        confirmation = self.vision.read_wall_confirmation(confirmation_png, settings)
+        if (
+            not confirmation.get("is_wall_upgrade")
+            or confirmation.get("currency") != pay_with
+            or int(confirmation.get("cost", -1)) != last_safe_cost
+        ):
+            self.log(
+                f"[WALL] Hop xac nhan khong khop: "
+                f"wall={bool(confirmation.get('is_wall_upgrade'))} | "
+                f"currency={confirmation.get('currency') or '?'} | "
+                f"cost={int(confirmation.get('cost', -1)):,}. Huy de tranh tieu nham."
+            )
+            self.adb.tap(*coords["confirm_cancel_button"])
+            self._sleep(0.4)
+            self._close_wall_popup()
+            return self._wall_result(False, "confirmation_mismatch")
         self.adb.tap(*coords["confirm_okay_button"])
         self._sleep(1.2)
         if self.stop_event.is_set():
@@ -1295,8 +1400,18 @@ class FarmBot:
             samples.append(value)
             if attempt < attempts - 1:
                 self._sleep(delay)
-        gold = self._stable_number([int(item.get("gold", -1)) for item in samples])
-        elixir = self._stable_number([int(item.get("elixir", -1)) for item in samples])
+        tolerance_percent = max(0.0, float(settings.get("stable_read_tolerance_percent", 0.1)))
+        tolerance_absolute = max(0, int(settings.get("stable_read_tolerance_absolute", 1_000)))
+        gold = self._stable_number(
+            [int(item.get("gold", -1)) for item in samples],
+            tolerance_percent,
+            tolerance_absolute,
+        )
+        elixir = self._stable_number(
+            [int(item.get("elixir", -1)) for item in samples],
+            tolerance_percent,
+            tolerance_absolute,
+        )
         details = " | ".join(f"{item.get('gold', -1):,}/{item.get('elixir', -1):,}" for item in samples)
         self.log(f"[WALL] Mau tai nguyen gold/elixir: {details}.")
         if gold < 0 or elixir < 0:
@@ -1328,17 +1443,44 @@ class FarmBot:
             if attempt < attempts - 1:
                 self._sleep(delay)
         self.log(f"[WALL] Mau gia nang: {', '.join(str(value) for value in values)}.")
-        return self._stable_number(values)
+        return self._stable_number(
+            values,
+            max(0.0, float(settings.get("stable_read_tolerance_percent", 0.1))),
+            max(0, int(settings.get("stable_read_tolerance_absolute", 1_000))),
+        )
 
-    def _stable_number(self, values: list[int]) -> int:
+    def _stable_number(
+        self,
+        values: list[int],
+        tolerance_percent: float = 0.1,
+        tolerance_absolute: int = 1_000,
+    ) -> int:
         valid = sorted(value for value in values if value >= 0)
-        if not valid:
+        if len(valid) < 2:
             return -1
         counts = {value: valid.count(value) for value in set(valid)}
         best_value, best_count = max(counts.items(), key=lambda item: item[1])
         if best_count >= 2:
             return best_value
-        return valid[len(valid) // 2]
+
+        best_cluster: list[int] = []
+        for start_index, start in enumerate(valid):
+            cluster = [start]
+            for candidate in valid[start_index + 1 :]:
+                tolerance = max(
+                    max(0, int(tolerance_absolute)),
+                    int(max(candidate, 1) * max(0.0, float(tolerance_percent)) / 100.0),
+                )
+                if candidate - start <= tolerance:
+                    cluster.append(candidate)
+                else:
+                    break
+            if len(cluster) > len(best_cluster):
+                best_cluster = cluster
+
+        if len(best_cluster) < 2:
+            return -1
+        return best_cluster[len(best_cluster) // 2]
 
     def _rollback_wall_selection_to_budget(
         self,
@@ -1393,15 +1535,20 @@ class FarmBot:
         if not self._loot_is_valid(loot):
             return False
         farm = self.config["farm"]
-        gold_ok = loot["gold"] >= int(farm["gold_min"])
-        elixir_ok = loot["elixir"] >= int(farm["elixir_min"])
-        total_ok = self._loot_total(loot) >= int(farm["total_min"])
         mode = farm.get("threshold_mode", "any")
-        if mode == "all":
-            return gold_ok and elixir_ok and total_ok
         if mode == "total":
-            return total_ok
-        return gold_ok or elixir_ok or total_ok
+            total_min = int(farm.get("total_min", 0))
+            return total_min > 0 and self._loot_total(loot) >= total_min
+
+        thresholds = (
+            (int(farm.get("gold_min", 0)), loot["gold"]),
+            (int(farm.get("elixir_min", 0)), loot["elixir"]),
+            (int(farm.get("total_min", 0)), self._loot_total(loot)),
+        )
+        conditions = [value >= minimum for minimum, value in thresholds if minimum > 0]
+        if not conditions:
+            return False
+        return all(conditions) if mode == "all" else any(conditions)
 
     def _surrender_reason(
         self,
@@ -1703,19 +1850,11 @@ class FarmBot:
         return paused_seconds
 
     def _load_total_stats(self) -> dict[str, int]:
-        try:
-            with self.stats_path.open("r", encoding="utf-8") as file:
-                data = json.load(file)
-        except (OSError, json.JSONDecodeError):
-            return {key: 0 for key in self.STAT_KEYS}
-
-        total = data.get("total", {})
-        return {key: int(total.get(key, 0)) for key in self.STAT_KEYS}
+        return load_total_stats(self.stats_path)
 
     def _publish_stats(self) -> None:
         payload = self._stats_payload()
-        self._save_stats(payload)
-        self.stats_callback(payload)
+        self.stats_callback(self._save_stats(payload))
 
     def _stats_payload(self) -> dict[str, Any]:
         total = {
@@ -1729,13 +1868,16 @@ class FarmBot:
             "total": total,
         }
 
-    def _save_stats(self, payload: dict[str, Any]) -> None:
+    def _save_stats(self, payload: dict[str, Any]) -> dict[str, Any]:
+        merged = merge_existing_stats(self.stats_path, payload)
         try:
             self.stats_path.parent.mkdir(parents=True, exist_ok=True)
             with self.stats_path.open("w", encoding="utf-8") as file:
-                json.dump(payload, file, ensure_ascii=True, indent=2)
+                json.dump(merged, file, ensure_ascii=True, indent=2)
         except OSError as exc:
             self.log(f"[WARN] Không ghi được stats.json: {exc}")
+            return payload
+        return merged
 
     def _dump_debug_png(self, reason: str, png: bytes = b"") -> None:
         if not png:

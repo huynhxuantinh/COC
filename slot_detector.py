@@ -52,7 +52,26 @@ class SlotDetector:
 
     def has_templates(self, kinds: list[str] | tuple[str, ...] | None = None) -> bool:
         active_kinds = kinds or self.kinds
-        return any(self.templates_for(kind) for kind in active_kinds)
+        return bool(active_kinds) and all(self.has_usable_template(kind) for kind in active_kinds)
+
+    def has_any_template(self, kinds: list[str] | tuple[str, ...] | None = None) -> bool:
+        active_kinds = kinds or self.kinds
+        return any(self.has_usable_template(kind) for kind in active_kinds)
+
+    def has_usable_template(self, kind: str) -> bool:
+        try:
+            maximum_width = max(1, int(self.bar_region[2]))
+            maximum_height = max(1, int(self.bar_region[3]))
+            for path in self.templates_for(kind):
+                template = self._load_template(path)
+                if template is None or not getattr(template, "size", 0):
+                    continue
+                height, width = template.shape[:2]
+                if 0 < width <= maximum_width and 0 < height <= maximum_height:
+                    return True
+        except (ImportError, OSError, ValueError):
+            return False
+        return False
 
     def templates_for(self, kind: str) -> list[Path]:
         directory = self.template_dir / self._safe_kind(kind)

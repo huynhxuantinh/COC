@@ -63,7 +63,10 @@ export function BuilderWallUpgradePage() {
           </Card>
 
           <Card title="Khi thất bại">
-            <TextInput type="number" min={1} suffix="trận" label="Thử lại sau" value={String(wall.retry_backoff_attacks ?? 10)} onChange={(event) => update("retry_backoff_attacks", numberValue(event.target.value))} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextInput type="number" min={1} suffix="trận" label="Thử lại sau" value={String(wall.retry_backoff_attacks ?? 10)} onChange={(event) => update("retry_backoff_attacks", numberValue(event.target.value))} />
+              <TextInput type="number" min={1} suffix="trận" label="Mô phỏng lại sau" value={String(wall.dry_run_retry_attacks ?? 10)} onChange={(event) => update("dry_run_retry_attacks", numberValue(event.target.value))} />
+            </div>
           </Card>
 
           <details className="rounded-lg border border-white/10 bg-ink-850/90 p-5">

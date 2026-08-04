@@ -4,10 +4,11 @@ import random
 import threading
 import unittest
 from io import BytesIO
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image, ImageDraw
 
+from adb_client import ADBError
 from backend.services.bot_service import BotService
 from bot import FarmBot
 from builder_bot import BuilderBaseBot
@@ -17,6 +18,37 @@ from bot_runtime import start_farm_threads
 
 
 class BuilderBaseTests(unittest.TestCase):
+    def test_builder_initial_adb_connect_error_is_reported_and_stops_cleanly(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.config = {"adb": {"connect_on_start": True}}
+        bot.adb = Mock()
+        bot.adb.connect.side_effect = ADBError("device offline")
+        bot.stop_event = threading.Event()
+        bot.log_messages = []
+        bot.log = bot.log_messages.append
+        bot._publish_stats = lambda: None
+        events: list[tuple[str, str]] = []
+        bot.lifecycle_callback = lambda event, detail="": events.append((event, detail))
+
+        bot.run()
+
+        self.assertTrue(bot.stop_event.is_set())
+        self.assertTrue(any("[ERROR]" in message and "device offline" in message for message in bot.log_messages))
+        self.assertEqual(events, [("error", "device offline"), ("stopped", "")])
+
+    def test_backend_status_uses_structured_lifecycle_not_log_text(self) -> None:
+        service = BotService()
+        service.bot_threads = []
+        service.status = "Đang khởi động..."
+        service._log("[INFO] Bot started.")
+        self.assertEqual(service.get_status()["status"], "Đang khởi động...")
+
+        service._lifecycle_threadsafe("127.0.0.1:5555", "running")
+        self.assertEqual(service.get_status()["status"], "Đang chạy...")
+        service._lifecycle_threadsafe("127.0.0.1:5555", "error", "device offline")
+        service._lifecycle_threadsafe("127.0.0.1:5555", "stopped")
+        self.assertEqual(service.get_status()["status"], "Đã dừng do lỗi.")
+
     def test_old_config_receives_builder_defaults(self) -> None:
         config = normalize_config({"farm": {"village": "builder"}})
         builder = config["builder_base"]
@@ -30,6 +62,7 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertEqual(builder["deploy"]["hero_deploy_attempts"], 2)
         self.assertEqual(builder["deploy"]["troop_skill_delay_seconds"], 3.0)
         self.assertEqual(builder["deploy"]["hero_first_skill_delay_seconds"], 28.0)
+        self.assertEqual(builder["deploy"]["hero_ready_poll_seconds"], 2.0)
         self.assertTrue(builder["elixir_cart"]["enabled"])
         self.assertEqual(builder["elixir_cart"]["collect_every_n_attacks"], 1)
         self.assertEqual(builder["elixir_cart"]["icon_search_attempts"], 3)
@@ -42,8 +75,171 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertEqual(builder["coords"]["start_dialog_close"], [1360, 165])
         self.assertFalse(builder["wall_upgrade"]["enabled"])
         self.assertEqual(builder["wall_upgrade"]["trigger_percent"], 90)
+        self.assertEqual(builder["wall_upgrade"]["dry_run_retry_attacks"], 10)
         self.assertEqual(builder["wall_upgrade"]["retry_backoff_attacks"], 10)
         self.assertEqual(builder["wall_upgrade"]["max_wall_search_scrolls"], 9)
+        self.assertEqual(builder["result_stats"]["read_attempts"], 3)
+        self.assertEqual(builder["result_stats"]["gold_max"], 2_000_000)
+
+    def test_hero_readiness_uses_configured_poll_interval(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "deploy": {
+                "hero_first_skill_delay_seconds": 0,
+                "hero_repeat_skill": True,
+                "hero_repeat_min_seconds": 15,
+                "hero_ready_poll_seconds": 2,
+            },
+            "coords": {"hero_slot": [162, 812]},
+        }
+        bot._hero_deployed_at = 1.0
+        bot._hero_last_skill_at = 0.0
+        bot._hero_last_ready_check_at = 0.0
+        clock = iter((10.0, 10.5, 12.1))
+        bot._active_time = lambda: next(clock)
+        readiness_checks: list[bytes] = []
+        bot.vision = type(
+            "Vision",
+            (),
+            {"hero_ability_ready": lambda _self, png, _hero: readiness_checks.append(png) or False},
+        )()
+        bot._tap = lambda _point, jitter=0: self.fail("Hero must not be tapped when ability is not ready")
+
+        bot._maybe_activate_hero(b"first")
+        bot._maybe_activate_hero(b"too-soon")
+        bot._maybe_activate_hero(b"after-poll")
+
+        self.assertEqual(readiness_checks, [b"first", b"after-poll"])
+
+    def test_backend_rejects_zero_hero_ready_poll_interval(self) -> None:
+        service = BotService.__new__(BotService)
+        config = normalize_config({})
+        config["builder_base"]["deploy"]["hero_ready_poll_seconds"] = 0
+
+        with self.assertRaisesRegex(ValueError, "chu kỳ kiểm tra kỹ năng"):
+            service._validate_config(config)
+
+    def test_builder_result_requires_consensus_and_rejects_values_over_cap(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "result_stats": {
+                "read_attempts": 3,
+                "read_delay_seconds": 0,
+                "damage_max": 200,
+                "gold_max": 2_000_000,
+                "trophies_max": 100,
+            },
+            "coords": {"return_home": [800, 760]},
+            "timing": {"result_wait_seconds": 0},
+        }
+        bot.stop_event = threading.Event()
+        readings = {
+            b"first": {"damage": 123, "gold": 98_000_000, "trophies": 20},
+            b"second": {"damage": 123, "gold": 98_000_000, "trophies": 20},
+            b"third": {"damage": 123, "gold": 98_000_000, "trophies": 20},
+        }
+        bot.vision = type(
+            "Vision",
+            (),
+            {
+                "read_result": lambda _self, png: readings[png],
+                "classify": lambda _self, _png: BuilderScreen.UNKNOWN,
+            },
+        )()
+        frames = iter((b"second", b"third", b"after-return"))
+        bot._screencap_png = lambda: next(frames)
+        bot._sleep = lambda _seconds: None
+        bot._tap = lambda _point: None
+        bot._watchdog_restarts = 1
+        bot.stats = {
+            "builder_damage": 0,
+            "builder_gold": 0,
+            "builder_trophies": 0,
+        }
+        logs: list[str] = []
+        bot.log = logs.append
+        bot._publish_stats = lambda: None
+
+        bot._handle_result(b"first")
+
+        self.assertEqual(bot.stats["builder_damage"], 123)
+        self.assertEqual(bot.stats["builder_gold"], 0)
+        self.assertEqual(bot.stats["builder_trophies"], 20)
+        self.assertTrue(any("vượt cap" in message for message in logs))
+
+    def test_builder_consensus_rejects_three_unrelated_values(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+
+        self.assertEqual(bot._builder_result_number([500_000, 800_000, 5_000_000], 1_000), -1)
+
+    def test_builder_auto_stop_uses_shared_game_schedule(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.config = {"game": {"auto_stop": True, "auto_restart_after_seconds": 3600}}
+        bot.run_started_at = 100.0
+        bot.auto_stop_at = 3700.0
+        bot.stop_event = threading.Event()
+        messages: list[str] = []
+        bot.log = messages.append
+
+        with patch("builder_bot.time.time", return_value=3701.0):
+            self.assertTrue(bot._auto_stop_due())
+
+        self.assertTrue(bot.stop_event.is_set())
+        self.assertTrue(any("Tự dừng" in message for message in messages))
+
+    def test_builder_periodic_restart_schedule_uses_configured_range(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.config = {
+            "game": {
+                "periodic_restart_game": True,
+                "periodic_restart_min_seconds": 120,
+                "periodic_restart_max_seconds": 180,
+            }
+        }
+        bot.log = lambda _message: None
+
+        with patch("builder_bot.random.randint", return_value=150):
+            self.assertEqual(bot._next_periodic_restart_at(1000.0), 1150.0)
+
+    def test_builder_pause_shifts_both_schedules(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.auto_stop_at = 100.0
+        bot.next_periodic_restart_at = 200.0
+
+        bot._shift_schedules_after_pause(15.0)
+
+        self.assertEqual(bot.auto_stop_at, 115.0)
+        self.assertEqual(bot.next_periodic_restart_at, 215.0)
+
+    def test_builder_pause_blocks_adb_action_and_freezes_active_time(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.pause_event = threading.Event()
+        bot.pause_event.set()
+        bot.stop_event = threading.Event()
+        bot.auto_stop_at = 0.0
+        bot.next_periodic_restart_at = 0.0
+        bot._paused_seconds_total = 0.0
+        bot.log = lambda _message: None
+        taps: list[tuple[int, int, int]] = []
+        bot.adb = type(
+            "ADB",
+            (),
+            {"tap": lambda _self, x, y, jitter=4: taps.append((x, y, jitter))},
+        )()
+
+        def resume_after_wait(_seconds: float) -> None:
+            self.assertEqual(taps, [])
+            bot.pause_event.clear()
+
+        with patch("builder_bot.time.time", side_effect=[100.0, 105.0]), patch(
+            "builder_bot.time.sleep", side_effect=resume_after_wait
+        ):
+            bot._tap([25, 50], jitter=0)
+
+        self.assertEqual(taps, [(25, 50, 0)])
+        self.assertEqual(bot._paused_seconds_total, 5.0)
+        with patch("builder_bot.time.time", return_value=110.0):
+            self.assertEqual(bot._active_time(), 105.0)
 
     def test_each_stage_zooms_before_slot_scan(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)
@@ -103,6 +299,97 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertTrue(bot._builder_wall_upgrade_due())
         bot.attacks_since_wall_upgrade = -1
         self.assertFalse(bot._builder_wall_upgrade_due())
+
+    def test_builder_wall_dry_run_sets_cooldown(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "wall_upgrade": {
+                "dry_run": True,
+                "dry_run_retry_attacks": 6,
+                "add1_rounds": 1,
+                "reserve_gold": 0,
+                "reserve_elixir": 0,
+                "coords": {},
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.attacks_since_wall_upgrade = 0
+        bot.log = lambda _message: None
+        bot._read_builder_resources_stable = lambda _settings: {"gold": 2000000, "elixir": 1000000}
+        bot._find_builder_wall_row = lambda _settings: [800, 400]
+        bot._read_builder_wall_cost_stable = lambda _settings, _button: 800000
+        bot._tap = lambda _point, jitter=0: None
+        bot._sleep = lambda _seconds: None
+        bot._close_builder_wall_ui = lambda: None
+
+        result = bot._upgrade_builder_walls()
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["continue_cycle"])
+        self.assertEqual(bot.attacks_since_wall_upgrade, -6)
+        self.assertFalse(bot._builder_wall_upgrade_due())
+
+    def test_builder_cycle_continues_to_match_after_wall_dry_run(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {"coords": {}, "timing": {"after_attack_seconds": 0, "after_find_now_seconds": 0}}
+        bot.stop_event = threading.Event()
+        bot.attacks_since_wall_upgrade = -4
+        bot.stats = {"builder_attacks": 0}
+        bot.log = lambda _message: None
+        bot._ensure_builder_home = lambda: True
+        bot._elixir_cart_due = lambda: False
+        bot._builder_wall_upgrade_due = lambda: True
+        bot._upgrade_builder_walls = lambda: {
+            "success": True,
+            "reason": "dry_run",
+            "continue_cycle": True,
+        }
+        bot._tap = Mock()
+        bot._sleep = lambda _seconds: None
+        bot._publish_stats = lambda: None
+        bot._wait_for_states = Mock(
+            side_effect=[
+                (BuilderScreen.START_DIALOG, b"dialog"),
+                (BuilderScreen.RESULT, b"result"),
+            ]
+        )
+        bot.vision = type("Vision", (), {"find_now_available": lambda _self, _png: True})()
+        bot._handle_result = Mock()
+
+        bot._run_cycle()
+
+        self.assertEqual(bot._tap.call_count, 2)
+        self.assertEqual(bot.stats["builder_attacks"], 1)
+        bot._handle_result.assert_called_once_with(b"result")
+
+    def test_find_now_failure_does_not_increment_attack_counters(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {"coords": {}, "timing": {"after_attack_seconds": 0, "after_find_now_seconds": 0}}
+        bot.stop_event = threading.Event()
+        bot.stats = {"builder_attacks": 4}
+        bot.attacks_since_wall_upgrade = 7
+        bot.log = lambda _message: None
+        bot._ensure_builder_home = lambda: True
+        bot._elixir_cart_due = lambda: False
+        bot._builder_wall_upgrade_due = lambda: False
+        bot._tap = Mock()
+        bot._sleep = lambda _seconds: None
+        bot._publish_stats = Mock()
+        bot._wait_for_states = Mock(
+            side_effect=[
+                (BuilderScreen.START_DIALOG, b"dialog"),
+                (BuilderScreen.UNKNOWN, b"stuck"),
+            ]
+        )
+        bot.vision = type("Vision", (), {"find_now_available": lambda _self, _png: True})()
+        bot._record_state_failure = Mock()
+
+        bot._run_cycle()
+
+        self.assertEqual(bot.stats["builder_attacks"], 4)
+        self.assertEqual(bot.attacks_since_wall_upgrade, 7)
+        bot._publish_stats.assert_not_called()
+        bot._record_state_failure.assert_called_once_with("builder-stage1-not-found", b"stuck")
 
     def test_builder_wall_confirmation_requires_currency_and_cost(self) -> None:
         vision = BuilderBaseVision(normalize_config({}))
@@ -341,7 +628,7 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertEqual(state, BuilderScreen.RESTARTED)
         self.assertEqual(restarted, ["builder-stage1-battle-frozen"])
 
-    def test_elixir_cart_only_adds_confirmed_collection(self) -> None:
+    def test_elixir_cart_does_not_credit_when_remaining_ocr_fails(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)
         bot.builder = {
             "elixir_cart": {
@@ -353,6 +640,7 @@ class BuilderBaseTests(unittest.TestCase):
         }
         bot.stop_event = threading.Event()
         bot.stats = {"builder_elixir": 0}
+        bot._elixir_cart_pending = True
         bot.log = lambda _message: None
         bot._sleep = lambda _seconds: None
         published: list[int] = []
@@ -375,11 +663,86 @@ class BuilderBaseTests(unittest.TestCase):
 
         bot.adb = FakeADB()
         bot.vision = FakeVision()
-        self.assertTrue(bot._collect_elixir_cart(b"before"))
+        self.assertFalse(bot._collect_elixir_cart(b"before"))
 
+        self.assertEqual(bot.stats["builder_elixir"], 0)
+        self.assertEqual(published, [])
+        self.assertTrue(bot._elixir_cart_pending)
+        self.assertEqual(taps, [(1175, 760), (1342, 88)])
+
+    def test_elixir_cart_credits_when_remaining_reward_is_zero(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "elixir_cart": {
+                "enabled": True,
+                "collect_button": [1175, 760],
+                "close_button": [1342, 88],
+                "collect_wait_seconds": 0,
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.stats = {"builder_elixir": 0}
+        bot._elixir_cart_pending = True
+        bot.log = lambda _message: None
+        bot._sleep = lambda _seconds: None
+        published: list[int] = []
+        bot._publish_stats = lambda: published.append(bot.stats["builder_elixir"])
+        bot._tap = lambda _point, jitter=0: None
+        bot._screencap_png = lambda: b"after"
+        bot.vision = type(
+            "Vision",
+            (),
+            {
+                "is_elixir_cart_popup": lambda _self, _png: True,
+                "read_elixir_cart_reward": lambda _self, png: 131000 if png == b"before" else 0,
+            },
+        )()
+
+        self.assertTrue(bot._collect_elixir_cart(b"before"))
         self.assertEqual(bot.stats["builder_elixir"], 131000)
         self.assertEqual(published, [131000])
-        self.assertEqual(taps, [(1175, 760), (1342, 88)])
+        self.assertFalse(bot._elixir_cart_pending)
+
+    def test_elixir_cart_credits_closed_popup_only_after_home_resource_increases(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "elixir_cart": {
+                "enabled": True,
+                "collect_button": [1175, 760],
+                "close_button": [1342, 88],
+                "open_wait_seconds": 0,
+                "collect_wait_seconds": 0,
+                "icon_search_attempts": 1,
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.stats = {"builder_elixir": 0}
+        bot._elixir_cart_pending = True
+        bot.log = lambda _message: None
+        bot._sleep = lambda _seconds: None
+        bot._publish_stats = lambda: None
+        bot._tap = lambda _point, jitter=0: None
+        screenshots = iter((b"popup", b"after"))
+        bot._screencap_png = lambda: next(screenshots)
+
+        class FakeVision:
+            def is_elixir_cart_popup(self, png: bytes) -> bool:
+                return png == b"popup"
+
+            def find_elixir_cart(self, _png: bytes) -> tuple[int, int, float]:
+                return (900, 500, 0.99)
+
+            def read_elixir_cart_reward(self, _png: bytes) -> int:
+                return 131000
+
+            def read_home_resources(self, png: bytes) -> dict[str, int]:
+                return {"gold": 0, "elixir": 1000000 if png == b"home" else 1131000}
+
+        bot.vision = FakeVision()
+
+        self.assertTrue(bot._collect_elixir_cart(b"home"))
+        self.assertEqual(bot.stats["builder_elixir"], 131000)
+        self.assertFalse(bot._elixir_cart_pending)
 
     def test_elixir_cart_respects_attack_interval(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)
@@ -577,6 +940,68 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertFalse(bot._ensure_builder_home())
         self.assertEqual(resumed, [(2, BuilderScreen.STAGE_PREP, b"stage-two-prep", True)])
 
+    def test_resume_expected_stage_two_when_reinforcement_detection_misses(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {"coords": {"reinforcement_slots": [[100, 800]]}}
+        bot._expected_stage = 2
+        bot.adb = type("ADB", (), {"screencap_png": lambda _self: b"stage-two-prep"})()
+        bot.vision = type(
+            "Vision",
+            (),
+            {
+                "classify": lambda _self, _png: BuilderScreen.STAGE_PREP,
+                "slot_available": lambda _self, _png, _slot: False,
+            },
+        )()
+        resumed: list[tuple[int, str, bytes, bool]] = []
+        bot.log = lambda _message: None
+        bot._run_match_from_stage = lambda stage, state, png, deploy_current: resumed.append(
+            (stage, state, png, deploy_current)
+        )
+
+        self.assertFalse(bot._ensure_builder_home())
+        self.assertEqual(resumed, [(2, BuilderScreen.STAGE_PREP, b"stage-two-prep", True)])
+
+    def test_stage_one_transition_timeout_restarts_watchdog(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "timing": {
+                "battle_timeout_seconds": 60,
+                "stage_transition_timeout_seconds": 10,
+                "screen_poll_seconds": 5,
+                "state_confirmations": 1,
+                "damage_unknown_restart_seconds": 0,
+                "damage_stall_seconds": 0,
+                "unknown_state_restart_seconds": 0,
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.pause_event = threading.Event()
+        bot.log = lambda _message: None
+        bot._pause_gate = lambda: None
+        bot._maybe_activate_hero = lambda _png: None
+        clock = {"value": 0.0}
+        bot._active_time = lambda: clock["value"]
+        bot._sleep = lambda seconds: clock.__setitem__("value", clock["value"] + seconds)
+        bot.adb = type("ADB", (), {"screencap_png": lambda _self: b"battle"})()
+        bot.vision = type(
+            "Vision",
+            (),
+            {
+                "classify": lambda _self, _png: BuilderScreen.BATTLE,
+                "read_damage": lambda _self, _png: 100,
+                "battle_frame_difference": lambda _self, _before, _after: 10,
+            },
+        )()
+        restarted: list[tuple[str, bytes, str]] = []
+        bot._restart_stage_watchdog = lambda reason, png, message: restarted.append((reason, png, message))
+
+        state, png = bot._monitor_stage(1, initial_state=BuilderScreen.BATTLE)
+
+        self.assertEqual(state, BuilderScreen.RESTARTED)
+        self.assertEqual(png, b"battle")
+        self.assertEqual(restarted[0][0], "builder-stage1-transition-timeout")
+
     def test_stage_two_deploys_survivors_before_reinforcements(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)
         survivor = [300, 812]
@@ -641,7 +1066,15 @@ class BuilderBaseTests(unittest.TestCase):
         created: list[str] = []
 
         class FakeBuilderBot:
-            def __init__(self, config, log, stop_event, pause_event, stats_callback) -> None:
+            def __init__(
+                self,
+                config,
+                log,
+                stop_event,
+                pause_event,
+                stats_callback,
+                lifecycle_callback,
+            ) -> None:
                 created.append(config["adb"]["device"])
 
             def run(self) -> None:

@@ -75,11 +75,12 @@ export function BuilderStrategyPage() {
         </Card>
 
         <Card title="Thời gian chờ" className="xl:col-span-2">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <TextInput type="number" min={0.1} step={0.5} suffix="giây" label="Sau nút Attack" value={String(timing.after_attack_seconds ?? 1.5)} onChange={(event) => updatePath(["builder_base", "timing", "after_attack_seconds"], decimal(event.target.value))} />
             <TextInput type="number" min={0.1} step={0.5} suffix="giây" label="Sau Find Now" value={String(timing.after_find_now_seconds ?? 6)} onChange={(event) => updatePath(["builder_base", "timing", "after_find_now_seconds"], decimal(event.target.value))} />
             <TextInput type="number" min={0.1} step={0.5} suffix="giây" label="Quét trạng thái" value={String(timing.screen_poll_seconds ?? 1)} onChange={(event) => updatePath(["builder_base", "timing", "screen_poll_seconds"], decimal(event.target.value))} />
-            <TextInput type="number" min={30} step={5} suffix="giây" label="Giới hạn trận" value={String(timing.battle_timeout_seconds ?? 190)} onChange={(event) => updatePath(["builder_base", "timing", "battle_timeout_seconds"], decimal(event.target.value))} />
+            <TextInput type="number" min={30} step={5} suffix="giây" label="Giới hạn mỗi làng" value={String(timing.battle_timeout_seconds ?? 150)} onChange={(event) => updatePath(["builder_base", "timing", "battle_timeout_seconds"], decimal(event.target.value))} />
+            <TextInput type="number" min={1} step={1} suffix="giây" label="Chờ chuyển Làng 2" value={String(timing.stage_transition_timeout_seconds ?? 25)} onChange={(event) => updatePath(["builder_base", "timing", "stage_transition_timeout_seconds"], decimal(event.target.value))} />
           </div>
         </Card>
       </div>

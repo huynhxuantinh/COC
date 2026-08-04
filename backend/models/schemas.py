@@ -2,7 +2,83 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ConfigSection(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class GameConfig(ConfigSection):
+    auto_restart_after_seconds: float | None = Field(default=None, ge=0)
+    periodic_restart_min_seconds: float | None = Field(default=None, ge=0)
+    periodic_restart_max_seconds: float | None = Field(default=None, ge=0)
+    restart_wait_seconds: float | None = Field(default=None, gt=0)
+    result_wait_seconds: float | None = Field(default=None, gt=0)
+    home_zoom_out_keyevents: int | None = Field(default=None, ge=0)
+    ldplayer_index: int | None = Field(default=None, ge=0)
+
+
+class FarmConfig(ConfigSection):
+    gold_min: int | None = Field(default=None, ge=0)
+    elixir_min: int | None = Field(default=None, ge=0)
+    total_min: int | None = Field(default=None, ge=0)
+    loot_gold_max: int | None = Field(default=None, ge=0)
+    loot_elixir_max: int | None = Field(default=None, ge=0)
+    max_next: int | None = Field(default=None, ge=1)
+    search_delay_seconds: float | None = Field(default=None, gt=0)
+    ocr_fail_restart_seconds: float | None = Field(default=None, ge=0)
+    max_ocr_restarts: int | None = Field(default=None, ge=1)
+
+
+class SurrenderConfig(ConfigSection):
+    time_min_seconds: int | None = Field(default=None, ge=0)
+    time_max_seconds: int | None = Field(default=None, ge=0)
+    destruction_min_percent: int | None = Field(default=None, ge=0, le=100)
+    destruction_max_percent: int | None = Field(default=None, ge=0, le=100)
+    total_remaining_less_than: int | None = Field(default=None, ge=0)
+    max_battle_seconds: int | None = Field(default=None, ge=1, le=175)
+    damage_jump_confirm_percent: int | None = Field(default=None, ge=0, le=100)
+    damage_jump_max_pending_reads: int | None = Field(default=None, ge=1)
+    damage_stall_seconds: float | None = Field(default=None, ge=0)
+    damage_unknown_restart_seconds: float | None = Field(default=None, ge=0)
+    max_damage_ocr_restarts: int | None = Field(default=None, ge=1)
+
+
+class MainTimingConfig(ConfigSection):
+    after_click: float | None = Field(default=None, ge=0)
+    after_home_attack: float | None = Field(default=None, ge=0)
+    after_find_match: float | None = Field(default=None, ge=0)
+    after_my_army_attack: float | None = Field(default=None, ge=0)
+    after_next: float | None = Field(default=None, ge=0)
+    after_return_home: float | None = Field(default=None, ge=0)
+    loop_sleep: float | None = Field(default=None, gt=0)
+    sleep_jitter_percent: float | None = Field(default=None, ge=0)
+    sleep_jitter_min_seconds: float | None = Field(default=None, ge=0)
+
+
+class BuilderTimingConfig(ConfigSection):
+    after_attack_seconds: float | None = Field(default=None, gt=0)
+    after_find_now_seconds: float | None = Field(default=None, gt=0)
+    attack_cooldown_retry_seconds: float | None = Field(default=None, gt=0)
+    screen_poll_seconds: float | None = Field(default=None, gt=0)
+    prep_timeout_seconds: float | None = Field(default=None, gt=0)
+    battle_timeout_seconds: float | None = Field(default=None, gt=0)
+    stage_transition_timeout_seconds: float | None = Field(default=None, gt=0)
+    result_wait_seconds: float | None = Field(default=None, gt=0)
+    star_bonus_wait_seconds: float | None = Field(default=None, gt=0)
+
+
+class BuilderBaseConfig(ConfigSection):
+    timing: BuilderTimingConfig = Field(default_factory=BuilderTimingConfig)
+
+
+class AppConfig(ConfigSection):
+    game: GameConfig = Field(default_factory=GameConfig)
+    farm: FarmConfig = Field(default_factory=FarmConfig)
+    surrender: SurrenderConfig = Field(default_factory=SurrenderConfig)
+    timing: MainTimingConfig = Field(default_factory=MainTimingConfig)
+    builder_base: BuilderBaseConfig = Field(default_factory=BuilderBaseConfig)
 
 
 class ApiMessage(BaseModel):
@@ -11,7 +87,7 @@ class ApiMessage(BaseModel):
 
 
 class ConfigPayload(BaseModel):
-    config: dict[str, Any]
+    config: AppConfig
 
 
 class StatusPayload(BaseModel):

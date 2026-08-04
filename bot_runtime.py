@@ -8,19 +8,7 @@ from typing import Any, Callable
 from adb_client import ADBClient, ADBError, COMMON_DEVICES, discover_adb_paths
 from bot import FarmBot
 from builder_bot import BuilderBaseBot
-
-
-STAT_KEYS = (
-    "attacks",
-    "next",
-    "gold_seen",
-    "elixir_seen",
-    "builder_attacks",
-    "builder_gold",
-    "builder_elixir",
-    "builder_trophies",
-    "builder_damage",
-)
+from stats_store import STAT_KEYS
 
 
 @dataclass(frozen=True)
@@ -87,6 +75,7 @@ def start_farm_threads(
     stop_event: threading.Event,
     pause_event: threading.Event,
     stats_callback: Callable[[str, dict[str, Any]], None],
+    lifecycle_callback: Callable[[str, str, str], None] | None = None,
 ) -> tuple[list[threading.Thread], list[str]]:
     devices = configured_devices(config)
     threads: list[threading.Thread] = []
@@ -102,6 +91,9 @@ def start_farm_threads(
             stop_event,
             pause_event,
             lambda stats, dev=device: stats_callback(dev, stats),
+            lambda event, detail="", dev=device: (
+                lifecycle_callback(dev, event, detail) if lifecycle_callback else None
+            ),
         )
         thread = threading.Thread(target=bot.run, daemon=True, name=f"{bot_type.__name__}-{device}")
         threads.append(thread)

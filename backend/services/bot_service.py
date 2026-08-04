@@ -11,17 +11,20 @@ from pathlib import Path
 from typing import Any
 
 from adb_client import ADBClient
-from bot_runtime import STAT_KEYS, scan_adb_connection, start_farm_threads
+from bot_runtime import scan_adb_connection, start_farm_threads
 from config_manager import load_config, normalize_config, save_config
 from slot_detector import SlotDetector
+from stats_store import STAT_KEYS
 from vision import Vision
 
 
 class BotService:
     def __init__(self) -> None:
         self.config_data = load_config()
+        self.config_revision = 0
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.stats_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+        self.lifecycle_queue: queue.Queue[dict[str, str]] = queue.Queue()
         self.bot_threads: list[threading.Thread] = []
         self.active_devices: list[str] = []
         self.stats_by_device: dict[str, dict[str, Any]] = {}
@@ -31,6 +34,8 @@ class BotService:
         self.status = "Chưa quét ADB."
         self.logs: list[dict[str, Any]] = []
         self.next_log_id = 1
+        self.bot_lifecycle: dict[str, str] = {}
+        self.bot_lifecycle_errors: dict[str, str] = {}
         self.lock = threading.RLock()
 
     def get_config(self) -> dict[str, Any]:
@@ -44,6 +49,7 @@ class BotService:
             normalized = normalize_config(config)
             self._validate_config(normalized)
             self.config_data = copy.deepcopy(normalized)
+            self.config_revision += 1
             save_config(self.config_data)
             self.adb_ready = False
             self.status = "Đã lưu. Quét ADB lại."
@@ -78,6 +84,7 @@ class BotService:
         }
 
     def get_status(self) -> dict[str, Any]:
+        self._drain_lifecycle()
         self._drain_stats()
         self._drain_logs()
         with self.lock:
@@ -95,16 +102,28 @@ class BotService:
                 raise RuntimeError("Dừng bot trước khi quét ADB.")
             self.adb_ready = False
             self.status = "Đang quét ADB..."
+            scan_revision = self.config_revision
+            scan_config = copy.deepcopy(self.config_data)
         self._log("[ADB] Đang quét adb.exe...")
 
         try:
-            scan_adb_connection(self.config_data, self._log)
+            scan_adb_connection(scan_config, self._log)
         except RuntimeError as exc:
             with self.lock:
+                if self.config_revision != scan_revision:
+                    self.adb_ready = False
+                    self.status = "Cấu hình đã thay đổi. Quét ADB lại."
+                    raise RuntimeError("Cấu hình đã thay đổi trong lúc quét ADB. Hãy quét lại.") from exc
                 self.status = "Không thấy ADB." if "Không tìm thấy" in str(exc) else "Kết nối ADB thất bại."
             raise
 
         with self.lock:
+            if self.config_revision != scan_revision:
+                self.adb_ready = False
+                self.status = "Cấu hình đã thay đổi. Quét ADB lại."
+                raise RuntimeError("Cấu hình đã thay đổi trong lúc quét ADB. Hãy quét lại.")
+            self.config_data = scan_config
+            self.config_revision += 1
             save_config(self.config_data)
             self.adb_ready = True
             self.status = "ADB đã kết nối 1 device. Có thể bắt đầu."
@@ -127,12 +146,15 @@ class BotService:
             self.pause_event.clear()
             self.status = "Đang khởi động..."
             self.stats_by_device = {}
+            self.bot_lifecycle = {}
+            self.bot_lifecycle_errors = {}
             self.bot_threads, self.active_devices = start_farm_threads(
                 self.config_data,
                 self._log,
                 self.stop_event,
                 self.pause_event,
                 self._stats_threadsafe,
+                self._lifecycle_threadsafe,
             )
         return self.get_status()
 
@@ -234,12 +256,20 @@ class BotService:
         }
 
     def test_tap(self, x: int, y: int) -> None:
-        config = self.get_config()
-        resolution = tuple(config["game"].get("resolution", [1600, 900]))
-        client = ADBClient(config["adb"].get("path", ""), config["adb"].get("device", ""), log=self._log, resolution=resolution)
-        if config["adb"].get("connect_on_start", True):
-            client.connect()
-        client.tap(int(x), int(y), jitter=0)
+        with self.lock:
+            if self._bot_running_locked():
+                raise ValueError("Hãy dừng bot trước khi Test Tap.")
+            config = copy.deepcopy(self.config_data)
+            resolution = tuple(config["game"].get("resolution", [1600, 900]))
+            client = ADBClient(
+                config["adb"].get("path", ""),
+                config["adb"].get("device", ""),
+                log=self._log,
+                resolution=resolution,
+            )
+            if config["adb"].get("connect_on_start", True):
+                client.connect()
+            client.tap(int(x), int(y), jitter=0)
         self._log(f"[COORD] Test tap {int(x)},{int(y)}.")
 
     def save_points(self, target: str, points: list[list[int]], combo_name: str = "") -> dict[str, Any]:
@@ -273,6 +303,7 @@ class BotService:
             candidate = normalize_config(candidate)
             self._validate_config(candidate)
             self.config_data = candidate
+            self.config_revision += 1
             save_config(self.config_data)
         self._log(f"[COORD] Saved {len(normalized)} point(s) to {target} | global deploy.")
         return self.get_config()
@@ -332,12 +363,6 @@ class BotService:
             except queue.Empty:
                 break
             with self.lock:
-                if "Bot started" in message:
-                    self.status = "Đang chạy..."
-                if "Bot stopped" in message and not self._bot_running_locked():
-                    self.status = "Đã dừng."
-                if "[ERROR]" in message and not self._bot_running_locked():
-                    self.status = "Đã dừng."
                 self.logs.append(
                     {
                         "id": self.next_log_id,
@@ -351,6 +376,31 @@ class BotService:
 
     def _stats_threadsafe(self, device: str, stats: dict[str, Any]) -> None:
         self.stats_queue.put({"device": device, "stats": stats})
+
+    def _lifecycle_threadsafe(self, device: str, event: str, detail: str = "") -> None:
+        self.lifecycle_queue.put({"device": device, "event": event, "detail": detail})
+
+    def _drain_lifecycle(self) -> None:
+        while True:
+            try:
+                item = self.lifecycle_queue.get_nowait()
+            except queue.Empty:
+                break
+            device = str(item.get("device", ""))
+            event = str(item.get("event", ""))
+            detail = str(item.get("detail", ""))
+            if not device or event not in {"running", "error", "stopped"}:
+                continue
+            with self.lock:
+                self.bot_lifecycle[device] = event
+                if event == "running":
+                    self.bot_lifecycle_errors.pop(device, None)
+                    self.status = "Đang chạy..."
+                elif event == "error":
+                    self.bot_lifecycle_errors[device] = detail
+                    self.status = "Đã dừng do lỗi."
+                elif not any(state == "running" for state in self.bot_lifecycle.values()):
+                    self.status = "Đã dừng do lỗi." if self.bot_lifecycle_errors else "Đã dừng."
 
     def _drain_stats(self) -> None:
         while True:
@@ -406,6 +456,7 @@ class BotService:
         game = config.get("game", {})
         farm = config.get("farm", {})
         surrender = config.get("surrender", {})
+        timing = config.get("timing", {})
         attack_timing = config.get("attack_timing", {})
         manual_army = config.get("manual_army", {})
         wall_upgrade = config.get("wall_upgrade", {})
@@ -415,6 +466,16 @@ class BotService:
             raise ValueError("Chế độ phải là main hoặc builder.")
         if int(game.get("periodic_restart_min_seconds", 0)) > int(game.get("periodic_restart_max_seconds", 0)):
             raise ValueError("Thời gian restart tối thiểu phải <= tối đa.")
+        for key in (
+            "auto_restart_after_seconds",
+            "periodic_restart_min_seconds",
+            "periodic_restart_max_seconds",
+        ):
+            if float(game.get(key, 0)) < 0:
+                raise ValueError(f"Game: {key} phải >= 0.")
+        for key in ("restart_wait_seconds", "result_wait_seconds"):
+            if float(game.get(key, 0)) <= 0:
+                raise ValueError(f"Game: {key} phải > 0.")
         if int(game.get("home_zoom_out_keyevents", 0)) < 0:
             raise ValueError("Zoom out ở làng chính phải >= 0.")
         if int(game.get("ldplayer_index", 0)) < 0:
@@ -425,16 +486,68 @@ class BotService:
             raise ValueError("Max Next phải >= 1.")
         if int(farm.get("max_ocr_restarts", 0)) < 1:
             raise ValueError("Số lần restart OCR loot phải >= 1.")
-        if int(surrender.get("time_min_seconds", 0)) > int(surrender.get("time_max_seconds", 0)):
+        if float(farm.get("search_delay_seconds", 0)) <= 0:
+            raise ValueError("Delay tìm trận phải > 0.")
+        if float(farm.get("ocr_fail_restart_seconds", 0)) < 0:
+            raise ValueError("Thời gian restart khi OCR loot lỗi phải >= 0.")
+        threshold_mode = str(farm.get("threshold_mode", "any"))
+        if threshold_mode not in {"any", "all", "total"}:
+            raise ValueError("Cách xét ngưỡng tài nguyên không hợp lệ.")
+        farm_thresholds = [
+            int(farm.get("gold_min", 0)),
+            int(farm.get("elixir_min", 0)),
+            int(farm.get("total_min", 0)),
+        ]
+        if any(value < 0 for value in farm_thresholds):
+            raise ValueError("Ngưỡng tài nguyên phải >= 0.")
+        if int(farm.get("loot_gold_max", 0)) < 0 or int(farm.get("loot_elixir_max", 0)) < 0:
+            raise ValueError("Giới hạn OCR tài nguyên phải >= 0.")
+        result_stats = config.get("ocr", {}).get("result_stats", {})
+        if int(result_stats.get("read_attempts", 0)) < 2:
+            raise ValueError("Thống kê kết quả: số lần đọc phải >= 2.")
+        if float(result_stats.get("read_delay_seconds", 0)) < 0:
+            raise ValueError("Thống kê kết quả: delay đọc phải >= 0.")
+        if int(result_stats.get("gold_max", 0)) < 1 or int(result_stats.get("elixir_max", 0)) < 1:
+            raise ValueError("Thống kê kết quả: giới hạn vàng/dầu phải >= 1.")
+        if village == "main":
+            if threshold_mode == "total" and farm_thresholds[2] <= 0:
+                raise ValueError("Chế độ Chỉ xét tổng yêu cầu Tổng vàng + dầu phải > 0.")
+            if threshold_mode in {"any", "all"} and not any(value > 0 for value in farm_thresholds):
+                raise ValueError("Phải bật ít nhất một ngưỡng tài nguyên lớn hơn 0.")
+        time_min = int(surrender.get("time_min_seconds", 0))
+        time_max = int(surrender.get("time_max_seconds", 0))
+        if time_min < 0 or time_max < 0:
+            raise ValueError("Thời gian đầu hàng phải >= 0.")
+        if time_min > time_max:
             raise ValueError("Thời gian đầu hàng tối thiểu phải <= tối đa.")
-        if int(surrender.get("destruction_min_percent", 0)) > int(surrender.get("destruction_max_percent", 0)):
+        destruction_min = int(surrender.get("destruction_min_percent", 0))
+        destruction_max = int(surrender.get("destruction_max_percent", 0))
+        if not 0 <= destruction_min <= 100 or not 0 <= destruction_max <= 100:
+            raise ValueError("% phá hủy phải nằm trong khoảng 0 đến 100.")
+        if destruction_min > destruction_max:
             raise ValueError("% phá hủy tối thiểu phải <= tối đa.")
+        max_battle_seconds = int(surrender.get("max_battle_seconds", 0))
+        if not 1 <= max_battle_seconds <= 175:
+            raise ValueError("Giới hạn trận Làng chính phải từ 1 đến 175 giây.")
+        if int(surrender.get("total_remaining_less_than", 0)) < 0:
+            raise ValueError("Tài nguyên còn lại để đầu hàng phải >= 0.")
+        damage_jump = int(surrender.get("damage_jump_confirm_percent", 0))
+        if not 0 <= damage_jump <= 100:
+            raise ValueError("Ngưỡng xác nhận damage nhảy phải từ 0 đến 100.")
+        if int(surrender.get("damage_jump_max_pending_reads", 0)) < 1:
+            raise ValueError("Số lần xác nhận damage nhảy phải >= 1.")
         if int(surrender.get("damage_unknown_restart_seconds", 0)) < 0:
             raise ValueError("Thời gian restart khi damage không đọc được phải >= 0.")
         if int(surrender.get("max_damage_ocr_restarts", 0)) < 1:
             raise ValueError("Số lần restart OCR damage phải >= 1.")
         if int(surrender.get("damage_stall_seconds", 0)) < 0:
             raise ValueError("Thời gian damage đứng im phải >= 0.")
+        for key, value in timing.items():
+            if key == "loop_sleep":
+                if float(value) <= 0:
+                    raise ValueError("Timing: loop_sleep phải > 0.")
+            elif isinstance(value, (int, float)) and float(value) < 0:
+                raise ValueError(f"Timing: {key} phải >= 0.")
         timing_ranges = [
             ("freeze_random_min_ms", "freeze_random_max_ms", "Thả băng"),
             ("rage_random_min_ms", "rage_random_max_ms", "Thả nộ"),
@@ -442,8 +555,17 @@ class BotService:
             ("next_battle_min_ms", "next_battle_max_ms", "Do tre tran moi"),
         ]
         for min_key, max_key, label in timing_ranges:
-            if int(attack_timing.get(min_key, 0)) > int(attack_timing.get(max_key, 0)):
+            minimum = int(attack_timing.get(min_key, 0))
+            maximum = int(attack_timing.get(max_key, 0))
+            if minimum < 0 or maximum < 0:
+                raise ValueError(f"{label}: giá trị phải >= 0.")
+            if minimum > maximum:
                 raise ValueError(f"{label}: gia tri tu phai <= den.")
+        for key in ("troop_delay_ms", "hero_search_delay_seconds"):
+            if float(attack_timing.get(key, 0)) < 0:
+                raise ValueError(f"Attack timing: {key} phải >= 0.")
+        if float(attack_timing.get("adb_delay_seconds", 0)) <= 0:
+            raise ValueError("Attack timing: adb_delay_seconds phải > 0.")
         if int(attack_timing.get("spell_min_point_distance_px", 0)) < 0:
             raise ValueError("Khoảng cách tối thiểu giữa 2 điểm thuốc phải >= 0.")
         if wall_upgrade:
@@ -474,6 +596,14 @@ class BotService:
             builder_deploy = builder_base.get("deploy", {})
             builder_timing = builder_base.get("timing", {})
             builder_wall = builder_base.get("wall_upgrade", {})
+            builder_result = builder_base.get("result_stats", {})
+            if int(builder_result.get("read_attempts", 0)) < 2:
+                raise ValueError("Kết quả Làng đêm: số lần đọc phải >= 2.")
+            if float(builder_result.get("read_delay_seconds", 0)) < 0:
+                raise ValueError("Kết quả Làng đêm: delay đọc phải >= 0.")
+            for key in ("damage_max", "gold_max", "trophies_max"):
+                if int(builder_result.get(key, 0)) < 1:
+                    raise ValueError(f"Kết quả Làng đêm: {key} phải >= 1.")
             if float(builder_deploy.get("troop_delay_seconds", 0)) < 0:
                 raise ValueError("Làng đêm: delay thả quân phải >= 0.")
             if int(builder_deploy.get("slot_scan_attempts", 0)) < 1:
@@ -484,13 +614,21 @@ class BotService:
                 raise ValueError("Làng đêm: delay kỹ năng lính phải >= 0.")
             if float(builder_deploy.get("hero_first_skill_delay_seconds", 0)) < 0:
                 raise ValueError("Làng đêm: delay kỹ năng tướng phải >= 0.")
+            if float(builder_deploy.get("hero_ready_poll_seconds", 0)) <= 0:
+                raise ValueError("Làng đêm: chu kỳ kiểm tra kỹ năng tướng phải > 0.")
+            if float(builder_deploy.get("hero_repeat_min_seconds", 0)) < 1:
+                raise ValueError("Làng đêm: khoảng cách bấm lại kỹ năng tướng phải >= 1.")
             if int(builder_deploy.get("point_spacing_min_px", 0)) < 0:
                 raise ValueError("Làng đêm: khoảng cách điểm tối thiểu phải >= 0.")
             if int(builder_deploy.get("point_spacing_min_px", 0)) > int(builder_deploy.get("point_spacing_max_px", 0)):
                 raise ValueError("Làng đêm: khoảng cách điểm tối thiểu phải <= tối đa.")
             for key in (
+                "after_attack_seconds",
+                "after_find_now_seconds",
+                "screen_poll_seconds",
                 "prep_timeout_seconds",
                 "battle_timeout_seconds",
+                "stage_transition_timeout_seconds",
                 "result_wait_seconds",
                 "star_bonus_wait_seconds",
                 "attack_cooldown_retry_seconds",
@@ -526,6 +664,7 @@ class BotService:
                     raise ValueError("Nâng tường Làng đêm: tài nguyên giữ lại phải >= 0.")
                 for key, label in (
                     ("add1_rounds", "số lần bấm +1"),
+                    ("dry_run_retry_attacks", "cooldown mô phỏng"),
                     ("retry_backoff_attacks", "cooldown"),
                     ("resource_read_attempts", "số lần đọc tài nguyên"),
                     ("cost_read_attempts", "số lần đọc giá"),
@@ -586,6 +725,10 @@ class BotService:
         if isinstance(wall_coords, dict):
             for name, point in wall_coords.items():
                 self._validate_point(point, f"wall_upgrade.coords.{name}", resolution)
+        wall_upgrade = config.get("wall_upgrade", {})
+        for name in ("search_region", "confirmation_region", "confirmation_cost_region"):
+            if name in wall_upgrade:
+                self._validate_region(wall_upgrade[name], f"wall_upgrade.{name}", resolution)
         builder = config.get("builder_base", {})
         builder_coords = builder.get("coords", {})
         for name in (
@@ -618,6 +761,25 @@ class BotService:
     def _validate_deploys(self, config: dict[str, Any]) -> None:
         resolution = tuple(config.get("game", {}).get("resolution", [1600, 900]))
         known_kinds = set(str(kind) for kind in config.get("slot_detection", {}).get("kinds", []))
+        slot_coords = config.get("coords", {}).get("slots", {})
+        detection_enabled = bool(config.get("slot_detection", {}).get("enabled", False))
+        detector = SlotDetector(config)
+
+        def validate_slot_input(slot: str, label: str) -> None:
+            coords = slot_coords.get(slot) if isinstance(slot_coords, dict) else None
+            has_fallback = isinstance(coords, list) and len(coords) >= 2
+            has_template = detection_enabled and detector.has_usable_template(slot)
+            if not has_fallback and not has_template:
+                raise ValueError(
+                    f"{label}: slot '{slot}' phải có template nhận diện hợp lệ "
+                    "hoặc tọa độ fallback trong coords.slots."
+                )
+
+        def step_is_active(step: dict[str, Any]) -> bool:
+            if int(step.get("max_taps", 0)) <= 0:
+                return False
+            count = step.get("count", 0)
+            return count == "all" or int(count) > 0
 
         def validate_deploy(deploy: dict[str, Any], label: str, include_global_fields: bool) -> None:
             if not isinstance(deploy, dict):
@@ -635,6 +797,8 @@ class BotService:
                 count = step.get("count", 0)
                 if count != "all" and int(count) < 0:
                     raise ValueError(f"{label}.sequence[{index}]: count phải là 'all' hoặc >= 0.")
+                if step_is_active(step):
+                    validate_slot_input(slot, f"{label}.sequence[{index}]")
             if not include_global_fields:
                 return
             for view, points in deploy.get("deploy_zones", {}).items():
@@ -643,6 +807,8 @@ class BotService:
                 for slot in group.get("slots", []):
                     if known_kinds and str(slot) not in known_kinds:
                         raise ValueError(f"{label}.spell_groups[{index}]: slot '{slot}' chưa có trong slot_detection.kinds.")
+                    if group.get("enabled", True) and int(group.get("max_casts", 0)) > 0:
+                        validate_slot_input(str(slot), f"{label}.spell_groups[{index}]")
                 if int(group.get("max_casts", 0)) < 0:
                     raise ValueError(f"{label}.spell_groups[{index}]: max_casts phải >= 0.")
                 if float(group.get("delay_after_deploy", 0)) < 0 or float(group.get("delay_between_casts", 0)) < 0:

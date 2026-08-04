@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import queue
 import subprocess
 import tempfile
 import threading
@@ -7,9 +9,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from PIL import Image
+from pydantic import ValidationError
+
 from adb_client import ADBClient, ADBError
+from backend.models.schemas import ConfigPayload
+from backend.services.bot_service import BotService
 from bot import FarmBot
 from config_manager import normalize_config
+from slot_detector import SlotDetector
+from vision import Vision
 
 
 class _TapRecorder:
@@ -27,6 +36,16 @@ class _ScreenshotADB(_TapRecorder):
 
     def screencap_png(self) -> bytes:
         return self.png
+
+
+class _WallVision:
+    available = True
+
+    def __init__(self, confirmation: dict[str, object]) -> None:
+        self.confirmation = confirmation
+
+    def read_wall_confirmation(self, _png: bytes, _settings: dict[str, object]) -> dict[str, object]:
+        return self.confirmation
 
 
 class SafetyRegressionTests(unittest.TestCase):
@@ -67,6 +86,215 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertEqual(bot.adb.taps, [])
         self.assertTrue(any("custom_troop" in message for message in bot.log_messages))
 
+    def test_backend_rejects_active_slot_without_template_or_fallback(self) -> None:
+        service = BotService.__new__(BotService)
+        config = normalize_config({})
+        kind = "custom_new_without_input"
+        config["slot_detection"]["kinds"].append(kind)
+        config["combos"]["Broken"] = {
+            "deploy": {
+                **config["deploy"],
+                "sequence": [{"slot": kind, "count": "all", "max_taps": 10, "delay": 0.1}],
+            }
+        }
+
+        with self.assertRaisesRegex(ValueError, "template nhận diện hợp lệ"):
+            service._validate_config(config)
+
+    def test_backend_accepts_active_slot_with_fallback_coordinate(self) -> None:
+        service = BotService.__new__(BotService)
+        config = normalize_config({})
+        kind = "custom_new_with_fallback"
+        config["slot_detection"]["kinds"].append(kind)
+        config["coords"]["slots"][kind] = [500, 815]
+        config["combos"]["Fallback"] = {
+            "deploy": {
+                **config["deploy"],
+                "sequence": [{"slot": kind, "count": "all", "max_taps": 10, "delay": 0.1}],
+            }
+        }
+
+        service._validate_config(config)
+
+    def test_test_tap_is_rejected_while_bot_thread_is_running(self) -> None:
+        service = BotService.__new__(BotService)
+        service.lock = threading.RLock()
+        service.bot_threads = [type("Thread", (), {"is_alive": lambda _self: True})()]
+        service.config_data = normalize_config({})
+
+        with patch("backend.services.bot_service.ADBClient") as client:
+            with self.assertRaisesRegex(ValueError, "dừng bot"):
+                service.test_tap(500, 500)
+
+        client.assert_not_called()
+
+    def test_adb_scan_discards_result_when_config_changes_concurrently(self) -> None:
+        service = BotService.__new__(BotService)
+        service.lock = threading.RLock()
+        service.config_data = normalize_config({})
+        service.config_revision = 4
+        service.bot_threads = []
+        service.adb_ready = True
+        service.status = "ADB đã kết nối."
+        service.log_queue = queue.Queue()
+
+        def scan_then_concurrent_save(scan_config: dict[str, object], _log: object) -> None:
+            scan_config["adb"]["path"] = "scanned-adb.exe"  # type: ignore[index]
+            scan_config["adb"]["device"] = "scanned-device"  # type: ignore[index]
+            with service.lock:
+                replacement = normalize_config({})
+                replacement["adb"]["path"] = "new-config-adb.exe"
+                replacement["adb"]["device"] = "new-config-device"
+                service.config_data = replacement
+                service.config_revision += 1
+
+        with patch("backend.services.bot_service.scan_adb_connection", side_effect=scan_then_concurrent_save):
+            with patch("backend.services.bot_service.save_config") as save:
+                with self.assertRaisesRegex(RuntimeError, "Cấu hình đã thay đổi"):
+                    service.scan_adb()
+
+        self.assertFalse(service.adb_ready)
+        self.assertEqual(service.config_data["adb"]["path"], "new-config-adb.exe")
+        self.assertEqual(service.config_data["adb"]["device"], "new-config-device")
+        self.assertEqual(service.status, "Cấu hình đã thay đổi. Quét ADB lại.")
+        save.assert_not_called()
+
+    def test_home_stats_preserve_builder_and_unknown_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stats_path = Path(directory) / "device.json"
+            stats_path.write_text(
+                json.dumps(
+                    {
+                        "current_session": {"builder_elixir": 131_000, "future_metric": 7},
+                        "total": {"builder_elixir": 131_000, "future_metric": 99},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            bot = FarmBot.__new__(FarmBot)
+            bot.stats_path = stats_path
+            bot.base_total_stats = bot._load_total_stats()
+            bot.stats = {key: 0 for key in bot.STAT_KEYS}
+            bot.session_started_at = "test-session"
+            bot.stats_callback = lambda _payload: None
+            bot.log = lambda _message: None
+
+            bot._publish_stats()
+
+            saved = json.loads(stats_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["total"]["builder_elixir"], 131_000)
+            self.assertEqual(saved["total"]["future_metric"], 99)
+            self.assertEqual(saved["current_session"]["future_metric"], 7)
+
+    def test_runtime_preflight_stops_when_active_slot_has_no_input(self) -> None:
+        bot = self._bare_bot()
+        bot.active_combo = "Broken"
+        bot.active_deploy = {
+            "sequence": [{"slot": "custom_new", "count": "all", "max_taps": 10}],
+        }
+        bot.config["slot_detection"] = {"enabled": True}
+        bot.slot_detector = type(
+            "Detector",
+            (),
+            {"has_usable_template": lambda _self, _kind: False},
+        )()
+
+        self.assertFalse(bot._slot_inputs_ready_or_stop())
+        self.assertTrue(bot.stop_event.is_set())
+        self.assertTrue(any("custom_new" in message for message in bot.log_messages))
+
+    def test_slot_detector_ignores_corrupt_template_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = normalize_config({})
+            config["slot_detection"]["template_dir"] = directory
+            config["slot_detection"]["kinds"] = ["custom"]
+            template_dir = Path(directory) / "custom"
+            template_dir.mkdir(parents=True)
+            (template_dir / "broken.png").write_bytes(b"not-an-image")
+            detector = SlotDetector(config)
+
+            self.assertFalse(detector.has_usable_template("custom"))
+            Image.new("RGB", (40, 40), "white").save(template_dir / "valid.png")
+            self.assertTrue(detector.has_usable_template("custom"))
+
+    def test_attack_threshold_zero_is_ignored_in_any_mode(self) -> None:
+        bot = self._bare_bot()
+        bot.config["farm"] = {
+            "gold_min": 0,
+            "elixir_min": 900_000,
+            "total_min": 1_700_000,
+            "threshold_mode": "any",
+        }
+
+        self.assertFalse(bot._should_attack({"gold": 1, "elixir": 1}))
+        self.assertTrue(bot._should_attack({"gold": 1, "elixir": 900_000}))
+
+    def test_attack_threshold_all_mode_only_checks_enabled_thresholds(self) -> None:
+        bot = self._bare_bot()
+        bot.config["farm"] = {
+            "gold_min": 500_000,
+            "elixir_min": 0,
+            "total_min": 0,
+            "threshold_mode": "all",
+        }
+
+        self.assertFalse(bot._should_attack({"gold": 499_999, "elixir": 2_000_000}))
+        self.assertTrue(bot._should_attack({"gold": 500_000, "elixir": 0}))
+
+    def test_backend_rejects_main_village_without_active_threshold(self) -> None:
+        service = BotService.__new__(BotService)
+        config = normalize_config(
+            {
+                "farm": {
+                    "village": "main",
+                    "gold_min": 0,
+                    "elixir_min": 0,
+                    "total_min": 0,
+                    "threshold_mode": "any",
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "ít nhất một ngưỡng"):
+            service._validate_config(config)
+
+        config["farm"]["threshold_mode"] = "total"
+        config["farm"]["gold_min"] = 900_000
+        with self.assertRaisesRegex(ValueError, r"Tổng vàng \+ dầu"):
+            service._validate_config(config)
+
+    def test_backend_rejects_unsafe_home_timing_and_damage_values(self) -> None:
+        service = BotService.__new__(BotService)
+        cases = (
+            (("surrender", "time_min_seconds"), -1, "Thời gian đầu hàng"),
+            (("surrender", "destruction_max_percent"), 101, "% phá hủy"),
+            (("surrender", "max_battle_seconds"), 176, "1 đến 175"),
+            (("farm", "gold_min"), -1, "Ngưỡng tài nguyên"),
+            (("timing", "loop_sleep"), 0, "loop_sleep"),
+        )
+
+        for path, value, message in cases:
+            with self.subTest(path=path, value=value):
+                config = normalize_config({})
+                config[path[0]][path[1]] = value
+                with self.assertRaisesRegex(ValueError, message):
+                    service._validate_config(config)
+
+    def test_backend_rejects_zero_builder_polling_and_required_delays(self) -> None:
+        service = BotService.__new__(BotService)
+        for key in ("screen_poll_seconds", "after_attack_seconds", "after_find_now_seconds"):
+            with self.subTest(key=key):
+                config = normalize_config({})
+                config["builder_base"]["timing"][key] = 0
+                with self.assertRaisesRegex(ValueError, key):
+                    service._validate_config(config)
+
+    def test_config_payload_uses_nested_validation_models(self) -> None:
+        with self.assertRaises(ValidationError):
+            ConfigPayload(config={"surrender": {"max_battle_seconds": 176}})
+        with self.assertRaises(ValidationError):
+            ConfigPayload(config={"builder_base": {"timing": {"screen_poll_seconds": 0}}})
+
     def test_initial_damage_outlier_requires_confirmation(self) -> None:
         bot = self._bare_bot()
         pending = {"value": -1, "reads": 0}
@@ -78,6 +306,136 @@ class SafetyRegressionTests(unittest.TestCase):
         best, pending = bot._filter_damage_reading(90, best, pending, 40, 3)
         self.assertEqual(best, 90)
         self.assertEqual(pending, {"value": -1, "reads": 0})
+
+    def test_inconsistent_damage_outliers_do_not_confirm_each_other(self) -> None:
+        bot = self._bare_bot()
+        pending = {"value": -1, "reads": 0}
+        best = -1
+
+        for raw_damage in (91, 50, 99):
+            best, pending = bot._filter_damage_reading(raw_damage, best, pending, 40, 3)
+
+        self.assertEqual(best, -1)
+        self.assertEqual(pending, {"value": 99, "reads": 1})
+
+    def test_stable_number_rejects_three_disagreeing_ocr_samples(self) -> None:
+        bot = self._bare_bot()
+
+        self.assertEqual(bot._stable_number([500_000, 800_000, 5_000_000]), -1)
+
+    def test_stable_number_accepts_two_close_samples(self) -> None:
+        bot = self._bare_bot()
+
+        self.assertEqual(
+            bot._stable_number(
+                [5_000_000, 5_001_000, -1],
+                tolerance_percent=0.05,
+                tolerance_absolute=1_000,
+            ),
+            5_001_000,
+        )
+
+    def test_result_loot_requires_consensus_and_rejects_values_over_cap(self) -> None:
+        bot = self._bare_bot()
+        bot.config.update(
+            {
+                "game": {"resource_stats": True},
+                "ocr": {
+                    "result_stats": {
+                        "read_attempts": 3,
+                        "read_delay_seconds": 0,
+                        "gold_max": 10_000_000,
+                        "elixir_max": 10_000_000,
+                    }
+                },
+            }
+        )
+        readings = {
+            b"first": {"gold": 98_000_000, "elixir": 700_000},
+            b"second": {"gold": 98_000_000, "elixir": 700_000},
+            b"third": {"gold": 98_000_000, "elixir": 701_000},
+        }
+        frames = iter((b"second", b"third"))
+        bot.adb = type("ADB", (), {"screencap_png": lambda _self: next(frames)})()
+        bot.vision = type(
+            "Vision",
+            (),
+            {
+                "available": True,
+                "read_result_loot": lambda _self, png: readings[png],
+            },
+        )()
+        bot._sleep = lambda _seconds: None
+        bot.stats = {"gold_seen": 10, "elixir_seen": 20}
+        published: list[bool] = []
+        bot._publish_stats = lambda: published.append(True)
+
+        bot._record_result_loot(b"first")
+
+        self.assertEqual(bot.stats["gold_seen"], 10)
+        self.assertEqual(bot.stats["elixir_seen"], 700_020)
+        self.assertEqual(published, [True])
+        self.assertTrue(any("vượt cap" in message for message in bot.log_messages))
+
+    def test_backend_rejects_unsafe_result_stat_limits(self) -> None:
+        service = BotService.__new__(BotService)
+        config = normalize_config({})
+        config["ocr"]["result_stats"]["read_attempts"] = 1
+
+        with self.assertRaisesRegex(ValueError, "số lần đọc"):
+            service._validate_config(config)
+
+    def test_home_wall_upgrade_cancels_mismatched_confirmation(self) -> None:
+        bot = self._bare_bot()
+        bot.config["wall_upgrade"] = {
+            "use_add10": False,
+            "add1_rounds": 1,
+            "dry_run": False,
+            "coords": {
+                "builder_icon": [10, 10],
+                "upgrade_more_button": [20, 20],
+                "add1_button": [30, 30],
+                "add10_button": [31, 31],
+                "remove_button": [40, 40],
+                "upgrade_gold_button": [50, 50],
+                "upgrade_elixir_button": [60, 60],
+                "confirm_okay_button": [70, 70],
+                "confirm_cancel_button": [80, 80],
+            },
+        }
+        bot.adb = _ScreenshotADB(b"confirmation")
+        bot.vision = _WallVision(
+            {"is_wall_upgrade": True, "currency": "gold", "cost": 5_000_000}
+        )
+        bot._sleep = lambda _seconds: None
+        bot._pause_gate = lambda: 0
+        bot._close_wall_popup = lambda: None
+        bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
+        bot._find_wall_row = lambda _settings: [100, 100]
+        bot._read_wall_cost_stable = lambda _settings, _button: 800_000
+
+        result = bot._upgrade_walls()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["reason"], "confirmation_mismatch")
+        self.assertIn((80, 80), bot.adb.taps)
+        self.assertNotIn((70, 70), bot.adb.taps)
+
+    def test_home_wall_confirmation_accepts_body_when_stylized_title_is_garbled(self) -> None:
+        vision = Vision.__new__(Vision)
+        vision.config = {"wall_upgrade": {}}
+        vision.image_from_png = lambda _png: object()
+        vision.read_text = lambda _image, _region, psm=7: (
+            "spiradeiwgas do you really want to upgrade the selected "
+            "walls for 8400000 elixir?"
+        )
+        vision.read_number = lambda _image, _region: self.fail("cost should come from modal text")
+
+        confirmation = vision.read_wall_confirmation(b"modal")
+
+        self.assertTrue(confirmation["is_wall_upgrade"])
+        self.assertEqual(confirmation["currency"], "elixir")
+        self.assertEqual(confirmation["cost"], 8_400_000)
 
     def test_debug_dump_can_capture_its_own_screenshot(self) -> None:
         bot = self._bare_bot()

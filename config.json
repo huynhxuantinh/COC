@@ -67,17 +67,17 @@
     "language": "en",
     "skip_restart_game": true,
     "auto_stop": false,
-    "auto_restart_after_seconds": 80,
+    "auto_restart_after_seconds": 80.0,
     "periodic_restart_game": false,
-    "periodic_restart_min_seconds": 3600,
-    "periodic_restart_max_seconds": 5400,
+    "periodic_restart_min_seconds": 3600.0,
+    "periodic_restart_max_seconds": 5400.0,
     "change_combo_on_start": false,
     "resource_stats": false,
     "restart_if_attack_missing": true,
     "attack_missing_retries": 3,
     "max_home_restart_failures": 3,
-    "restart_wait_seconds": 20,
-    "result_wait_seconds": 15,
+    "restart_wait_seconds": 20.0,
+    "result_wait_seconds": 15.0,
     "max_consecutive_cycle_errors": 8,
     "home_zoom_out_keyevents": 3,
     "ldplayer_index": 0
@@ -93,8 +93,8 @@
     "loot_gold_max": 3000000,
     "loot_elixir_max": 3000000,
     "max_next": 80,
-    "search_delay_seconds": 3,
-    "ocr_fail_restart_seconds": 30,
+    "search_delay_seconds": 3.0,
+    "ocr_fail_restart_seconds": 30.0,
     "max_ocr_restarts": 3
   },
   "surrender": {
@@ -110,8 +110,8 @@
     "max_battle_seconds": 175,
     "damage_jump_confirm_percent": 40,
     "damage_jump_max_pending_reads": 3,
-    "damage_stall_seconds": 10,
-    "damage_unknown_restart_seconds": 10,
+    "damage_stall_seconds": 10.0,
+    "damage_unknown_restart_seconds": 10.0,
     "max_damage_ocr_restarts": 3
   },
   "ocr": {
@@ -1029,9 +1029,9 @@
     "after_click": 0.25,
     "after_home_attack": 1.5,
     "after_find_match": 1.5,
-    "after_my_army_attack": 4,
-    "after_next": 3,
-    "after_return_home": 5,
+    "after_my_army_attack": 4.0,
+    "after_next": 3.0,
+    "after_return_home": 5.0,
     "loop_sleep": 0.2,
     "sleep_jitter_percent": 0.15,
     "sleep_jitter_min_seconds": 0.25
@@ -1072,11 +1072,25 @@
     "resource_read_attempts": 3,
     "cost_read_attempts": 3,
     "read_attempt_delay": 0.45,
+    "stable_read_tolerance_percent": 0.1,
+    "stable_read_tolerance_absolute": 1000,
     "search_region": [
       560,
       100,
       500,
       600
+    ],
+    "confirmation_region": [
+      420,
+      210,
+      760,
+      300
+    ],
+    "confirmation_cost_region": [
+      560,
+      365,
+      480,
+      105
     ],
     "list_scroll_swipe": [
       820,
@@ -1281,24 +1295,28 @@
       ],
       "stage2_zone": [
         [
-          1281,
-          400
+          1066,
+          578
         ],
         [
-          1337,
-          382
+          1113,
+          622
         ],
         [
-          1445,
-          471
+          1462,
+          340
         ],
         [
-          1151,
-          682
+          1244,
+          177
         ],
         [
-          1309,
-          494
+          1206,
+          207
+        ],
+        [
+          1365,
+          345
         ]
       ],
       "stage1_zoom_out_count": 3,
@@ -1354,6 +1372,7 @@
       "reserve_gold": 800000,
       "reserve_elixir": 200000,
       "add1_rounds": 3,
+      "dry_run_retry_attacks": 10,
       "retry_backoff_attacks": 1,
       "max_wall_search_scrolls": 8,
       "resource_read_attempts": 3,
@@ -1432,19 +1451,19 @@
     "timing": {
       "after_attack_seconds": 1.5,
       "after_find_now_seconds": 5.6,
-      "attack_cooldown_retry_seconds": 15,
-      "screen_poll_seconds": 1,
+      "attack_cooldown_retry_seconds": 15.0,
+      "screen_poll_seconds": 1.0,
       "state_confirmations": 2,
-      "prep_timeout_seconds": 70,
-      "battle_timeout_seconds": 190,
-      "stage_transition_timeout_seconds": 25,
+      "prep_timeout_seconds": 70.0,
+      "battle_timeout_seconds": 150.0,
+      "stage_transition_timeout_seconds": 25.0,
       "damage_unknown_restart_seconds": 20,
       "damage_stall_seconds": 20,
       "unknown_state_restart_seconds": 12,
       "result_transition_grace_seconds": 8,
       "frozen_frame_min_difference": 1.5,
       "max_watchdog_restarts": 3,
-      "result_wait_seconds": 12,
+      "result_wait_seconds": 12.0,
       "star_bonus_wait_seconds": 1.5,
       "restart_after_state_failures": 2,
       "max_state_failures": 5

@@ -17,7 +17,8 @@ def get_config() -> ConfigPayload:
 @router.put("", response_model=ConfigPayload)
 def update_config(payload: ConfigPayload) -> ConfigPayload:
     try:
-        return ConfigPayload(config=bot_service.save_config_data(payload.config))
+        config = payload.config.model_dump(mode="python", exclude_none=True)
+        return ConfigPayload(config=bot_service.save_config_data(config))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

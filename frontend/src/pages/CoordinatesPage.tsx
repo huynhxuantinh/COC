@@ -10,7 +10,7 @@ import { SegmentedControl } from "../components/SegmentedControl";
 import { useConfigEditor } from "../hooks/useConfigEditor";
 import { captureScreenshot, listReferenceImages, loadReferenceImage, saveCoordinatePoints, testTap } from "../services/coordinatesApi";
 import { apiErrorMessage } from "../services/http";
-import type { AppConfig, ReferenceImageItem, ScreenshotPayload } from "../services/types";
+import type { AppConfig, BotStatus, ReferenceImageItem, ScreenshotPayload } from "../services/types";
 
 type CoordinateMode = "troops" | "spells";
 
@@ -39,7 +39,7 @@ function parseInitialTarget(raw: string | null): { view: string; groupIndex: num
   return { view: "trenbenphai", groupIndex: 0 };
 }
 
-function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
+function CoordinateToolPage({ mode, status }: { mode: CoordinateMode; status: BotStatus | null }) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [searchParams] = useSearchParams();
   const initial = parseInitialTarget(searchParams.get("target"));
@@ -125,6 +125,7 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
 
   async function handleTestTap() {
     if (!selectedPoint) { setError("Chọn một điểm trước khi test tap."); return; }
+    if (status?.running) { setError("Hãy dừng bot trước khi Test Tap."); return; }
     await run("tap", async () => { await testTap(selectedPoint[0], selectedPoint[1]); setMessage(`Đã test tap ${selectedPoint[0]},${selectedPoint[1]}.`); });
   }
 
@@ -187,7 +188,7 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
               <Button variant="muted" disabled={Boolean(busy) || !points.length} onClick={() => { setPoints((current) => current.slice(0, -1)); setSelectedIndex(null); }}><Undo2 className="h-4 w-4" />Hoàn tác</Button>
               <Button variant="muted" disabled={Boolean(busy) || !localDirty} onClick={resetSaved}><RotateCcw className="h-4 w-4" />Tải lại</Button>
               <Button variant="danger" disabled={Boolean(busy) || !points.length} onClick={() => { setPoints([]); setSelectedIndex(null); }}><Trash2 className="h-4 w-4" />Xóa hết</Button>
-              <Button className="col-span-2" variant="ghost" loading={busy === "tap"} disabled={Boolean(busy) || !selectedPoint} onClick={handleTestTap}><Crosshair className="h-4 w-4" />Test điểm đang chọn</Button>
+              <Button className="col-span-2" variant="ghost" loading={busy === "tap"} disabled={Boolean(busy) || !selectedPoint || Boolean(status?.running)} onClick={handleTestTap}><Crosshair className="h-4 w-4" />Test điểm đang chọn</Button>
             </div>
             {points.length > 0 && points.length < 3 ? <Feedback tone="warning" className="mt-4">Cần thêm {3 - points.length} điểm để tạo polygon.</Feedback> : null}
           </Card>
@@ -205,5 +206,5 @@ function CoordinateToolPage({ mode }: { mode: CoordinateMode }) {
   );
 }
 
-export function TroopCoordinatesPage() { return <CoordinateToolPage mode="troops" />; }
-export function SpellCoordinatesPage() { return <CoordinateToolPage mode="spells" />; }
+export function TroopCoordinatesPage({ status }: { status: BotStatus | null }) { return <CoordinateToolPage mode="troops" status={status} />; }
+export function SpellCoordinatesPage({ status }: { status: BotStatus | null }) { return <CoordinateToolPage mode="spells" status={status} />; }

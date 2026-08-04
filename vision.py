@@ -144,7 +144,7 @@ class Vision:
         mask = np.where(digit_pixels, 0, 255).astype(np.uint8)
         return self.Image.fromarray(mask, mode="L")
 
-    def read_text(self, image, region: list[int]) -> str:
+    def read_text(self, image, region: list[int], psm: int = 7) -> str:
         if not self.available or image is None:
             return ""
 
@@ -153,7 +153,7 @@ class Vision:
         crop = crop.resize((w * 3, h * 3))
         gray = self.ImageOps.grayscale(crop)
         gray = gray.point(lambda p: 255 if p > 135 else 0)
-        config = "--psm 7"
+        config = f"--psm {int(psm)}"
         return self.pytesseract.image_to_string(gray, config=config).strip().lower()
 
     def has_home_attack_button(self, png: bytes) -> bool:
@@ -422,6 +422,34 @@ class Vision:
         image = self.image_from_png(png)
         cx, cy = int(button_center[0]), int(button_center[1])
         return self.read_number(image, [cx - 90, cy - 55, 180, 35])
+
+    def read_wall_confirmation(
+        self,
+        png: bytes,
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        image = self.image_from_png(png)
+        wall = settings or self.config.get("wall_upgrade", {})
+        region = wall.get("confirmation_region", [420, 210, 760, 300])
+        cost_region = wall.get("confirmation_cost_region", [560, 365, 480, 105])
+        text = self.read_text(image, region, psm=6)
+        compact = "".join(character for character in text if character.isalnum())
+        currency = "elixir" if "elixir" in compact else "gold" if "gold" in compact else ""
+        cost = -1
+        if currency:
+            match = re.search(rf"for(\d{{1,12}}){currency}", compact)
+            if match:
+                cost = int(match.group(1))
+        if cost < 0:
+            cost = self.read_number(image, cost_region)
+        is_wall_upgrade = "upgradewalls" in compact or (
+            "upgrade" in compact and "selectedwalls" in compact
+        )
+        return {
+            "is_wall_upgrade": is_wall_upgrade,
+            "currency": currency,
+            "cost": cost,
+        }
 
     def read_damage_percent(self, png: bytes) -> int:
         image = self.image_from_png(png)

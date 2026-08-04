@@ -113,6 +113,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ocr": {
         "enabled": True,
         "tesseract_path": "",
+        "result_stats": {
+            "read_attempts": 3,
+            "read_delay_seconds": 0.3,
+            "gold_max": 10000000,
+            "elixir_max": 10000000,
+        },
         "regions": {
             "loot_panel": [78, 123, 145, 86],
             "loot_gold": [78, 123, 145, 40],
@@ -330,7 +336,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "resource_read_attempts": 3,
         "cost_read_attempts": 3,
         "read_attempt_delay": 0.45,
+        "stable_read_tolerance_percent": 0.1,
+        "stable_read_tolerance_absolute": 1000,
         "search_region": [560, 100, 500, 600],
+        "confirmation_region": [420, 210, 760, 300],
+        "confirmation_cost_region": [560, 365, 480, 105],
         "list_scroll_swipe": [820, 650, 820, 220, 500],
         "coords": {
             "builder_icon": [755, 60],
@@ -434,6 +444,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "reserve_gold": 200000,
             "reserve_elixir": 200000,
             "add1_rounds": 1,
+            "dry_run_retry_attacks": 10,
             "retry_backoff_attacks": 10,
             "max_wall_search_scrolls": 9,
             "resource_read_attempts": 3,
@@ -464,7 +475,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "screen_poll_seconds": 1.0,
             "state_confirmations": 2,
             "prep_timeout_seconds": 70,
-            "battle_timeout_seconds": 190,
+            "battle_timeout_seconds": 150,
             "stage_transition_timeout_seconds": 25,
             "damage_unknown_restart_seconds": 20,
             "damage_stall_seconds": 20,
@@ -476,6 +487,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "star_bonus_wait_seconds": 1.5,
             "restart_after_state_failures": 2,
             "max_state_failures": 5,
+        },
+        "result_stats": {
+            "read_attempts": 3,
+            "read_delay_seconds": 0.3,
+            "damage_max": 200,
+            "gold_max": 2000000,
+            "trophies_max": 100,
         },
         "ocr_regions": {
             "top_state": [680, 0, 280, 110],
