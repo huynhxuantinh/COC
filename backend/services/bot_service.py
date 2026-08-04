@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from adb_client import ADBClient
+from adb_client import ADBClient, ADBError
 from bot_runtime import scan_adb_connection, start_farm_threads
 from config_manager import load_config, normalize_config, save_config
 from slot_detector import SlotDetector
@@ -148,14 +148,31 @@ class BotService:
             self.stats_by_device = {}
             self.bot_lifecycle = {}
             self.bot_lifecycle_errors = {}
-            self.bot_threads, self.active_devices = start_farm_threads(
-                self.config_data,
-                self._log,
-                self.stop_event,
-                self.pause_event,
-                self._stats_threadsafe,
-                self._lifecycle_threadsafe,
-            )
+            try:
+                threads, devices = start_farm_threads(
+                    self.config_data,
+                    self._log,
+                    self.stop_event,
+                    self.pause_event,
+                    self._stats_threadsafe,
+                    self._lifecycle_threadsafe,
+                )
+                if not threads or not devices:
+                    raise RuntimeError("Khong co device nao duoc khoi dong.")
+            except (ADBError, RuntimeError) as exc:
+                self.stop_event.set()
+                self.pause_event.clear()
+                self.bot_threads = []
+                self.active_devices = []
+                self.stats_by_device = {}
+                self.bot_lifecycle = {}
+                self.bot_lifecycle_errors = {}
+                self.adb_ready = False
+                self.status = "Kết nối ADB thất bại khi khởi động. Hãy quét lại."
+                self._log(f"[ADB][ERROR] Khởi động bot thất bại: {exc}")
+                raise RuntimeError(f"Không thể khởi động bot: {exc}. Hãy quét ADB lại.") from exc
+            self.bot_threads = threads
+            self.active_devices = devices
         return self.get_status()
 
     def _validate_start_requirements(self, config: dict[str, Any]) -> None:
@@ -464,7 +481,10 @@ class BotService:
         village = str(farm.get("village", "main"))
         if village not in {"main", "builder"}:
             raise ValueError("Chế độ phải là main hoặc builder.")
-        if int(game.get("periodic_restart_min_seconds", 0)) > int(game.get("periodic_restart_max_seconds", 0)):
+        periodic_min = float(game.get("periodic_restart_min_seconds", 0))
+        periodic_max = float(game.get("periodic_restart_max_seconds", 0))
+        auto_stop_seconds = float(game.get("auto_restart_after_seconds", 0))
+        if periodic_min > periodic_max:
             raise ValueError("Thời gian restart tối thiểu phải <= tối đa.")
         for key in (
             "auto_restart_after_seconds",
@@ -473,6 +493,13 @@ class BotService:
         ):
             if float(game.get(key, 0)) < 0:
                 raise ValueError(f"Game: {key} phải >= 0.")
+        if bool(game.get("periodic_restart_game", False)) and (periodic_min <= 0 or periodic_max <= 0):
+            raise ValueError("Khi bật restart định kỳ, thời gian từ/đến phải > 0.")
+        if bool(game.get("auto_stop", False)) and auto_stop_seconds <= 0:
+            raise ValueError("Khi bật tự động dừng, thời gian dừng sau phải > 0.")
+        for key in ("max_consecutive_cycle_errors", "attack_missing_retries", "max_home_restart_failures"):
+            if int(game.get(key, 0)) < 1:
+                raise ValueError(f"Game: {key} phải >= 1.")
         for key in ("restart_wait_seconds", "result_wait_seconds"):
             if float(game.get(key, 0)) <= 0:
                 raise ValueError(f"Game: {key} phải > 0.")
@@ -675,6 +702,10 @@ class BotService:
                     raise ValueError("Nâng tường Làng đêm: số lần cuộn phải >= 0.")
                 if float(builder_wall.get("read_attempt_delay", 0)) < 0:
                     raise ValueError("Nâng tường Làng đêm: delay đọc phải >= 0.")
+                if float(builder_wall.get("stable_read_tolerance_percent", 0)) < 0:
+                    raise ValueError("Nâng tường Làng đêm: tolerance phần trăm phải >= 0.")
+                if int(builder_wall.get("stable_read_tolerance_absolute", 0)) < 0:
+                    raise ValueError("Nâng tường Làng đêm: tolerance tuyệt đối phải >= 0.")
         self._validate_coords(config)
         self._validate_deploys(config)
 

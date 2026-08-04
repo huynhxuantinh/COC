@@ -81,6 +81,9 @@ def start_farm_threads(
     threads: list[threading.Thread] = []
     village = str(config.get("farm", {}).get("village", "main"))
     bot_type = BuilderBaseBot if village == "builder" else FarmBot
+
+    # Build every bot before starting any thread. If ADB setup fails, startup
+    # remains atomic and the service has no partially running device to clean up.
     for device in devices:
         bot_config = copy.deepcopy(config)
         bot_config.setdefault("adb", {})["device"] = device
@@ -97,5 +100,15 @@ def start_farm_threads(
         )
         thread = threading.Thread(target=bot.run, daemon=True, name=f"{bot_type.__name__}-{device}")
         threads.append(thread)
-        thread.start()
+
+    started: list[threading.Thread] = []
+    try:
+        for thread in threads:
+            thread.start()
+            started.append(thread)
+    except RuntimeError as exc:
+        stop_event.set()
+        for thread in started:
+            thread.join(timeout=2)
+        raise RuntimeError(f"Khong khoi dong duoc bot thread: {exc}") from exc
     return threads, devices

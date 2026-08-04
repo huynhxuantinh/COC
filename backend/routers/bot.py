@@ -28,6 +28,8 @@ def start_bot() -> StatusPayload:
         return StatusPayload(**bot_service.start_bot())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/pause-toggle", response_model=StatusPayload)

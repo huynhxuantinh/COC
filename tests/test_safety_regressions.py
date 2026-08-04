@@ -10,10 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from adb_client import ADBClient, ADBError
 from backend.models.schemas import ConfigPayload
+from backend.routers import bot as bot_router
 from backend.services.bot_service import BotService
 from bot import FarmBot
 from config_manager import normalize_config
@@ -25,7 +27,7 @@ class _TapRecorder:
     def __init__(self) -> None:
         self.taps: list[tuple[int, int]] = []
 
-    def tap(self, x: int, y: int) -> None:
+    def tap(self, x: int, y: int, jitter: int = 4) -> None:
         self.taps.append((x, y))
 
 
@@ -85,6 +87,37 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertFalse(bot._tap_slot("custom_troop"))
         self.assertEqual(bot.adb.taps, [])
         self.assertTrue(any("custom_troop" in message for message in bot.log_messages))
+
+    def test_home_pause_blocks_coordinate_tap_and_freezes_active_time(self) -> None:
+        bot = self._bare_bot()
+        bot.pause_event.set()
+        bot.auto_stop_at = 0.0
+        bot.next_periodic_restart_at = 0.0
+        bot._paused_seconds_total = 0.0
+        bot.config["coords"]["find_match"] = [25, 50]
+        bot._optimized_action_pause = lambda: None
+        bot._after_click_seconds = lambda: 0.0
+        bot._sleep = lambda _seconds: None
+        taps: list[tuple[int, int, int]] = []
+        bot.adb = type(
+            "ADB",
+            (),
+            {"tap": lambda _self, x, y, jitter=4: taps.append((x, y, jitter))},
+        )()
+
+        def resume_after_wait(_seconds: float) -> None:
+            self.assertEqual(taps, [])
+            bot.pause_event.clear()
+
+        with patch("bot.time.time", side_effect=[100.0, 105.0]), patch(
+            "bot.time.sleep", side_effect=resume_after_wait
+        ):
+            bot._tap_coord("find_match")
+
+        self.assertEqual(taps, [(25, 50, 4)])
+        self.assertEqual(bot._paused_seconds_total, 5.0)
+        with patch("bot.time.time", return_value=110.0):
+            self.assertEqual(bot._active_time(), 105.0)
 
     def test_backend_rejects_active_slot_without_template_or_fallback(self) -> None:
         service = BotService.__new__(BotService)
@@ -158,6 +191,39 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertEqual(service.config_data["adb"]["device"], "new-config-device")
         self.assertEqual(service.status, "Cấu hình đã thay đổi. Quét ADB lại.")
         save.assert_not_called()
+
+    def test_start_bot_rolls_back_when_adb_disappears_after_scan(self) -> None:
+        service = BotService()
+        service.config_data = normalize_config({})
+        service.adb_ready = True
+        service.status = "ADB đã kết nối."
+
+        with patch("backend.services.bot_service.save_config"), patch(
+            "backend.services.bot_service.start_farm_threads",
+            side_effect=ADBError("Khong tim thay adb.exe"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "quét ADB lại"):
+                service.start_bot()
+
+        self.assertFalse(service.adb_ready)
+        self.assertFalse(service.pause_event.is_set())
+        self.assertTrue(service.stop_event.is_set())
+        self.assertEqual(service.bot_threads, [])
+        self.assertEqual(service.active_devices, [])
+        self.assertEqual(service.stats_by_device, {})
+        self.assertEqual(service.status, "Kết nối ADB thất bại khi khởi động. Hãy quét lại.")
+
+    def test_start_route_returns_503_for_runtime_start_failure(self) -> None:
+        with patch.object(
+            bot_router.bot_service,
+            "start_bot",
+            side_effect=RuntimeError("Không thể khởi động bot"),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                bot_router.start_bot()
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertIn("Không thể khởi động bot", raised.exception.detail)
 
     def test_home_stats_preserve_builder_and_unknown_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -294,6 +360,40 @@ class SafetyRegressionTests(unittest.TestCase):
             ConfigPayload(config={"surrender": {"max_battle_seconds": 176}})
         with self.assertRaises(ValidationError):
             ConfigPayload(config={"builder_base": {"timing": {"screen_poll_seconds": 0}}})
+
+    def test_config_payload_rejects_invalid_game_recovery_counters(self) -> None:
+        for key in ("max_consecutive_cycle_errors", "attack_missing_retries", "max_home_restart_failures"):
+            with self.subTest(key=key):
+                with self.assertRaises(ValidationError):
+                    ConfigPayload(config={"game": {key: -1}})
+
+    def test_backend_requires_positive_enabled_schedule_times(self) -> None:
+        service = BotService.__new__(BotService)
+
+        periodic = normalize_config({})
+        periodic["game"].update(
+            {
+                "periodic_restart_game": True,
+                "periodic_restart_min_seconds": 0,
+                "periodic_restart_max_seconds": 0,
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "restart định kỳ"):
+            service._validate_config(periodic)
+
+        auto_stop = normalize_config({})
+        auto_stop["game"].update({"auto_stop": True, "auto_restart_after_seconds": 0})
+        with self.assertRaisesRegex(ValueError, "tự động dừng"):
+            service._validate_config(auto_stop)
+
+    def test_backend_requires_positive_game_recovery_counters(self) -> None:
+        service = BotService.__new__(BotService)
+        for key in ("max_consecutive_cycle_errors", "attack_missing_retries", "max_home_restart_failures"):
+            with self.subTest(key=key):
+                config = normalize_config({})
+                config["game"][key] = -1
+                with self.assertRaisesRegex(ValueError, key):
+                    service._validate_config(config)
 
     def test_initial_damage_outlier_requires_confirmation(self) -> None:
         bot = self._bare_bot()

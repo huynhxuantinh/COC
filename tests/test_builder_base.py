@@ -279,6 +279,42 @@ class BuilderBaseTests(unittest.TestCase):
         )
         self.assertIsNone(payment)
 
+    def test_builder_stable_number_rejects_disparate_or_single_sample(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+
+        self.assertEqual(bot._builder_stable_number([8_000_000, 10_000_000, 12_000_000]), -1)
+        self.assertEqual(bot._builder_stable_number([-1, 10_000_000, -1]), -1)
+        self.assertEqual(bot._builder_stable_number([10_000_000, 10_000_000, 12_000_000]), 10_000_000)
+
+    def test_builder_resource_read_rejects_samples_without_consensus(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.stop_event = threading.Event()
+        bot._pause_gate = lambda: None
+        bot._sleep = lambda _seconds: None
+        bot._screencap_png = lambda: b"frame"
+        samples = iter(
+            [
+                {"gold": 8_000_000, "elixir": 8_000_000},
+                {"gold": 10_000_000, "elixir": 10_000_000},
+                {"gold": 12_000_000, "elixir": 12_000_000},
+            ]
+        )
+        bot.vision = type("Vision", (), {"read_home_resources": lambda _self, _png: next(samples)})()
+        logs: list[str] = []
+        bot.log = logs.append
+
+        resources = bot._read_builder_resources_stable(
+            {
+                "resource_read_attempts": 3,
+                "read_attempt_delay": 0,
+                "gold_capacity": 20_000_000,
+                "elixir_capacity": 20_000_000,
+            }
+        )
+
+        self.assertIsNone(resources)
+        self.assertTrue(any("Không đọc ổn định" in message for message in logs))
+
     def test_builder_wall_due_uses_percent_or_attack_interval(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)
         bot.builder = {
@@ -647,28 +683,29 @@ class BuilderBaseTests(unittest.TestCase):
         bot._publish_stats = lambda: published.append(bot.stats["builder_elixir"])
         taps: list[tuple[int, int]] = []
 
-        class FakeADB:
-            def screencap_png(self) -> bytes:
-                return b"after"
-
-            def tap(self, x: int, y: int, jitter: int = 0) -> None:
-                taps.append((x, y))
-
         class FakeVision:
-            def is_elixir_cart_popup(self, _png: bytes) -> bool:
-                return True
+            def is_elixir_cart_popup(self, png: bytes) -> bool:
+                return png in {b"popup", b"after"}
+
+            def find_elixir_cart(self, _png: bytes) -> tuple[int, int, float]:
+                return (900, 500, 0.99)
 
             def read_elixir_cart_reward(self, png: bytes) -> int:
-                return 131000 if png == b"before" else -1
+                return 131000 if png == b"popup" else -1
 
-        bot.adb = FakeADB()
+            def read_home_resources(self, _png: bytes) -> dict[str, int]:
+                return {"gold": 0, "elixir": 1000000}
+
+        bot._tap = lambda point, jitter=0: taps.append(tuple(point))
+        screenshots = iter((b"popup", b"after"))
+        bot._screencap_png = lambda: next(screenshots)
         bot.vision = FakeVision()
-        self.assertFalse(bot._collect_elixir_cart(b"before"))
+        self.assertFalse(bot._collect_elixir_cart(b"home"))
 
         self.assertEqual(bot.stats["builder_elixir"], 0)
         self.assertEqual(published, [])
         self.assertTrue(bot._elixir_cart_pending)
-        self.assertEqual(taps, [(1175, 760), (1342, 88)])
+        self.assertEqual(taps, [(900, 500), (1175, 760), (1342, 88)])
 
     def test_elixir_cart_credits_when_remaining_reward_is_zero(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)
@@ -688,20 +725,68 @@ class BuilderBaseTests(unittest.TestCase):
         published: list[int] = []
         bot._publish_stats = lambda: published.append(bot.stats["builder_elixir"])
         bot._tap = lambda _point, jitter=0: None
-        bot._screencap_png = lambda: b"after"
+        screenshots = iter((b"popup", b"after"))
+        bot._screencap_png = lambda: next(screenshots)
         bot.vision = type(
             "Vision",
             (),
             {
-                "is_elixir_cart_popup": lambda _self, _png: True,
-                "read_elixir_cart_reward": lambda _self, png: 131000 if png == b"before" else 0,
+                "is_elixir_cart_popup": lambda _self, png: png in {b"popup", b"after"},
+                "find_elixir_cart": lambda _self, _png: (900, 500, 0.99),
+                "read_elixir_cart_reward": lambda _self, png: 131000 if png == b"popup" else 0,
+                "read_home_resources": lambda _self, _png: {"gold": 0, "elixir": 1000000},
             },
         )()
 
-        self.assertTrue(bot._collect_elixir_cart(b"before"))
+        self.assertTrue(bot._collect_elixir_cart(b"home"))
         self.assertEqual(bot.stats["builder_elixir"], 131000)
         self.assertEqual(published, [131000])
         self.assertFalse(bot._elixir_cart_pending)
+
+    def test_elixir_cart_open_at_start_is_reopened_and_verified_from_home_resources(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "elixir_cart": {
+                "enabled": True,
+                "collect_button": [1175, 760],
+                "close_button": [1342, 88],
+                "open_wait_seconds": 0,
+                "collect_wait_seconds": 0,
+                "icon_search_attempts": 1,
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.stats = {"builder_elixir": 0}
+        bot._elixir_cart_pending = True
+        bot.log = lambda _message: None
+        bot._sleep = lambda _seconds: None
+        published: list[int] = []
+        bot._publish_stats = lambda: published.append(bot.stats["builder_elixir"])
+        taps: list[tuple[int, int]] = []
+        bot._tap = lambda point, jitter=0: taps.append(tuple(point))
+        screenshots = iter((b"home", b"popup", b"after"))
+        bot._screencap_png = lambda: next(screenshots)
+
+        class FakeVision:
+            def is_elixir_cart_popup(self, png: bytes) -> bool:
+                return png in {b"initial-popup", b"popup"}
+
+            def find_elixir_cart(self, _png: bytes) -> tuple[int, int, float]:
+                return (900, 500, 0.99)
+
+            def read_elixir_cart_reward(self, _png: bytes) -> int:
+                return 131000
+
+            def read_home_resources(self, png: bytes) -> dict[str, int]:
+                return {"gold": 0, "elixir": 1000000 if png == b"home" else 1131000}
+
+        bot.vision = FakeVision()
+
+        self.assertTrue(bot._collect_elixir_cart(b"initial-popup"))
+        self.assertEqual(bot.stats["builder_elixir"], 131000)
+        self.assertEqual(published, [131000])
+        self.assertFalse(bot._elixir_cart_pending)
+        self.assertEqual(taps, [(1342, 88), (900, 500), (1175, 760)])
 
     def test_elixir_cart_credits_closed_popup_only_after_home_resource_increases(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)

@@ -54,7 +54,7 @@ export function SettingsPage() {
             <div className="space-y-3">
               <Toggle label="Không thấy Attack thì mở lại game" checked={Boolean(game.restart_if_attack_missing)} onChange={(value) => updatePath(["game", "restart_if_attack_missing"], value)} />
               <Toggle label="Tự động dừng" checked={Boolean(game.auto_stop)} onChange={(value) => updatePath(["game", "auto_stop"], value)} />
-              {game.auto_stop ? <TextInput type="number" min={0} suffix="giây" label="Dừng sau" value={String(game.auto_restart_after_seconds)} onChange={(event) => updatePath(["game", "auto_restart_after_seconds"], numberValue(event.target.value))} /> : null}
+              {game.auto_stop ? <TextInput type="number" min={1} suffix="giây" label="Dừng sau" value={String(game.auto_restart_after_seconds)} onChange={(event) => updatePath(["game", "auto_restart_after_seconds"], numberValue(event.target.value))} /> : null}
               <Toggle label="Bỏ qua restart game khi khởi động" checked={Boolean(game.skip_restart_game)} onChange={(value) => updatePath(["game", "skip_restart_game"], value)} />
             </div>
             <details className="mt-5 rounded-lg border border-white/10 bg-black/20 p-4">
@@ -75,8 +75,8 @@ export function SettingsPage() {
               <Toggle label="Restart game định kỳ" checked={Boolean(game.periodic_restart_game)} onChange={(value) => updatePath(["game", "periodic_restart_game"], value)} />
               {game.periodic_restart_game ? (
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <TextInput type="number" min={0} suffix="giây" label="Restart từ" value={String(game.periodic_restart_min_seconds)} onChange={(event) => updatePath(["game", "periodic_restart_min_seconds"], numberValue(event.target.value))} />
-                  <TextInput type="number" min={0} suffix="giây" label="Restart đến" value={String(game.periodic_restart_max_seconds)} onChange={(event) => updatePath(["game", "periodic_restart_max_seconds"], numberValue(event.target.value))} />
+                  <TextInput type="number" min={1} suffix="giây" label="Restart từ" value={String(game.periodic_restart_min_seconds)} onChange={(event) => updatePath(["game", "periodic_restart_min_seconds"], numberValue(event.target.value))} />
+                  <TextInput type="number" min={1} suffix="giây" label="Restart đến" value={String(game.periodic_restart_max_seconds)} onChange={(event) => updatePath(["game", "periodic_restart_max_seconds"], numberValue(event.target.value))} />
                 </div>
               ) : null}
             </div>

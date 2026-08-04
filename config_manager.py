@@ -450,6 +450,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "resource_read_attempts": 3,
             "cost_read_attempts": 3,
             "read_attempt_delay": 0.45,
+            "stable_read_tolerance_percent": 0.1,
+            "stable_read_tolerance_absolute": 1000,
             "search_region": [720, 120, 420, 580],
             "list_scroll_swipe": [930, 650, 930, 250, 500],
             "resource_regions": {

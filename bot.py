@@ -57,6 +57,7 @@ class FarmBot:
         self.search_ocr_restarts = 0
         self.damage_ocr_restarts = 0
         self.next_periodic_restart_at = 0.0
+        self._paused_seconds_total = 0.0
 
     def run(self) -> None:
         try:
@@ -70,7 +71,7 @@ class FarmBot:
             self.log(f"[COMBO] Đang dùng: {self.active_combo}.")
             if not self.config["game"]["skip_restart_game"]:
                 self.log("[GAME] Start Clash of Clans.")
-                self.adb.start_app(self.config["adb"]["package"])
+                self._start_app(self.config["adb"]["package"])
                 self._sleep(10)
 
             self._publish_stats()
@@ -165,7 +166,7 @@ class FarmBot:
     def _ensure_main_village(self) -> bool:
         if not hasattr(self, "village_vision"):
             return True
-        png = self.adb.screencap_png()
+        png = self._screencap_png()
         state = self.village_vision.classify(png)
         if state == BuilderScreen.MAIN_HOME:
             return True
@@ -174,7 +175,7 @@ class FarmBot:
         if state == BuilderScreen.RESULT:
             self.log("[HOME] Đang ở kết quả Làng đêm. Về nhà trước.")
             point = self.config.get("builder_base", {}).get("coords", {}).get("return_home", [800, 760])
-            self.adb.tap(int(point[0]), int(point[1]), jitter=0)
+            self._tap(point, jitter=0)
             self._sleep(float(self.config.get("builder_base", {}).get("timing", {}).get("result_wait_seconds", 12)))
             return False
         if state in {BuilderScreen.STAGE_PREP, BuilderScreen.BATTLE}:
@@ -189,17 +190,17 @@ class FarmBot:
             if self.stop_event.is_set():
                 return False
             if not self._ldplayer_zoom_out():
-                self.adb.shell("input", "keyevent", "KEYCODE_ZOOM_OUT", timeout=5)
+                self._shell("input", "keyevent", "KEYCODE_ZOOM_OUT", timeout=5)
             self._sleep(0.25)
         for swipe in entry.get("return_camera_swipes", [[950, 350, 650, 650, 500]]):
-            self.adb.swipe(*[int(value) for value in swipe])
+            self._swipe(swipe)
             self._sleep(0.8)
 
         attempts = max(1, int(entry.get("boat_search_attempts", 3)))
         last_png = png
         moved_from_stage2 = False
         for attempt in range(1, attempts + 1):
-            last_png = self.adb.screencap_png()
+            last_png = self._screencap_png()
             if self.village_vision.classify(last_png) == BuilderScreen.MAIN_HOME:
                 return True
             boat = self.village_vision.find_return_boat(last_png)
@@ -210,10 +211,10 @@ class FarmBot:
                         "stage2_to_stage1_swipes",
                         [[1200, 700, 400, 200, 700]] * 3,
                     ):
-                        self.adb.swipe(*[int(value) for value in swipe])
+                        self._swipe(swipe)
                         self._sleep(0.6)
                     for swipe in entry.get("return_camera_swipes", []):
-                        self.adb.swipe(*[int(value) for value in swipe])
+                        self._swipe(swipe)
                         self._sleep(0.6)
                     moved_from_stage2 = True
                     continue
@@ -223,16 +224,16 @@ class FarmBot:
 
             x, y, score = boat
             self.log(f"[HOME] Bấm thuyền về Làng chính tại {x},{y} (score={score:.2f}).")
-            self.adb.tap(x, y, jitter=0)
+            self._tap([x, y], jitter=0)
             self._sleep(2)
-            focused_png = self.adb.screencap_png()
+            focused_png = self._screencap_png()
             if self.village_vision.classify(focused_png) == BuilderScreen.MAIN_HOME:
                 return True
             focused_boat = self.village_vision.find_return_boat(focused_png)
             if focused_boat is not None:
-                self.adb.tap(focused_boat[0], focused_boat[1], jitter=0)
+                self._tap([focused_boat[0], focused_boat[1]], jitter=0)
             self._sleep(float(entry.get("travel_wait_seconds", 8)))
-            arrived_png = self.adb.screencap_png()
+            arrived_png = self._screencap_png()
             if self.village_vision.classify(arrived_png) == BuilderScreen.MAIN_HOME:
                 self.log("[HOME] Đã về Làng chính.")
                 return True
@@ -273,7 +274,7 @@ class FarmBot:
             if self.stop_event.is_set():
                 return
             if not self._ldplayer_zoom_out():
-                self.adb.shell("input", "keyevent", "KEYCODE_ZOOM_OUT", timeout=5)
+                self._shell("input", "keyevent", "KEYCODE_ZOOM_OUT", timeout=5)
             self._sleep(0.2)
 
     def _ldplayer_zoom_out(self) -> bool:
@@ -355,7 +356,7 @@ class FarmBot:
             self._pause_gate()
             if self.stop_event.is_set():
                 return False
-            png = self.adb.screencap_png()
+            png = self._screencap_png()
             last_png = png
             if self.vision.has_home_attack_button(png):
                 if attempt > 1:
@@ -371,7 +372,7 @@ class FarmBot:
         self.log("[HOME] Không thấy nút Attack. Restart game...")
         self._restart_app_interruptible(package, wait_seconds)
 
-        png = self.adb.screencap_png()
+        png = self._screencap_png()
         if self.vision.has_home_attack_button(png):
             self.log("[HOME] Restart xong, da thay nut Attack.")
             self.home_restart_failures = 0
@@ -419,8 +420,8 @@ class FarmBot:
                     self.log("[SEARCH] Da vao battle screen. Continue deploy.")
                     return True
                 if ocr_fail_started_at is None:
-                    ocr_fail_started_at = time.time()
-                fail_seconds = int(time.time() - ocr_fail_started_at)
+                    ocr_fail_started_at = self._active_time()
+                fail_seconds = int(self._active_time() - ocr_fail_started_at)
                 self.log(f"[SEARCH] OCR could not read loot ({fail_seconds}s), wait.")
                 if fail_seconds >= ocr_fail_restart_seconds:
                     self._dump_debug_png("loot_ocr_fail_restart", png)
@@ -450,11 +451,11 @@ class FarmBot:
         self._restart_app_interruptible(package, wait_seconds)
 
     def _restart_app_interruptible(self, package: str, wait_seconds: float) -> None:
-        self.adb.force_stop_app(package)
+        self._force_stop_app(package)
         self._sleep(1)
         if self.stop_event.is_set():
             return
-        self.adb.start_app(package)
+        self._start_app(package)
         self._sleep(wait_seconds)
 
     def _attack_base(self) -> dict[str, Any]:
@@ -465,7 +466,7 @@ class FarmBot:
             return {"state": "stopped", "attacked": False}
         self._scan_runtime_slots()
 
-        attack_start = time.time()
+        attack_start = self._active_time()
         deploy_result = self._deploy_troops()
         if deploy_result.get("reason") == "stopped":
             return {"state": "stopped", "attacked": bool(deploy_result.get("deployed", False))}
@@ -488,7 +489,7 @@ class FarmBot:
             return {"state": "result", "attacked": False}
         self.stats["attacks"] += 1
         self._publish_stats()
-        deploy_finished = time.time()
+        deploy_finished = self._active_time()
         self._cast_spells(deploy_finished)
         if self.stop_event.is_set():
             return {"state": "stopped", "attacked": True}
@@ -507,7 +508,7 @@ class FarmBot:
                 self._pause_gate()
                 if self.stop_event.is_set():
                     return
-                self.adb.shell("input", "keyevent", "169", timeout=5)
+                self._shell("input", "keyevent", "169", timeout=5)
                 self._sleep(0.2)
 
         swipes = self._camera_swipes_for_current_view()
@@ -517,14 +518,14 @@ class FarmBot:
             self._pause_gate()
             if self.stop_event.is_set():
                 return
-            self.adb.swipe(*swipe)
+            self._swipe(swipe)
             self._sleep(0.35)
 
         for swipe in deploy.get("pre_attack_swipes", []):
             self._pause_gate()
             if self.stop_event.is_set():
                 return
-            self.adb.swipe(*swipe)
+            self._swipe(swipe)
             self._sleep(0.35)
 
         self._sleep(float(deploy.get("camera_settle_seconds", 0.5)))
@@ -549,7 +550,7 @@ class FarmBot:
             return
 
         try:
-            png = self.adb.screencap_png()
+            png = self._screencap_png()
         except ADBError as exc:
             self.log(f"[SLOT] Không chụp được thanh quân để nhận diện: {exc}")
             return
@@ -730,7 +731,7 @@ class FarmBot:
                     self.log(f"[ATTACK] Khong con vi tri slot {slot}, stop deploy.")
                     break
                 x, y = points[i % len(points)]
-                self.adb.tap(x, y)
+                self._tap([x, y])
                 self._consume_runtime_slot(slot)
                 deployed_any = True
                 deployed_for_step += 1
@@ -771,7 +772,7 @@ class FarmBot:
 
         if fallback_slots and deploy.get("scan_slot_counts", True):
             try:
-                png = self.adb.screencap_png()
+                png = self._screencap_png()
             except ADBError as exc:
                 self.log(f"[ATTACK] Slot count scan failed: {exc}")
                 png = None
@@ -823,9 +824,8 @@ class FarmBot:
             if not slots:
                 continue
             delay = float(group.get("delay_after_deploy", 0))
-            while time.time() - deploy_finished < delay and not self.stop_event.is_set():
-                paused_seconds = self._pause_gate()
-                deploy_finished += paused_seconds
+            while self._active_time() - deploy_finished < delay and not self.stop_event.is_set():
+                self._pause_gate()
                 self._sleep(0.1)
 
             max_casts = self._tap_limit(group.get("max_casts", 0), 0)
@@ -854,7 +854,7 @@ class FarmBot:
                     self.log(f"[SPELL] Khong co vi tri slot {slot}, dung group.")
                     break
                 self._spell_random_delay(slot)
-                self.adb.tap(int(x), int(y))
+                self._tap([int(x), int(y)])
                 self._consume_runtime_slot(slot)
                 self._optimized_action_pause()
                 self._sleep(delay_between)
@@ -883,9 +883,8 @@ class FarmBot:
             scheduled.append((delay, slot, label))
 
         for delay, slot, label in sorted(scheduled):
-            while time.time() - deploy_finished < delay and not self.stop_event.is_set():
-                paused_seconds = self._pause_gate()
-                deploy_finished += paused_seconds
+            while self._active_time() - deploy_finished < delay and not self.stop_event.is_set():
+                self._pause_gate()
                 self._sleep(0.1)
             if self.stop_event.is_set():
                 return
@@ -900,7 +899,7 @@ class FarmBot:
                         if self.stop_event.is_set():
                             return
                         x, y = item.get("center", [0, 0])
-                        self.adb.tap(int(x), int(y))
+                        self._tap([int(x), int(y)])
                         self._optimized_action_pause()
                         self._sleep(0.18)
                     continue
@@ -920,7 +919,7 @@ class FarmBot:
         max_seconds = min(int(surrender["max_battle_seconds"]), 175)
         best_damage = -1
         last_damage = -1
-        last_damage_changed_at = time.time()
+        last_damage_changed_at = self._active_time()
         pending_damage: dict[str, int] = {"value": -1, "reads": 0}
         max_jump = int(surrender.get("damage_jump_confirm_percent", 40))
         max_pending_reads = int(surrender.get("damage_jump_max_pending_reads", 3))
@@ -934,21 +933,17 @@ class FarmBot:
 
         self.log(f"[BATTLE] Monitor. time={target_time}s, damage={target_damage}%.")
         while not self.stop_event.is_set():
-            paused_seconds = self._pause_gate()
-            if paused_seconds > 0:
-                attack_start += paused_seconds
-                last_damage_changed_at += paused_seconds
-                if damage_unknown_started_at is not None:
-                    damage_unknown_started_at += paused_seconds
+            self._pause_gate()
             if self.stop_event.is_set():
                 return "stopped"
-            elapsed = int(time.time() - attack_start)
-            png = self.adb.screencap_png()
+            now = self._active_time()
+            elapsed = int(now - attack_start)
+            png = self._screencap_png()
             raw_damage = self.vision.read_damage_percent(png)
             if raw_damage < 0:
                 if damage_unknown_started_at is None:
-                    damage_unknown_started_at = time.time()
-                unknown_seconds = int(time.time() - damage_unknown_started_at)
+                    damage_unknown_started_at = now
+                unknown_seconds = int(now - damage_unknown_started_at)
                 if damage_unknown_restart_seconds > 0 and unknown_seconds >= damage_unknown_restart_seconds:
                     self._dump_debug_png("damage_ocr_unknown_restart", png)
                     self.log(
@@ -979,7 +974,7 @@ class FarmBot:
             loot = self.vision.read_loot(png) if read_battle_loot and self.vision.available else {}
             if damage >= 0 and damage != last_damage:
                 last_damage = damage
-                last_damage_changed_at = time.time()
+                last_damage_changed_at = now
 
             surrender_reason = self._surrender_reason(
                 elapsed,
@@ -998,7 +993,7 @@ class FarmBot:
             if (
                 damage_stall_seconds > 0
                 and damage >= 0
-                and time.time() - last_damage_changed_at >= damage_stall_seconds
+                and now - last_damage_changed_at >= damage_stall_seconds
             ):
                 self.log(f"[BATTLE] Damage đứng ở {damage}% quá {damage_stall_seconds}s. End battle.")
                 self._tap_coord("end_battle")
@@ -1060,13 +1055,13 @@ class FarmBot:
     def _wait_return_home(self) -> bool:
         self.log("[RESULT] Wait result screen.")
         wait_seconds = max(1.0, float(self.config.get("game", {}).get("result_wait_seconds", 15)))
-        deadline = time.time() + wait_seconds
+        deadline = self._active_time() + wait_seconds
         result_png = b""
-        while time.time() < deadline and not self.stop_event.is_set():
-            deadline += self._pause_gate()
+        while self._active_time() < deadline and not self.stop_event.is_set():
+            self._pause_gate()
             if self.stop_event.is_set():
                 return False
-            result_png = self.adb.screencap_png()
+            result_png = self._screencap_png()
             if self.vision.has_return_home_button(result_png):
                 break
             self._sleep(0.8)
@@ -1084,7 +1079,7 @@ class FarmBot:
         self._sleep(self.config["timing"]["after_return_home"])
         if self.stop_event.is_set():
             return False
-        home_png = self.adb.screencap_png()
+        home_png = self._screencap_png()
         if not self.vision.has_home_attack_button(home_png):
             self._dump_debug_png("return_home_not_confirmed", home_png)
             self.log("[RESULT] Chua ve lang thanh cong. Thu lai o cycle sau.")
@@ -1116,7 +1111,7 @@ class FarmBot:
             if self.stop_event.is_set():
                 break
             try:
-                current_png = png if attempt == 0 and png else self.adb.screencap_png()
+                current_png = png if attempt == 0 and png else self._screencap_png()
             except ADBError as exc:
                 self.log(f"[RESULT] Chụp mẫu OCR lỗi ({attempt + 1}/{attempts}): {exc}")
                 continue
@@ -1235,7 +1230,7 @@ class FarmBot:
             return self._wall_result(False, budget_reason or "budget_unavailable")
 
         self.log(f"[WALL] Bat dau nang tuong. Ngan sach: {budget:,} {pay_with}.")
-        self.adb.tap(*coords["builder_icon"])
+        self._tap(coords["builder_icon"])
         self._sleep(1.4)
 
         wall_pos = self._find_wall_row(settings)
@@ -1245,10 +1240,10 @@ class FarmBot:
             return self._wall_result(False, "wall_not_found")
 
         self.log(f"[WALL] Chon dong Wall tai {wall_pos[0]},{wall_pos[1]}.")
-        self.adb.tap(int(wall_pos[0]), int(wall_pos[1]))
+        self._tap([int(wall_pos[0]), int(wall_pos[1])])
         self._sleep(0.8)
 
-        self.adb.tap(*coords["upgrade_more_button"])
+        self._tap(coords["upgrade_more_button"])
         self._sleep(1.0)
 
         upgrade_button = coords["upgrade_gold_button"] if pay_with == "gold" else coords["upgrade_elixir_button"]
@@ -1270,7 +1265,7 @@ class FarmBot:
                     f"({last_safe_cost + last_add_increment:,}/{budget:,}), dung them."
                 )
                 break
-            self.adb.tap(*add_button)
+            self._tap(add_button)
             self._sleep(0.5)
             cost = self._read_wall_cost_stable(settings, upgrade_button)
             if cost < 0:
@@ -1308,13 +1303,13 @@ class FarmBot:
             return self._wall_result(True)
 
         self.log(f"[WALL] Xac nhan nang tuong: {last_safe_cost:,} {pay_with}.")
-        self.adb.tap(*upgrade_button)
+        self._tap(upgrade_button)
         self._sleep(1.0)
         try:
-            confirmation_png = self.adb.screencap_png()
+            confirmation_png = self._screencap_png()
         except ADBError as exc:
             self.log(f"[WALL] Khong chup duoc hop xac nhan: {exc}")
-            self.adb.tap(*coords["confirm_cancel_button"])
+            self._tap(coords["confirm_cancel_button"])
             self._sleep(0.4)
             self._close_wall_popup()
             return self._wall_result(False, "confirmation_read_failed")
@@ -1330,11 +1325,11 @@ class FarmBot:
                 f"currency={confirmation.get('currency') or '?'} | "
                 f"cost={int(confirmation.get('cost', -1)):,}. Huy de tranh tieu nham."
             )
-            self.adb.tap(*coords["confirm_cancel_button"])
+            self._tap(coords["confirm_cancel_button"])
             self._sleep(0.4)
             self._close_wall_popup()
             return self._wall_result(False, "confirmation_mismatch")
-        self.adb.tap(*coords["confirm_okay_button"])
+        self._tap(coords["confirm_okay_button"])
         self._sleep(1.2)
         if self.stop_event.is_set():
             return self._wall_result(False, "stopped")
@@ -1366,7 +1361,7 @@ class FarmBot:
             if self.stop_event.is_set():
                 return None
             try:
-                png = self.adb.screencap_png()
+                png = self._screencap_png()
             except ADBError as exc:
                 self.log(f"[WALL] Khong chup duoc danh sach nang cap: {exc}")
                 return None
@@ -1377,7 +1372,7 @@ class FarmBot:
                 return wall_pos
             if attempt < max_scrolls:
                 self.log(f"[WALL] Chua thay Wall, cuon danh sach ({attempt + 1}/{max_scrolls}).")
-                self.adb.swipe(*scroll_swipe)
+                self._swipe(scroll_swipe)
                 self._sleep(0.9)
         return None
 
@@ -1392,7 +1387,7 @@ class FarmBot:
             if self.stop_event.is_set():
                 return None
             try:
-                png = self.adb.screencap_png()
+                png = self._screencap_png()
             except ADBError as exc:
                 self.log(f"[WALL] Khong doc duoc tai nguyen o lang: {exc}")
                 return None
@@ -1435,7 +1430,7 @@ class FarmBot:
             if self.stop_event.is_set():
                 return -1
             try:
-                png = self.adb.screencap_png()
+                png = self._screencap_png()
             except ADBError as exc:
                 self.log(f"[WALL] Khong chup duoc gia nang tuong: {exc}")
                 return -1
@@ -1492,7 +1487,7 @@ class FarmBot:
     ) -> int:
         rollback_clicks = 10 if use_add10 else 1
         for _ in range(rollback_clicks):
-            self.adb.tap(*coords["remove_button"])
+            self._tap(coords["remove_button"])
             self._sleep(0.5)
             cost = self._read_wall_cost_stable(settings, upgrade_button)
             if 0 < cost <= budget:
@@ -1501,9 +1496,9 @@ class FarmBot:
 
     def _close_wall_popup(self) -> None:
         try:
-            self.adb.shell("input", "keyevent", "KEYCODE_BACK", timeout=5)
+            self._shell("input", "keyevent", "KEYCODE_BACK", timeout=5)
             self._sleep(0.3)
-            self.adb.shell("input", "keyevent", "KEYCODE_BACK", timeout=5)
+            self._shell("input", "keyevent", "KEYCODE_BACK", timeout=5)
             self._sleep(0.3)
         except ADBError as exc:
             self.log(f"[WALL] Khong dong duoc popup nang tuong: {exc}")
@@ -1514,7 +1509,7 @@ class FarmBot:
     def _read_loot_frame(self) -> tuple[bytes, dict[str, int]]:
         if not self.vision.available:
             raise RuntimeError("OCR is not ready, cannot read loot.")
-        png = self.adb.screencap_png()
+        png = self._screencap_png()
         return png, self.vision.read_loot(png)
 
     def _loot_is_valid(self, loot: dict[str, int]) -> bool:
@@ -1678,9 +1673,52 @@ class FarmBot:
             return view_swipes[self.current_attack_view]
         return deploy.get("camera_swipes", [])
 
+    def _stop_requested(self) -> bool:
+        stop_event = getattr(self, "stop_event", None)
+        return bool(stop_event and stop_event.is_set())
+
+    def _active_time(self) -> float:
+        return time.time() - float(getattr(self, "_paused_seconds_total", 0.0))
+
+    def _tap(self, point: list[int] | tuple[int, int], jitter: int = 4) -> None:
+        self._pause_gate()
+        if self._stop_requested():
+            return
+        self.adb.tap(int(point[0]), int(point[1]), jitter=jitter)
+
+    def _swipe(self, values: list[int] | tuple[int, int, int, int, int]) -> None:
+        self._pause_gate()
+        if self._stop_requested():
+            return
+        self.adb.swipe(*[int(value) for value in values])
+
+    def _shell(self, *args: str, timeout: float = 5) -> Any:
+        self._pause_gate()
+        if self._stop_requested():
+            return None
+        return self.adb.shell(*args, timeout=timeout)
+
+    def _screencap_png(self) -> bytes:
+        self._pause_gate()
+        if self._stop_requested():
+            return b""
+        return self.adb.screencap_png()
+
+    def _force_stop_app(self, package: str) -> None:
+        self._pause_gate()
+        if self._stop_requested():
+            return
+        self.adb.force_stop_app(package)
+
+    def _start_app(self, package: str) -> None:
+        self._pause_gate()
+        if self._stop_requested():
+            return
+        self.adb.start_app(package)
+
     def _tap_coord(self, name: str) -> None:
         x, y = self.config["coords"][name]
-        self.adb.tap(int(x), int(y))
+        self._tap([int(x), int(y)])
         self._optimized_action_pause()
         self._sleep(self._after_click_seconds())
 
@@ -1694,7 +1732,7 @@ class FarmBot:
                 self.log(f"[WARN] Khong co toa do fallback cho slot '{name}'.")
                 return False
             x, y = coords
-        self.adb.tap(int(x), int(y))
+        self._tap([int(x), int(y)])
         self._optimized_action_pause()
         self._sleep(0.18)
         return True
@@ -1727,7 +1765,7 @@ class FarmBot:
         if not coords:
             return False
         try:
-            png = self.adb.screencap_png()
+            png = self._screencap_png()
         except ADBError as exc:
             self.log(f"[WARN] Slot check failed: {exc}")
             return True
@@ -1817,11 +1855,12 @@ class FarmBot:
         return max(0.0, float(timing.get("adb_delay_seconds", self.config["timing"]["after_click"])))
 
     def _sleep(self, seconds: float) -> None:
-        end = time.time() + self._jittered_sleep_seconds(seconds)
-        while time.time() < end:
-            if self.stop_event.is_set():
+        end = self._active_time() + self._jittered_sleep_seconds(seconds)
+        while self._active_time() < end:
+            self._pause_gate()
+            if self._stop_requested():
                 return
-            time.sleep(min(0.1, end - time.time()))
+            time.sleep(max(0.0, min(0.1, end - self._active_time())))
 
     def _jittered_sleep_seconds(self, seconds: float) -> float:
         base = max(0.0, float(seconds))
@@ -1834,17 +1873,22 @@ class FarmBot:
         return max(0.0, random.uniform(base - delta, base + delta))
 
     def _pause_gate(self) -> float:
+        pause_event = getattr(self, "pause_event", None)
+        stop_event = getattr(self, "stop_event", None)
+        if pause_event is None or stop_event is None:
+            return 0.0
         pause_started_at = 0.0
-        while self.pause_event.is_set() and not self.stop_event.is_set():
+        while pause_event.is_set() and not stop_event.is_set():
             if pause_started_at <= 0:
                 pause_started_at = time.time()
             time.sleep(0.2)
         if pause_started_at <= 0:
             return 0.0
         paused_seconds = time.time() - pause_started_at
-        if self.auto_stop_at > 0:
+        self._paused_seconds_total = float(getattr(self, "_paused_seconds_total", 0.0)) + paused_seconds
+        if getattr(self, "auto_stop_at", 0.0) > 0:
             self.auto_stop_at += paused_seconds
-        if self.next_periodic_restart_at > 0:
+        if getattr(self, "next_periodic_restart_at", 0.0) > 0:
             self.next_periodic_restart_at += paused_seconds
         self.log(f"[SCHEDULE] Pause {int(paused_seconds)}s, lịch chạy được dời lại.")
         return paused_seconds
@@ -1882,7 +1926,7 @@ class FarmBot:
     def _dump_debug_png(self, reason: str, png: bytes = b"") -> None:
         if not png:
             try:
-                png = self.adb.screencap_png()
+                png = self._screencap_png()
             except ADBError as exc:
                 self.log(f"[WARN] Khong chup duoc debug screencap: {exc}")
                 return

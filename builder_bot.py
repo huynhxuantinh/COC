@@ -328,36 +328,46 @@ class BuilderBaseBot:
     def _collect_elixir_cart(self, png: bytes = b"") -> bool:
         cart = self.builder.get("elixir_cart", {})
         if not cart.get("enabled", True):
-            return
+            return False
 
         current = png or self._screencap_png()
-        popup_open = self.vision.is_elixir_cart_popup(current)
-        home_elixir_before = -1
-        if not popup_open:
-            home_resources = self.vision.read_home_resources(current)
-            home_elixir_before = int(home_resources.get("elixir", -1))
-            icon = None
-            attempts = max(1, int(cart.get("icon_search_attempts", 3)))
-            for attempt in range(1, attempts + 1):
-                icon = self.vision.find_elixir_cart(current)
-                if icon is not None:
-                    break
-                if attempt < attempts:
-                    self.log(f"[BUILDER] Chưa thấy Elixir Cart ({attempt}/{attempts}), zoom tìm lại.")
-                    self._zoom_out(1)
-                    self._sleep(0.8)
-                    current = self._screencap_png()
-            if icon is None:
-                self.log("[BUILDER][WARN] Đã đến hạn nhận dầu nhưng chưa tìm thấy Elixir Cart; sẽ thử lại sau trận kế tiếp.")
-                self._dump_debug("builder-elixir-cart-not-found", current)
-                return False
-            self.log(f"[BUILDER] Mở Elixir Cart tại {icon[0]},{icon[1]}.")
-            self._tap([icon[0], icon[1]], jitter=0)
+        if self.vision.is_elixir_cart_popup(current):
+            self.log("[BUILDER] Elixir Cart đang mở; đóng để đọc dầu trước khi nhận.")
+            self._tap(cart.get("close_button", [1342, 88]), jitter=0)
             self._sleep(float(cart.get("open_wait_seconds", 1.0)))
             current = self._screencap_png()
-            if not self.vision.is_elixir_cart_popup(current):
-                self.log("[BUILDER][WARN] Không mở được Elixir Cart.")
-                return
+            if self.vision.is_elixir_cart_popup(current):
+                self.log("[BUILDER][WARN] Không đóng được Elixir Cart; chưa nhận dầu.")
+                return False
+
+        home_resources = self.vision.read_home_resources(current)
+        home_elixir_before = int(home_resources.get("elixir", -1))
+        if home_elixir_before < 0:
+            self.log("[BUILDER][WARN] Không đọc được dầu trước khi mở Elixir Cart; chưa bấm Collect.")
+            return False
+
+        icon = None
+        attempts = max(1, int(cart.get("icon_search_attempts", 3)))
+        for attempt in range(1, attempts + 1):
+            icon = self.vision.find_elixir_cart(current)
+            if icon is not None:
+                break
+            if attempt < attempts:
+                self.log(f"[BUILDER] Chưa thấy Elixir Cart ({attempt}/{attempts}), zoom tìm lại.")
+                self._zoom_out(1)
+                self._sleep(0.8)
+                current = self._screencap_png()
+        if icon is None:
+            self.log("[BUILDER][WARN] Đã đến hạn nhận dầu nhưng chưa tìm thấy Elixir Cart; sẽ thử lại sau trận kế tiếp.")
+            self._dump_debug("builder-elixir-cart-not-found", current)
+            return False
+        self.log(f"[BUILDER] Mở Elixir Cart tại {icon[0]},{icon[1]}.")
+        self._tap([icon[0], icon[1]], jitter=0)
+        self._sleep(float(cart.get("open_wait_seconds", 1.0)))
+        current = self._screencap_png()
+        if not self.vision.is_elixir_cart_popup(current):
+            self.log("[BUILDER][WARN] Không mở được Elixir Cart.")
+            return False
 
         reward = self.vision.read_elixir_cart_reward(current)
         if reward < 0:
@@ -385,7 +395,7 @@ class BuilderBaseBot:
                     "[BUILDER][WARN] Popup Elixir Cart con mo nhung OCR khong doc duoc "
                     "so dau con lai; chua xac nhan Collect."
                 )
-        elif home_elixir_before >= 0:
+        else:
             home_resources_after = self.vision.read_home_resources(after_png)
             home_elixir_after = int(home_resources_after.get("elixir", -1))
             if home_elixir_after > home_elixir_before:
@@ -395,11 +405,6 @@ class BuilderBaseBot:
                     "[BUILDER][WARN] Popup Elixir Cart da dong nhung tai nguyen lang "
                     "khong tang; chua xac nhan Collect."
                 )
-        else:
-            self.log(
-                "[BUILDER][WARN] Popup Elixir Cart da dong nhung khong co so dau truoc "
-                "Collect de doi chieu; khong cong thong ke."
-            )
         if collected > 0:
             self.stats["builder_elixir"] += collected
             self._elixir_cart_pending = False
@@ -1029,8 +1034,18 @@ class BuilderBaseBot:
             samples.append(self.vision.read_home_resources(self._screencap_png()))
             if attempt < attempts - 1:
                 self._sleep(delay)
-        gold = self._builder_stable_number([int(item.get("gold", -1)) for item in samples])
-        elixir = self._builder_stable_number([int(item.get("elixir", -1)) for item in samples])
+        tolerance_percent = max(0.0, float(settings.get("stable_read_tolerance_percent", 0.1)))
+        tolerance_absolute = max(0, int(settings.get("stable_read_tolerance_absolute", 1_000)))
+        gold = self._builder_stable_number(
+            [int(item.get("gold", -1)) for item in samples],
+            tolerance_percent,
+            tolerance_absolute,
+        )
+        elixir = self._builder_stable_number(
+            [int(item.get("elixir", -1)) for item in samples],
+            tolerance_percent,
+            tolerance_absolute,
+        )
         if gold < 0 or elixir < 0:
             self.log("[BUILDER][WALL] Không đọc ổn định được vàng/dầu.")
             return None
@@ -1049,15 +1064,44 @@ class BuilderBaseBot:
             values.append(self.vision.read_wall_upgrade_cost(self._screencap_png(), button))
             if attempt < attempts - 1:
                 self._sleep(delay)
-        return self._builder_stable_number(values)
+        return self._builder_stable_number(
+            values,
+            max(0.0, float(settings.get("stable_read_tolerance_percent", 0.1))),
+            max(0, int(settings.get("stable_read_tolerance_absolute", 1_000))),
+        )
 
-    def _builder_stable_number(self, values: list[int]) -> int:
+    def _builder_stable_number(
+        self,
+        values: list[int],
+        tolerance_percent: float = 0.1,
+        tolerance_absolute: int = 1_000,
+    ) -> int:
         valid = sorted(value for value in values if value >= 0)
-        if not valid:
+        if len(valid) < 2:
             return -1
         counts = {value: valid.count(value) for value in set(valid)}
-        best, count = max(counts.items(), key=lambda item: item[1])
-        return best if count >= 2 else valid[len(valid) // 2]
+        best_value, best_count = max(counts.items(), key=lambda item: item[1])
+        if best_count >= 2:
+            return best_value
+
+        best_cluster: list[int] = []
+        for start_index, start in enumerate(valid):
+            cluster = [start]
+            for candidate in valid[start_index + 1 :]:
+                tolerance = max(
+                    max(0, int(tolerance_absolute)),
+                    int(max(candidate, 1) * max(0.0, float(tolerance_percent)) / 100.0),
+                )
+                if candidate - start <= tolerance:
+                    cluster.append(candidate)
+                else:
+                    break
+            if len(cluster) > len(best_cluster):
+                best_cluster = cluster
+
+        if len(best_cluster) < 2:
+            return -1
+        return best_cluster[len(best_cluster) // 2]
 
     def _builder_result_number(self, values: list[int], tolerance_absolute: int) -> int:
         valid = sorted(value for value in values if value >= 0)

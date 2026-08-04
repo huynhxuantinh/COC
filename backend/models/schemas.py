@@ -10,13 +10,18 @@ class ConfigSection(BaseModel):
 
 
 class GameConfig(ConfigSection):
+    auto_stop: bool | None = None
     auto_restart_after_seconds: float | None = Field(default=None, ge=0)
+    periodic_restart_game: bool | None = None
     periodic_restart_min_seconds: float | None = Field(default=None, ge=0)
     periodic_restart_max_seconds: float | None = Field(default=None, ge=0)
     restart_wait_seconds: float | None = Field(default=None, gt=0)
     result_wait_seconds: float | None = Field(default=None, gt=0)
     home_zoom_out_keyevents: int | None = Field(default=None, ge=0)
     ldplayer_index: int | None = Field(default=None, ge=0)
+    max_consecutive_cycle_errors: int | None = Field(default=None, ge=1)
+    attack_missing_retries: int | None = Field(default=None, ge=1)
+    max_home_restart_failures: int | None = Field(default=None, ge=1)
 
 
 class FarmConfig(ConfigSection):
