@@ -121,6 +121,7 @@ class BotService:
                 return self.get_status()
 
             self._validate_config(self.config_data)
+            self._validate_start_requirements(self.config_data)
             save_config(self.config_data)
             self.stop_event.clear()
             self.pause_event.clear()
@@ -134,6 +135,18 @@ class BotService:
                 self._stats_threadsafe,
             )
         return self.get_status()
+
+    def _validate_start_requirements(self, config: dict[str, Any]) -> None:
+        if config.get("farm", {}).get("village", "main") != "builder":
+            return
+        deploy = config.get("builder_base", {}).get("deploy", {})
+        missing = [
+            label
+            for key, label in (("stage1_zone", "Làng 1"), ("stage2_zone", "Làng 2"))
+            if len(deploy.get(key, [])) < 3
+        ]
+        if missing:
+            raise ValueError(f"Chưa thiết lập vùng thả quân: {', '.join(missing)}.")
 
     def toggle_pause(self) -> dict[str, Any]:
         with self.lock:
@@ -235,6 +248,8 @@ class BotService:
             "zone_trenbentrai": ["deploy", "deploy_zones", "trenbentrai"],
             "zone_duoibenphai": ["deploy", "deploy_zones", "duoibenphai"],
             "zone_duoibentrai": ["deploy", "deploy_zones", "duoibentrai"],
+            "builder_stage1_zone": ["builder_base", "deploy", "stage1_zone"],
+            "builder_stage2_zone": ["builder_base", "deploy", "stage2_zone"],
         }
         allowed = dict(deploy_zone_targets)
         spell_match = re.fullmatch(r"spell_group_(\d+)_zone_(trenbenphai|trenbentrai|duoibenphai|duoibentrai)", target)
@@ -394,6 +409,10 @@ class BotService:
         attack_timing = config.get("attack_timing", {})
         manual_army = config.get("manual_army", {})
         wall_upgrade = config.get("wall_upgrade", {})
+        builder_base = config.get("builder_base", {})
+        village = str(farm.get("village", "main"))
+        if village not in {"main", "builder"}:
+            raise ValueError("Chế độ phải là main hoặc builder.")
         if int(game.get("periodic_restart_min_seconds", 0)) > int(game.get("periodic_restart_max_seconds", 0)):
             raise ValueError("Thời gian restart tối thiểu phải <= tối đa.")
         if int(game.get("home_zoom_out_keyevents", 0)) < 0:
@@ -451,6 +470,72 @@ class BotService:
             for kind, value in counts.items():
                 if int(value) < 0:
                     raise ValueError(f"Số quân {kind} phải >= 0.")
+        if builder_base:
+            builder_deploy = builder_base.get("deploy", {})
+            builder_timing = builder_base.get("timing", {})
+            builder_wall = builder_base.get("wall_upgrade", {})
+            if float(builder_deploy.get("troop_delay_seconds", 0)) < 0:
+                raise ValueError("Làng đêm: delay thả quân phải >= 0.")
+            if int(builder_deploy.get("slot_scan_attempts", 0)) < 1:
+                raise ValueError("Làng đêm: số lần quét slot phải >= 1.")
+            if float(builder_deploy.get("slot_scan_delay_seconds", 0)) < 0:
+                raise ValueError("Làng đêm: delay quét slot phải >= 0.")
+            if float(builder_deploy.get("troop_skill_delay_seconds", 0)) < 0:
+                raise ValueError("Làng đêm: delay kỹ năng lính phải >= 0.")
+            if float(builder_deploy.get("hero_first_skill_delay_seconds", 0)) < 0:
+                raise ValueError("Làng đêm: delay kỹ năng tướng phải >= 0.")
+            if int(builder_deploy.get("point_spacing_min_px", 0)) < 0:
+                raise ValueError("Làng đêm: khoảng cách điểm tối thiểu phải >= 0.")
+            if int(builder_deploy.get("point_spacing_min_px", 0)) > int(builder_deploy.get("point_spacing_max_px", 0)):
+                raise ValueError("Làng đêm: khoảng cách điểm tối thiểu phải <= tối đa.")
+            for key in (
+                "prep_timeout_seconds",
+                "battle_timeout_seconds",
+                "result_wait_seconds",
+                "star_bonus_wait_seconds",
+                "attack_cooldown_retry_seconds",
+            ):
+                if float(builder_timing.get(key, 0)) <= 0:
+                    raise ValueError(f"Làng đêm: {key} phải > 0.")
+            for key in (
+                "damage_unknown_restart_seconds",
+                "damage_stall_seconds",
+                "unknown_state_restart_seconds",
+                "result_transition_grace_seconds",
+                "frozen_frame_min_difference",
+            ):
+                if float(builder_timing.get(key, 0)) < 0:
+                    raise ValueError(f"Làng đêm: {key} phải >= 0.")
+            if int(builder_timing.get("state_confirmations", 0)) < 1:
+                raise ValueError("Làng đêm: số frame xác nhận trạng thái phải >= 1.")
+            if int(builder_timing.get("restart_after_state_failures", 0)) < 1:
+                raise ValueError("Làng đêm: ngưỡng restart phục hồi phải >= 1.")
+            if int(builder_timing.get("max_state_failures", 0)) < 1:
+                raise ValueError("Làng đêm: ngưỡng dừng do lỗi trạng thái phải >= 1.")
+            if int(builder_timing.get("max_watchdog_restarts", 0)) < 1:
+                raise ValueError("Làng đêm: số lần restart watchdog tối đa phải >= 1.")
+            if builder_wall:
+                if int(builder_wall.get("run_every_n_attacks", 0)) < 1:
+                    raise ValueError("Nâng tường Làng đêm: số trận phải >= 1.")
+                trigger = int(builder_wall.get("trigger_percent", 0))
+                if trigger < 1 or trigger > 100:
+                    raise ValueError("Nâng tường Làng đêm: ngưỡng tài nguyên phải từ 1 đến 100.")
+                if int(builder_wall.get("gold_capacity", 0)) < 1 or int(builder_wall.get("elixir_capacity", 0)) < 1:
+                    raise ValueError("Nâng tường Làng đêm: sức chứa kho phải >= 1.")
+                if int(builder_wall.get("reserve_gold", 0)) < 0 or int(builder_wall.get("reserve_elixir", 0)) < 0:
+                    raise ValueError("Nâng tường Làng đêm: tài nguyên giữ lại phải >= 0.")
+                for key, label in (
+                    ("add1_rounds", "số lần bấm +1"),
+                    ("retry_backoff_attacks", "cooldown"),
+                    ("resource_read_attempts", "số lần đọc tài nguyên"),
+                    ("cost_read_attempts", "số lần đọc giá"),
+                ):
+                    if int(builder_wall.get(key, 0)) < 1:
+                        raise ValueError(f"Nâng tường Làng đêm: {label} phải >= 1.")
+                if int(builder_wall.get("max_wall_search_scrolls", 0)) < 0:
+                    raise ValueError("Nâng tường Làng đêm: số lần cuộn phải >= 0.")
+                if float(builder_wall.get("read_attempt_delay", 0)) < 0:
+                    raise ValueError("Nâng tường Làng đêm: delay đọc phải >= 0.")
         self._validate_coords(config)
         self._validate_deploys(config)
 
@@ -501,6 +586,34 @@ class BotService:
         if isinstance(wall_coords, dict):
             for name, point in wall_coords.items():
                 self._validate_point(point, f"wall_upgrade.coords.{name}", resolution)
+        builder = config.get("builder_base", {})
+        builder_coords = builder.get("coords", {})
+        for name in (
+            "attack",
+            "find_now",
+            "start_dialog_close",
+            "end_battle",
+            "return_home",
+            "star_bonus_okay",
+            "hero_slot",
+        ):
+            self._validate_point(builder_coords.get(name), f"builder_base.coords.{name}", resolution)
+        for group_name in ("troop_slots", "reinforcement_slots"):
+            for index, point in enumerate(builder_coords.get(group_name, []), start=1):
+                self._validate_point(point, f"builder_base.coords.{group_name}[{index}]", resolution)
+        for name, region in builder.get("ocr_regions", {}).items():
+            self._validate_region(region, f"builder_base.ocr_regions.{name}", resolution)
+        builder_wall = builder.get("wall_upgrade", {})
+        for name, point in builder_wall.get("coords", {}).items():
+            self._validate_point(point, f"builder_base.wall_upgrade.coords.{name}", resolution)
+        for name, region in builder_wall.get("resource_regions", {}).items():
+            self._validate_region(region, f"builder_base.wall_upgrade.resource_regions.{name}", resolution)
+        for name in ("search_region", "confirmation_region", "confirmation_cost_region"):
+            if name in builder_wall:
+                self._validate_region(builder_wall[name], f"builder_base.wall_upgrade.{name}", resolution)
+        builder_deploy = builder.get("deploy", {})
+        self._validate_polygon(builder_deploy.get("stage1_zone", []), "builder_base.deploy.stage1_zone", resolution)
+        self._validate_polygon(builder_deploy.get("stage2_zone", []), "builder_base.deploy.stage2_zone", resolution)
 
     def _validate_deploys(self, config: dict[str, Any]) -> None:
         resolution = tuple(config.get("game", {}).get("resolution", [1600, 900]))

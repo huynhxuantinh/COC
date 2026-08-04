@@ -71,22 +71,20 @@
     "periodic_restart_game": false,
     "periodic_restart_min_seconds": 3600,
     "periodic_restart_max_seconds": 5400,
-    "donate_when_farming": false,
     "change_combo_on_start": false,
     "resource_stats": false,
     "restart_if_attack_missing": true,
     "attack_missing_retries": 3,
     "max_home_restart_failures": 3,
     "restart_wait_seconds": 20,
+    "result_wait_seconds": 15,
     "max_consecutive_cycle_errors": 8,
     "home_zoom_out_keyevents": 3,
     "ldplayer_index": 0
   },
   "farm": {
-    "village": "main",
+    "village": "builder",
     "combo": "Rồng",
-    "deploy_mode": "random",
-    "attack_edge": "random",
     "attack_view": "random",
     "threshold_mode": "any",
     "gold_min": 1000000,
@@ -96,7 +94,8 @@
     "loot_elixir_max": 3000000,
     "max_next": 80,
     "search_delay_seconds": 3,
-    "ocr_fail_restart_seconds": 30
+    "ocr_fail_restart_seconds": 30,
+    "max_ocr_restarts": 3
   },
   "surrender": {
     "by_time": false,
@@ -111,8 +110,9 @@
     "max_battle_seconds": 175,
     "damage_jump_confirm_percent": 40,
     "damage_jump_max_pending_reads": 3,
-    "damage_stall_seconds": 20,
-    "damage_unknown_restart_seconds": 20
+    "damage_stall_seconds": 10,
+    "damage_unknown_restart_seconds": 10,
+    "max_damage_ocr_restarts": 3
   },
   "ocr": {
     "enabled": true,
@@ -176,6 +176,12 @@
         20,
         715,
         170,
+        160
+      ],
+      "return_home_button": [
+        650,
+        700,
+        300,
         160
       ],
       "home_gold": [
@@ -1119,6 +1125,408 @@
       "confirm_cancel_button": [
         622,
         578
+      ]
+    }
+  },
+  "builder_base": {
+    "entry": {
+      "zoom_out_count": 4,
+      "camera_swipes": [
+        [
+          650,
+          650,
+          950,
+          350,
+          500
+        ]
+      ],
+      "return_camera_swipes": [
+        [
+          950,
+          350,
+          650,
+          650,
+          500
+        ]
+      ],
+      "stage2_to_stage1_swipes": [
+        [
+          1200,
+          700,
+          400,
+          200,
+          700
+        ],
+        [
+          1200,
+          700,
+          400,
+          200,
+          700
+        ],
+        [
+          1200,
+          700,
+          400,
+          200,
+          700
+        ]
+      ],
+      "boat_template_dir": "img/builder/boat",
+      "return_boat_template_dir": "img/builder/return_boat",
+      "boat_match_threshold": 0.62,
+      "return_boat_match_threshold": 0.68,
+      "return_boat_search_region": [
+        900,
+        250,
+        700,
+        650
+      ],
+      "boat_search_attempts": 3,
+      "return_zoom_out_count": 4,
+      "travel_wait_seconds": 8
+    },
+    "coords": {
+      "attack": [
+        105,
+        795
+      ],
+      "find_now": [
+        1190,
+        592
+      ],
+      "start_dialog_close": [
+        1360,
+        165
+      ],
+      "end_battle": [
+        115,
+        625
+      ],
+      "return_home": [
+        800,
+        760
+      ],
+      "star_bonus_okay": [
+        800,
+        700
+      ],
+      "hero_slot": [
+        162,
+        812
+      ],
+      "troop_slots": [
+        [
+          305,
+          812
+        ],
+        [
+          432,
+          812
+        ],
+        [
+          560,
+          812
+        ],
+        [
+          687,
+          812
+        ],
+        [
+          815,
+          812
+        ],
+        [
+          943,
+          812
+        ]
+      ],
+      "reinforcement_slots": [
+        [
+          1063,
+          812
+        ],
+        [
+          1184,
+          812
+        ]
+      ]
+    },
+    "deploy": {
+      "stage1_zone": [
+        [
+          1255,
+          368
+        ],
+        [
+          1376,
+          465
+        ],
+        [
+          1103,
+          679
+        ],
+        [
+          1218,
+          690
+        ],
+        [
+          1449,
+          483
+        ],
+        [
+          1302,
+          340
+        ]
+      ],
+      "stage2_zone": [
+        [
+          1281,
+          400
+        ],
+        [
+          1337,
+          382
+        ],
+        [
+          1445,
+          471
+        ],
+        [
+          1151,
+          682
+        ],
+        [
+          1309,
+          494
+        ]
+      ],
+      "stage1_zoom_out_count": 3,
+      "stage2_zoom_out_count": 3,
+      "camera_settle_seconds": 0.8,
+      "random_points": 64,
+      "point_spacing_min_px": 20,
+      "point_spacing_max_px": 45,
+      "troop_delay_seconds": 0.1,
+      "slot_scan_attempts": 3,
+      "slot_scan_delay_seconds": 0.35,
+      "hero_deploy_attempts": 2,
+      "hero_deploy_verify_seconds": 0.8,
+      "troop_skill_delay_seconds": 3,
+      "hero_first_skill_delay_seconds": 28,
+      "hero_repeat_skill": false,
+      "hero_ready_poll_seconds": 2,
+      "hero_repeat_min_seconds": 15
+    },
+    "elixir_cart": {
+      "enabled": true,
+      "collect_every_n_attacks": 5,
+      "icon_search_attempts": 3,
+      "icon_template_dir": "img/builder/elixir-cart/icon",
+      "popup_template_dir": "img/builder/elixir-cart/popup",
+      "icon_match_threshold": 0.76,
+      "popup_match_threshold": 0.82,
+      "reward_region": [
+        850,
+        185,
+        190,
+        55
+      ],
+      "collect_button": [
+        1175,
+        760
+      ],
+      "close_button": [
+        1342,
+        88
+      ],
+      "open_wait_seconds": 1,
+      "collect_wait_seconds": 1
+    },
+    "wall_upgrade": {
+      "enabled": true,
+      "dry_run": false,
+      "run_after_attacks_enabled": true,
+      "run_every_n_attacks": 10,
+      "gold_capacity": 6500000,
+      "elixir_capacity": 6500000,
+      "trigger_percent": 80,
+      "reserve_gold": 800000,
+      "reserve_elixir": 200000,
+      "add1_rounds": 3,
+      "retry_backoff_attacks": 1,
+      "max_wall_search_scrolls": 8,
+      "resource_read_attempts": 3,
+      "cost_read_attempts": 3,
+      "read_attempt_delay": 0.45,
+      "search_region": [
+        720,
+        120,
+        420,
+        580
+      ],
+      "list_scroll_swipe": [
+        930,
+        650,
+        930,
+        250,
+        500
+      ],
+      "resource_regions": {
+        "gold": [
+          1280,
+          15,
+          285,
+          60
+        ],
+        "elixir": [
+          1280,
+          95,
+          285,
+          60
+        ]
+      },
+      "confirmation_region": [
+        420,
+        210,
+        760,
+        300
+      ],
+      "confirmation_cost_region": [
+        690,
+        365,
+        480,
+        85
+      ],
+      "coords": {
+        "builder_icon": [
+          840,
+          50
+        ],
+        "add1_button": [
+          800,
+          700
+        ],
+        "remove_button": [
+          446,
+          700
+        ],
+        "upgrade_gold_button": [
+          980,
+          700
+        ],
+        "upgrade_elixir_button": [
+          1155,
+          700
+        ],
+        "confirm_okay_button": [
+          973,
+          580
+        ],
+        "confirm_cancel_button": [
+          622,
+          580
+        ]
+      }
+    },
+    "timing": {
+      "after_attack_seconds": 1.5,
+      "after_find_now_seconds": 5.6,
+      "attack_cooldown_retry_seconds": 15,
+      "screen_poll_seconds": 1,
+      "state_confirmations": 2,
+      "prep_timeout_seconds": 70,
+      "battle_timeout_seconds": 190,
+      "stage_transition_timeout_seconds": 25,
+      "damage_unknown_restart_seconds": 20,
+      "damage_stall_seconds": 20,
+      "unknown_state_restart_seconds": 12,
+      "result_transition_grace_seconds": 8,
+      "frozen_frame_min_difference": 1.5,
+      "max_watchdog_restarts": 3,
+      "result_wait_seconds": 12,
+      "star_bonus_wait_seconds": 1.5,
+      "restart_after_state_failures": 2,
+      "max_state_failures": 5
+    },
+    "ocr_regions": {
+      "top_state": [
+        680,
+        0,
+        280,
+        110
+      ],
+      "damage_percent": [
+        1450,
+        630,
+        135,
+        70
+      ],
+      "battle_activity": [
+        250,
+        120,
+        1100,
+        500
+      ],
+      "result_damage": [
+        690,
+        335,
+        230,
+        105
+      ],
+      "result_gold": [
+        930,
+        532,
+        150,
+        42
+      ],
+      "result_trophies": [
+        920,
+        590,
+        235,
+        70
+      ],
+      "return_home_button": [
+        680,
+        710,
+        245,
+        105
+      ],
+      "star_bonus_title": [
+        550,
+        120,
+        500,
+        120
+      ],
+      "star_bonus_panel": [
+        250,
+        130,
+        1100,
+        660
+      ],
+      "star_bonus_okay_button": [
+        650,
+        640,
+        300,
+        130
+      ],
+      "start_attack_title": [
+        500,
+        100,
+        600,
+        120
+      ],
+      "find_now_button": [
+        1025,
+        520,
+        330,
+        140
+      ],
+      "builder_attack_button": [
+        20,
+        710,
+        175,
+        175
       ]
     }
   },

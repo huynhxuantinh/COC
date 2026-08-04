@@ -12,6 +12,7 @@ type Props = {
 function isCompactLog(message: string): boolean {
   if (message.includes("[ERROR]") || message.includes("[WARN]") || message.includes("[INFO]")) return true;
   if (/\[BATTLE\]\s+\d+s\s+\|\s+damage=/.test(message)) return false;
+  if (/\[BUILDER\]\s+Làng\s+[12]:\s+damage=/.test(message)) return false;
   if (/\[SEARCH\]\s+OCR could not read loot/.test(message)) return false;
   if (message.includes("[SPELL] Cast ") || message.includes("[CAMERA] ")) return false;
   return true;

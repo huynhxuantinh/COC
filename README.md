@@ -1,6 +1,6 @@
 # COC Auto Farm LDPlayer
 
-Tool auto farm làng chính Clash of Clans qua LDPlayer + ADB.
+Tool auto farm Làng chính và Làng đêm Clash of Clans qua LDPlayer + ADB.
 
 Kiến trúc hiện tại:
 
@@ -27,6 +27,7 @@ Kiến trúc hiện tại:
 - Đọc vàng/dầu nhận được ở màn Victory.
 - Lưu stats theo device.
 - Dump ảnh debug khi OCR/vision lỗi.
+- Chế độ Làng đêm hai giai đoạn: tự sang làng bằng thuyền, thả quân sống và quân tiếp viện, dùng kỹ năng, đọc phần thưởng.
 
 ## Cài đặt
 
@@ -124,10 +125,11 @@ python main.py
 
 UI Tkinter dùng chung `config.json` và logic bot, nhưng hướng phát triển chính là React + FastAPI.
 
-## Luồng bot
+## Luồng Làng chính
 
 ```text
-Home
+Làng chính hoặc Làng đêm
+-> nếu ở Làng đêm: zoom nhỏ, tìm và bấm thuyền về Làng chính
 -> zoom nhỏ ở làng chính
 -> Attack
 -> Find a Match
@@ -145,16 +147,49 @@ Home
 -> lặp lại
 ```
 
+## Luồng Làng đêm
+
+```text
+Làng chính hoặc Làng đêm
+-> nếu ở Làng chính: zoom nhỏ, kéo camera, tìm và bấm thuyền
+-> nhận dầu phòng thủ trong Elixir Cart nếu có
+-> Attack
+-> Find Now
+-> Làng 1: thả tướng, thả 6 slot trong polygon, dùng kỹ năng
+-> nếu đạt 100%: sang Làng 2
+-> quét quân còn sống, thả trước
+-> thả quân tiếp viện slot 7-8
+-> theo dõi damage đến kết quả
+-> đọc tổng damage, vàng và cúp
+-> Return Home
+-> lặp lại
+```
+
+Trước khi chạy lần đầu:
+
+1. Ở `Tổng quan`, chọn `Làng đêm` và bấm `Lưu chế độ`.
+2. Vào `Tọa độ`, chụp ADB và vẽ polygon riêng cho `Làng 1` và `Làng 2`.
+3. Vào `Chiến thuật` để chỉnh delay quân, kỹ năng lính và kỹ năng tướng.
+4. Quét ADB rồi bấm `Bắt đầu`.
+
+Bot sẽ không khởi động chế độ Làng đêm nếu thiếu một trong hai polygon.
+
 ## Các trang React
 
 ### Tổng quan
 
+- Chọn Làng chính hoặc Làng đêm.
 - Quét ADB.
 - Start / Pause / Resume / Stop.
-- Nhập số quân thủ công.
 - Xem stats.
 - Xem log realtime.
 - Log có chế độ gọn/chi tiết.
+
+### Làng đêm
+
+- `Chiến thuật`: delay thả quân, khoảng cách điểm, kỹ năng lính và kỹ năng tướng.
+- `Tọa độ`: vẽ vùng thả riêng cho Làng 1 và Làng 2.
+- Số quân thủ công của Làng chính không được dùng trong chế độ này.
 
 ### Farm
 

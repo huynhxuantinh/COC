@@ -5,6 +5,7 @@ import { Card } from "../components/Card";
 import { Feedback } from "../components/Feedback";
 import { LogPanel } from "../components/LogPanel";
 import { PageHeader } from "../components/PageHeader";
+import { SegmentedControl } from "../components/SegmentedControl";
 import { StatGrid } from "../components/StatGrid";
 import { StatusBadge } from "../components/StatusBadge";
 import { useConfigEditor } from "../hooks/useConfigEditor";
@@ -32,8 +33,9 @@ export function DashboardPage({ status, refreshStatus }: Props) {
   const [pollError, setPollError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const afterRef = useRef(0);
-  const { config, saving, error, savedMessage, isDirty, save } = useConfigEditor();
+  const { config, saving, error, savedMessage, isDirty, updatePath, save } = useConfigEditor();
   const selectedCombo = config?.farm?.combo ?? "";
+  const villageMode = config?.farm?.village === "builder" ? "builder" : "main";
 
   const lastError = useMemo(() => [...logs].reverse().find((entry) => /\[(ERROR|WARN)\]/.test(entry.message))?.message ?? "", [logs]);
 
@@ -98,6 +100,22 @@ export function DashboardPage({ status, refreshStatus }: Props) {
 
       <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
         <div className="space-y-5">
+          <Card title="Chế độ chạy">
+            <SegmentedControl
+              value={villageMode}
+              columns={2}
+              disabled={Boolean(status?.running)}
+              options={[
+                { value: "main", label: "Làng chính" },
+                { value: "builder", label: "Làng đêm" },
+              ]}
+              onChange={(value) => updatePath(["farm", "village"], value)}
+            />
+            <Button className="mt-3 w-full" size="sm" variant="success" loading={saving} disabled={!isDirty || Boolean(status?.running)} onClick={save}>
+              Lưu chế độ
+            </Button>
+          </Card>
+
           <Card title="Điều khiển phiên" action={<StatusBadge status={status} />}>
             <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 px-4 py-3">
               <div className="min-w-0">
@@ -121,16 +139,25 @@ export function DashboardPage({ status, refreshStatus }: Props) {
             </div>
             <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 border-t border-white/10 pt-5 text-sm">
               <dt className="text-slate-500">Trạng thái</dt><dd className="text-right font-medium text-white">{status?.status ?? "Đang kết nối..."}</dd>
-              <dt className="text-slate-500">Combo</dt><dd className="truncate text-right font-medium text-white">{selectedCombo || "Chưa chọn"}</dd>
-              <dt className="text-slate-500">Góc đánh</dt><dd className="text-right font-medium text-white">{viewLabels[config?.farm?.attack_view] ?? config?.farm?.attack_view ?? "Chưa chọn"}</dd>
-              <dt className="text-slate-500">Next</dt><dd className="text-right font-mono font-medium text-white">{Number(stats?.current_session?.next ?? 0).toLocaleString("vi-VN")}</dd>
+              {villageMode === "main" ? (
+                <>
+                  <dt className="text-slate-500">Combo</dt><dd className="truncate text-right font-medium text-white">{selectedCombo || "Chưa chọn"}</dd>
+                  <dt className="text-slate-500">Góc đánh</dt><dd className="text-right font-medium text-white">{viewLabels[config?.farm?.attack_view] ?? config?.farm?.attack_view ?? "Chưa chọn"}</dd>
+                  <dt className="text-slate-500">Next</dt><dd className="text-right font-mono font-medium text-white">{Number(stats?.current_session?.next ?? 0).toLocaleString("vi-VN")}</dd>
+                </>
+              ) : (
+                <>
+                  <dt className="text-slate-500">Chiến thuật</dt><dd className="text-right font-medium text-white">Tướng + Night Witch</dd>
+                  <dt className="text-slate-500">Giai đoạn</dt><dd className="text-right font-medium text-white">Làng 1 → Làng 2</dd>
+                </>
+              )}
             </dl>
             {lastError ? <Feedback tone="warning" className="mt-4 break-words">{lastError}</Feedback> : null}
           </Card>
         </div>
 
         <div className="min-w-0 space-y-5">
-          <Card title="Thống kê phiên"><StatGrid stats={stats} /></Card>
+          <Card title="Thống kê phiên"><StatGrid stats={stats} mode={villageMode} /></Card>
 
           <Card title="Theo dõi chạy tool"><LogPanel logs={logs} onClear={handleClearLogs} /></Card>
         </div>

@@ -7,9 +7,20 @@ from typing import Any, Callable
 
 from adb_client import ADBClient, ADBError, COMMON_DEVICES, discover_adb_paths
 from bot import FarmBot
+from builder_bot import BuilderBaseBot
 
 
-STAT_KEYS = ("attacks", "next", "gold_seen", "elixir_seen")
+STAT_KEYS = (
+    "attacks",
+    "next",
+    "gold_seen",
+    "elixir_seen",
+    "builder_attacks",
+    "builder_gold",
+    "builder_elixir",
+    "builder_trophies",
+    "builder_damage",
+)
 
 
 @dataclass(frozen=True)
@@ -79,18 +90,20 @@ def start_farm_threads(
 ) -> tuple[list[threading.Thread], list[str]]:
     devices = configured_devices(config)
     threads: list[threading.Thread] = []
+    village = str(config.get("farm", {}).get("village", "main"))
+    bot_type = BuilderBaseBot if village == "builder" else FarmBot
     for device in devices:
         bot_config = copy.deepcopy(config)
         bot_config.setdefault("adb", {})["device"] = device
         bot_config.setdefault("runtime", {})["stats_path"] = f"stats/{safe_device_name(device)}.json"
-        bot = FarmBot(
+        bot = bot_type(
             bot_config,
             lambda message, dev=device: log(f"[{dev}] {message}"),
             stop_event,
             pause_event,
             lambda stats, dev=device: stats_callback(dev, stats),
         )
-        thread = threading.Thread(target=bot.run, daemon=True, name=f"FarmBot-{device}")
+        thread = threading.Thread(target=bot.run, daemon=True, name=f"{bot_type.__name__}-{device}")
         threads.append(thread)
         thread.start()
     return threads, devices

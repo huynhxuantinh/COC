@@ -1,0 +1,1116 @@
+from __future__ import annotations
+
+import json
+import random
+import subprocess
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from adb_client import ADBClient, ADBError
+from builder_vision import BuilderBaseVision, BuilderScreen
+
+
+class BuilderBaseBot:
+    STAT_KEYS = (
+        "attacks",
+        "next",
+        "gold_seen",
+        "elixir_seen",
+        "builder_attacks",
+        "builder_gold",
+        "builder_elixir",
+        "builder_trophies",
+        "builder_damage",
+    )
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        log,
+        stop_event: threading.Event,
+        pause_event: threading.Event,
+        stats_callback=None,
+    ) -> None:
+        self.config = config
+        self.log = log
+        self.stop_event = stop_event
+        self.pause_event = pause_event
+        resolution = tuple(config.get("game", {}).get("resolution", [1600, 900]))
+        self.adb = ADBClient(config["adb"]["path"], config["adb"]["device"], log=log, resolution=resolution)
+        self.vision = BuilderBaseVision(config, log=log)
+        self.builder = config.get("builder_base", {})
+        self.stats = {key: 0 for key in self.STAT_KEYS}
+        self.stats_callback = stats_callback or (lambda stats: None)
+        self.stats_path = Path(config.get("runtime", {}).get("stats_path", "stats.json"))
+        self.base_total_stats = self._load_total_stats()
+        self.session_started_at = datetime.now().isoformat(timespec="seconds")
+        self.debug_dir = Path("debug")
+        self.safe_device = self._safe_name(config["adb"]["device"])
+        self._state_failures = 0
+        self._watchdog_restarts = 0
+        self._hero_deployed_at = 0.0
+        self._hero_last_skill_at = 0.0
+        self.attacks_since_wall_upgrade = 0
+        self._elixir_cart_pending = False
+
+    def run(self) -> None:
+        try:
+            if self.config.get("adb", {}).get("connect_on_start", True):
+                self.adb.connect()
+            if not self.vision.available:
+                self.log("[ERROR] OCR chưa sẵn sàng cho chế độ Làng đêm.")
+                self.stop_event.set()
+                return
+
+            self._publish_stats()
+            self.log("[BUILDER] Bắt đầu chế độ Làng đêm.")
+            errors = 0
+            max_errors = max(1, int(self.config.get("game", {}).get("max_consecutive_cycle_errors", 8)))
+            while not self.stop_event.is_set():
+                self._pause_gate()
+                try:
+                    self._run_cycle()
+                    errors = 0
+                except ADBError as exc:
+                    errors += 1
+                    self.log(f"[BUILDER][WARN] Lỗi ADB ({errors}/{max_errors}): {exc}")
+                    try:
+                        self.adb.connect()
+                    except ADBError as reconnect_error:
+                        self.log(f"[BUILDER][WARN] Kết nối lại thất bại: {reconnect_error}")
+                except Exception as exc:
+                    errors += 1
+                    self.log(f"[BUILDER][WARN] Lỗi cycle ({errors}/{max_errors}): {exc}")
+                if errors >= max_errors:
+                    self.log("[BUILDER][ERROR] Quá nhiều lỗi liên tiếp. Dừng bot.")
+                    self.stop_event.set()
+                    break
+                self._sleep(1.0 if errors else 0.2)
+        finally:
+            self._publish_stats()
+            self.log("[BUILDER] Đã dừng chế độ Làng đêm.")
+
+    def _run_cycle(self) -> None:
+        if not self._ensure_builder_home():
+            return
+
+        if self._elixir_cart_due():
+            self._collect_elixir_cart()
+        if self.stop_event.is_set():
+            return
+
+        if self._builder_wall_upgrade_due():
+            result = self._upgrade_builder_walls()
+            if not result["success"]:
+                self._backoff_builder_wall_upgrade(result["reason"])
+            return
+
+        coords = self.builder.get("coords", {})
+        self.log("[BUILDER] Mở tìm trận.")
+        self._tap(coords.get("attack", [105, 795]))
+        self._sleep(float(self.builder.get("timing", {}).get("after_attack_seconds", 1.5)))
+
+        state, dialog_png = self._wait_for_states({BuilderScreen.START_DIALOG}, timeout=12)
+        if state != BuilderScreen.START_DIALOG:
+            self.log("[BUILDER][WARN] Không thấy cửa sổ Start Attack.")
+            self._record_state_failure("builder-start-dialog-missing", dialog_png)
+            return
+        if not self.vision.find_now_available(dialog_png):
+            self._close_start_dialog(cooldown=True)
+            return
+
+        self._tap(coords.get("find_now", [1190, 592]))
+        self.log("[BUILDER] Find Now.")
+        self.stats["builder_attacks"] += 1
+        self.attacks_since_wall_upgrade += 1
+        self._publish_stats()
+        self._sleep(float(self.builder.get("timing", {}).get("after_find_now_seconds", 6.0)))
+
+        state, png = self._wait_for_states(
+            {BuilderScreen.STAGE_PREP, BuilderScreen.BATTLE, BuilderScreen.RESULT},
+            timeout=float(self.builder.get("timing", {}).get("prep_timeout_seconds", 70)),
+        )
+        if state == BuilderScreen.RESULT:
+            self._handle_result(png)
+            return
+        if state not in {BuilderScreen.STAGE_PREP, BuilderScreen.BATTLE}:
+            self.log("[BUILDER][WARN] Không vào được Làng 1.")
+            self._record_state_failure("builder-stage1-not-found", png)
+            return
+
+        self._clear_state_failures()
+        self._run_match_from_stage(stage=1, state=state, png=png, deploy_current=True)
+
+    def _run_match_from_stage(
+        self,
+        stage: int,
+        state: str,
+        png: bytes,
+        deploy_current: bool,
+    ) -> bool:
+        current_stage = 2 if int(stage) == 2 else 1
+        current_state = state
+        current_png = png
+        should_deploy = deploy_current
+
+        while not self.stop_event.is_set():
+            if current_state == BuilderScreen.RESULT:
+                self._handle_result(current_png)
+                self._clear_state_failures()
+                return True
+
+            if current_state not in {BuilderScreen.STAGE_PREP, BuilderScreen.BATTLE}:
+                self._record_state_failure(f"builder-stage{current_stage}-invalid-state", current_png)
+                return False
+
+            if should_deploy:
+                current_png = self._prepare_stage_camera(stage=current_stage)
+                if not self._deploy_stage(stage=current_stage, png=current_png):
+                    self._record_state_failure(
+                        f"builder-stage{current_stage}-deploy-failed",
+                        current_png,
+                        restart=False,
+                    )
+                    return False
+
+            current_state, current_png = self._monitor_stage(
+                stage=current_stage,
+                initial_state=current_state,
+            )
+            if current_state in {BuilderScreen.INTERRUPTED, BuilderScreen.RESTARTED}:
+                return False
+            if current_state == BuilderScreen.RESULT:
+                self._handle_result(current_png)
+                self._clear_state_failures()
+                return True
+
+            if current_stage == 1 and current_state == BuilderScreen.STAGE_PREP:
+                self.log("[BUILDER] Đã xác nhận Làng 2. Quét quân sống trước, sau đó quân tiếp viện.")
+                current_stage = 2
+                should_deploy = True
+                continue
+
+            self._record_state_failure(
+                f"builder-stage{current_stage}-transition-failed",
+                current_png,
+            )
+            return False
+
+        return False
+
+    def _ensure_builder_home(self) -> bool:
+        png = self.adb.screencap_png()
+        state = self.vision.classify(png)
+        if state == BuilderScreen.BUILDER_HOME:
+            return True
+        if state == BuilderScreen.ELIXIR_CART:
+            self._collect_elixir_cart(png)
+            return False
+        if state == BuilderScreen.STAR_BONUS:
+            self._dismiss_star_bonus(png)
+            return False
+        if state == BuilderScreen.START_DIALOG:
+            self._close_start_dialog(cooldown=not self.vision.find_now_available(png))
+            return False
+        if state == BuilderScreen.MAIN_HOME:
+            return self._travel_to_builder_base()
+        if state == BuilderScreen.RESULT:
+            self._handle_result(png)
+            self._clear_state_failures()
+            return False
+        if state in {BuilderScreen.STAGE_PREP, BuilderScreen.BATTLE}:
+            stage = 2 if state == BuilderScreen.STAGE_PREP and self._stage_two_ready(png) else 1
+            deploy_current = state == BuilderScreen.STAGE_PREP
+            if state == BuilderScreen.BATTLE:
+                stage = 2 if self._stage_two_visible(png) else 1
+            self.log(
+                f"[BUILDER][WARN] Phát hiện trận cũ ở Làng {stage}. "
+                "Tiếp tục xử lý thay vì mở trận mới."
+            )
+            self._run_match_from_stage(stage, state, png, deploy_current=deploy_current)
+            return False
+
+        self.log("[BUILDER][WARN] Không nhận diện được màn hình hiện tại. Khởi động lại game.")
+        self._record_state_failure("builder-home-unknown", png)
+        return False
+
+    def _travel_to_builder_base(self) -> bool:
+        entry = self.builder.get("entry", {})
+        self.log("[BUILDER] Đang ở Làng chính. Zoom nhỏ để tìm thuyền.")
+        self._zoom_out(int(entry.get("zoom_out_count", 4)))
+        for swipe in entry.get("camera_swipes", [[650, 650, 950, 350, 500]]):
+            self.adb.swipe(*[int(value) for value in swipe])
+            self._sleep(0.8)
+
+        attempts = max(1, int(entry.get("boat_search_attempts", 3)))
+        last_png = b""
+        for attempt in range(1, attempts + 1):
+            self._pause_gate()
+            last_png = self.adb.screencap_png()
+            if self.vision.is_builder_home(last_png):
+                return True
+            boat = self.vision.find_boat(last_png)
+            if boat is None:
+                self.log(f"[BUILDER] Chưa thấy thuyền ({attempt}/{attempts}), zoom/kéo lại.")
+                self._zoom_out(1)
+                for swipe in entry.get("camera_swipes", []):
+                    self.adb.swipe(*[int(value) for value in swipe])
+                self._sleep(1.0)
+                continue
+
+            x, y, score = boat
+            self.log(f"[BUILDER] Thấy thuyền tại {x},{y} (score={score:.2f}).")
+            self._tap([x, y], jitter=0)
+            self._sleep(2.0)
+
+            focused_png = self.adb.screencap_png()
+            if self.vision.is_builder_home(focused_png):
+                self.log("[BUILDER] Đã sang Làng đêm.")
+                return True
+            focused_boat = self.vision.find_boat(focused_png)
+            if focused_boat is not None:
+                focused_x, focused_y, focused_score = focused_boat
+                self.log(f"[BUILDER] Xác nhận đi thuyền tại {focused_x},{focused_y} (score={focused_score:.2f}).")
+                self._tap([focused_x, focused_y], jitter=0)
+                self._sleep(float(entry.get("travel_wait_seconds", 8.0)))
+                arrived_png = self.adb.screencap_png()
+                if self.vision.is_builder_home(arrived_png):
+                    self.log("[BUILDER] Đã sang Làng đêm.")
+                    return True
+                last_png = arrived_png
+
+        self.log("[BUILDER][WARN] Đã bấm thuyền nhưng chưa vào được Làng đêm.")
+        self._record_state_failure("builder-boat-travel-failed", last_png)
+        return False
+
+    def _collect_elixir_cart(self, png: bytes = b"") -> bool:
+        cart = self.builder.get("elixir_cart", {})
+        if not cart.get("enabled", True):
+            return
+
+        current = png or self.adb.screencap_png()
+        if not self.vision.is_elixir_cart_popup(current):
+            icon = None
+            attempts = max(1, int(cart.get("icon_search_attempts", 3)))
+            for attempt in range(1, attempts + 1):
+                icon = self.vision.find_elixir_cart(current)
+                if icon is not None:
+                    break
+                if attempt < attempts:
+                    self.log(f"[BUILDER] Chưa thấy Elixir Cart ({attempt}/{attempts}), zoom tìm lại.")
+                    self._zoom_out(1)
+                    self._sleep(0.8)
+                    current = self.adb.screencap_png()
+            if icon is None:
+                self.log("[BUILDER][WARN] Đã đến hạn nhận dầu nhưng chưa tìm thấy Elixir Cart; sẽ thử lại sau trận kế tiếp.")
+                self._dump_debug("builder-elixir-cart-not-found", current)
+                return False
+            self.log(f"[BUILDER] Mở Elixir Cart tại {icon[0]},{icon[1]}.")
+            self._tap([icon[0], icon[1]], jitter=0)
+            self._sleep(float(cart.get("open_wait_seconds", 1.0)))
+            current = self.adb.screencap_png()
+            if not self.vision.is_elixir_cart_popup(current):
+                self.log("[BUILDER][WARN] Không mở được Elixir Cart.")
+                return
+
+        reward = self.vision.read_elixir_cart_reward(current)
+        if reward < 0:
+            self.log("[BUILDER][WARN] Không đọc được lượng dầu trong Elixir Cart; sẽ thử lại sau trận kế tiếp.")
+            self._tap(cart.get("close_button", [1342, 88]), jitter=0)
+            return False
+        if reward == 0:
+            self._tap(cart.get("close_button", [1342, 88]), jitter=0)
+            self._elixir_cart_pending = False
+            self.log("[BUILDER] Elixir Cart hiện không có dầu để nhận.")
+            return True
+
+        self.log(f"[BUILDER] Elixir Cart có {reward:,} dầu. Bấm Collect.")
+        self._tap(cart.get("collect_button", [1175, 760]), jitter=0)
+        self._sleep(float(cart.get("collect_wait_seconds", 1.0)))
+        after_png = self.adb.screencap_png()
+        remaining = self.vision.read_elixir_cart_reward(after_png) if self.vision.is_elixir_cart_popup(after_png) else 0
+        collected = reward - max(0, remaining)
+        if collected > 0:
+            self.stats["builder_elixir"] += collected
+            self._elixir_cart_pending = False
+            self._publish_stats()
+            self.log(f"[BUILDER] Đã nhận {collected:,} dầu Làng đêm.")
+        else:
+            self.log("[BUILDER][WARN] Collect chưa thành công; không cộng thống kê.")
+        if self.vision.is_elixir_cart_popup(after_png):
+            self._tap(cart.get("close_button", [1342, 88]), jitter=0)
+        return collected > 0
+
+    def _elixir_cart_due(self) -> bool:
+        cart = self.builder.get("elixir_cart", {})
+        if not cart.get("enabled", True):
+            return False
+        every = max(1, int(cart.get("collect_every_n_attacks", 1)))
+        total_attacks = int(self.base_total_stats.get("builder_attacks", 0)) + int(
+            self.stats.get("builder_attacks", 0)
+        )
+        if every == 1 or (total_attacks > 0 and total_attacks % every == 0):
+            self._elixir_cart_pending = True
+        return bool(getattr(self, "_elixir_cart_pending", False))
+
+    def _dismiss_star_bonus(self, png: bytes = b"") -> bool:
+        current = png or self.adb.screencap_png()
+        if not self.vision.is_star_bonus_popup(current):
+            return True
+        coords = self.builder.get("coords", {})
+        wait_seconds = float(self.builder.get("timing", {}).get("star_bonus_wait_seconds", 1.5))
+        for attempt in range(1, 3):
+            self.log(f"[BUILDER] Nhận Star Bonus, bấm Okay ({attempt}/2).")
+            self._tap(coords.get("star_bonus_okay", [800, 700]), jitter=0)
+            self._sleep(wait_seconds)
+            current = self.adb.screencap_png()
+            if not self.vision.is_star_bonus_popup(current):
+                return True
+        self.log("[BUILDER][WARN] Popup Star Bonus chưa đóng.")
+        self._dump_debug("builder-star-bonus-not-closed", current)
+        return False
+
+    def _close_start_dialog(self, cooldown: bool) -> None:
+        coords = self.builder.get("coords", {})
+        if cooldown:
+            self.log("[BUILDER] Trận trước bị gián đoạn; Find Now đang cooldown. Đóng cửa sổ và chờ.")
+        else:
+            self.log("[BUILDER] Đóng cửa sổ Start Attack còn sót lại.")
+        self._tap(coords.get("start_dialog_close", [1360, 165]), jitter=0)
+        self._sleep(1.0)
+        if cooldown:
+            retry = float(self.builder.get("timing", {}).get("attack_cooldown_retry_seconds", 15.0))
+            self._sleep(max(1.0, retry))
+
+    def _prepare_stage_camera(self, stage: int) -> bytes:
+        deploy = self.builder.get("deploy", {})
+        zoom_count = max(0, int(deploy.get(f"stage{stage}_zoom_out_count", 3)))
+        if zoom_count:
+            self.log(f"[BUILDER] Làng {stage}: zoom nhỏ x{zoom_count} trước khi thả quân.")
+            self._zoom_out(zoom_count)
+            self._sleep(max(0.0, float(deploy.get("camera_settle_seconds", 0.8))))
+        return self.adb.screencap_png()
+
+    def _deploy_stage(self, stage: int, png: bytes) -> bool:
+        deploy = self.builder.get("deploy", {})
+        zone_name = "stage1_zone" if stage == 1 else "stage2_zone"
+        zone = self._valid_polygon(deploy.get(zone_name, []))
+        if not zone:
+            self.log(f"[BUILDER][ERROR] Chưa thiết lập polygon Làng {stage}.")
+            self.stop_event.set()
+            return False
+
+        coords = self.builder.get("coords", {})
+        hero = coords.get("hero_slot", [162, 812])
+        regular = coords.get("troop_slots", [])
+        reinforcements = coords.get("reinforcement_slots", []) if stage == 2 else []
+        hero_available, surviving_slots, reinforcement_slots = self._scan_stage_army(
+            stage,
+            png,
+            hero,
+            regular,
+            reinforcements,
+        )
+        ordered_slots = surviving_slots + reinforcement_slots
+
+        if not hero_available and not ordered_slots:
+            self.log(f"[BUILDER][WARN] Làng {stage}: không còn slot quân có thể thả.")
+            return False
+
+        hero_attempts = max(1, int(deploy.get("hero_deploy_attempts", 2))) if hero_available else 0
+        points = self._clustered_points(zone, hero_attempts + len(ordered_slots))
+        point_index = 0
+        hero_deployed_at = 0.0
+        troop_skill_jobs: list[tuple[float, list[int]]] = []
+
+        if hero_available:
+            verify_delay = max(0.2, float(deploy.get("hero_deploy_verify_seconds", 0.8)))
+            for attempt in range(1, hero_attempts + 1):
+                self._deploy_slot(hero, points[point_index])
+                point_index += 1
+                self._sleep(verify_delay)
+                verify_png = self.adb.screencap_png()
+                if self.vision.hero_deployed(verify_png, hero):
+                    hero_deployed_at = time.time()
+                    self.log(f"[BUILDER] Làng {stage}: đã xác nhận thả tướng.")
+                    break
+                self.log(f"[BUILDER][WARN] Làng {stage}: thả tướng chưa thành công ({attempt}/{hero_attempts}).")
+
+        delay = max(0.0, float(deploy.get("troop_delay_seconds", 0.5)))
+        skill_delay = max(0.0, float(deploy.get("troop_skill_delay_seconds", 3.0)))
+        for slot in ordered_slots:
+            if self.stop_event.is_set():
+                return False
+            self._deploy_slot(slot, points[point_index])
+            deployed_at = time.time()
+            troop_skill_jobs.append((deployed_at + skill_delay, slot))
+            point_index += 1
+            self._sleep(delay)
+
+        self.log(
+            f"[BUILDER] Làng {stage}: đã thả {len(surviving_slots)} slot chính"
+            f" và {len(reinforcement_slots)} slot tiếp viện."
+        )
+        self._run_troop_skill_jobs(troop_skill_jobs)
+        self._hero_deployed_at = hero_deployed_at
+        self._hero_last_skill_at = 0.0
+        return True
+
+    def _scan_stage_army(
+        self,
+        stage: int,
+        first_png: bytes,
+        hero: list[int],
+        regular: list[list[int]],
+        reinforcements: list[list[int]],
+    ) -> tuple[bool, list[list[int]], list[list[int]]]:
+        deploy = self.builder.get("deploy", {})
+        attempts = max(1, int(deploy.get("slot_scan_attempts", 3)))
+        delay = max(0.0, float(deploy.get("slot_scan_delay_seconds", 0.35)))
+        labels: list[tuple[str, list[int]]] = [("hero", hero)]
+        labels.extend((f"regular:{index}", slot) for index, slot in enumerate(regular, start=1))
+        labels.extend((f"reinforcement:{index}", slot) for index, slot in enumerate(reinforcements, start=1))
+        votes = {label: 0 for label, _slot in labels}
+
+        for attempt in range(attempts):
+            if self.stop_event.is_set():
+                break
+            if attempt == 0 and first_png:
+                png = first_png
+            else:
+                self._sleep(delay)
+                png = self.adb.screencap_png()
+            for label, slot in labels:
+                if self.vision.slot_available(png, slot):
+                    votes[label] += 1
+
+        required = attempts // 2 + 1
+        hero_available = votes.get("hero", 0) >= required
+        surviving = [
+            slot
+            for index, slot in enumerate(regular, start=1)
+            if votes.get(f"regular:{index}", 0) >= required
+        ]
+        reinforcement = [
+            slot
+            for index, slot in enumerate(reinforcements, start=1)
+            if votes.get(f"reinforcement:{index}", 0) >= required
+        ]
+        survivor_indexes = [str(index) for index, slot in enumerate(regular, start=1) if slot in surviving]
+        reinforcement_indexes = [
+            str(index) for index, slot in enumerate(reinforcements, start=1) if slot in reinforcement
+        ]
+        self.log(
+            f"[BUILDER] Làng {stage}: tướng={'có' if hero_available else 'không'} | "
+            f"quân sống={','.join(survivor_indexes) or 'không'} | "
+            f"tiếp viện={','.join(reinforcement_indexes) or 'không'}."
+        )
+        return hero_available, surviving, reinforcement
+
+    def _stage_two_ready(self, png: bytes) -> bool:
+        reinforcements = self.builder.get("coords", {}).get("reinforcement_slots", [])
+        return bool(reinforcements) and any(self.vision.slot_available(png, slot) for slot in reinforcements)
+
+    def _stage_two_visible(self, png: bytes) -> bool:
+        return self._stage_two_ready(png)
+
+    def _deploy_slot(self, slot: list[int], point: list[int]) -> None:
+        self._tap(slot, jitter=0)
+        self._sleep(0.12)
+        self._tap(point, jitter=3)
+
+    def _run_troop_skill_jobs(self, jobs: list[tuple[float, list[int]]]) -> None:
+        pending = list(jobs)
+        while pending and not self.stop_event.is_set():
+            now = time.time()
+            due = [job for job in pending if job[0] <= now]
+            for job in due:
+                self._tap(job[1], jitter=0)
+                pending.remove(job)
+                self._sleep(0.12)
+            if pending:
+                self._sleep(min(0.15, max(0.01, min(job[0] for job in pending) - time.time())))
+
+    def _monitor_stage(self, stage: int, initial_state: str = BuilderScreen.STAGE_PREP) -> tuple[str, bytes]:
+        timing = self.builder.get("timing", {})
+        timeout = float(timing.get("battle_timeout_seconds", 190))
+        confirmations = max(1, int(timing.get("state_confirmations", 2)))
+        damage_unknown_timeout = max(0.0, float(timing.get("damage_unknown_restart_seconds", 20)))
+        damage_stall_timeout = max(0.0, float(timing.get("damage_stall_seconds", 20)))
+        unknown_state_timeout = max(0.0, float(timing.get("unknown_state_restart_seconds", 12)))
+        frame_difference_threshold = max(0.0, float(timing.get("frozen_frame_min_difference", 1.5)))
+        started = time.time()
+        # Làng 2 hiển thị tổng phá hủy của cả hai làng, nên luôn bắt đầu từ 100%.
+        last_damage = 100 if stage == 2 else -1
+        last_log_at = 0.0
+        last_damage_changed_at = started
+        last_visual_change_at = started
+        damage_unknown_started_at: float | None = None
+        unknown_state_started_at: float | None = None
+        previous_battle_png = b""
+        last_png = b""
+        battle_seen = initial_state == BuilderScreen.BATTLE
+        candidate_state = BuilderScreen.UNKNOWN
+        candidate_reads = 0
+        home_state_started_at: float | None = None
+        home_state_reads = 0
+        while not self.stop_event.is_set() and time.time() - started < timeout:
+            self._pause_gate()
+            last_png = self.adb.screencap_png()
+            state = self.vision.classify(last_png)
+            now = time.time()
+
+            if state == BuilderScreen.START_DIALOG:
+                self.log(f"[BUILDER][WARN] Làng {stage} bị gián đoạn và đã quay về Start Attack.")
+                self._close_start_dialog(cooldown=not self.vision.find_now_available(last_png))
+                self._record_state_failure(f"builder-stage{stage}-interrupted", last_png, restart=False)
+                return BuilderScreen.INTERRUPTED, last_png
+            if state in {BuilderScreen.BUILDER_HOME, BuilderScreen.MAIN_HOME}:
+                if home_state_started_at is None:
+                    home_state_started_at = now
+                    home_state_reads = 1
+                else:
+                    home_state_reads += 1
+                grace = (
+                    max(0.0, float(timing.get("result_transition_grace_seconds", 8)))
+                    if stage == 2 and last_damage >= 100
+                    else 0.0
+                )
+                if now - home_state_started_at < grace or home_state_reads < confirmations:
+                    self._sleep(float(timing.get("screen_poll_seconds", 1.0)))
+                    continue
+                self.log(f"[BUILDER][WARN] Làng {stage} bị gián đoạn và đã quay về màn hình làng.")
+                self._record_state_failure(f"builder-stage{stage}-returned-home", last_png, restart=False)
+                return BuilderScreen.INTERRUPTED, last_png
+            home_state_started_at = None
+            home_state_reads = 0
+
+            if state == BuilderScreen.UNKNOWN:
+                if unknown_state_started_at is None:
+                    unknown_state_started_at = now
+                unknown_seconds = now - unknown_state_started_at
+                if unknown_state_timeout > 0 and unknown_seconds >= unknown_state_timeout:
+                    self._restart_stage_watchdog(
+                        f"builder-stage{stage}-unknown-screen",
+                        last_png,
+                        f"Làng {stage}: màn hình không nhận diện được quá {int(unknown_seconds)}s.",
+                    )
+                    return BuilderScreen.RESTARTED, last_png
+            else:
+                unknown_state_started_at = None
+
+            if state == BuilderScreen.BATTLE:
+                battle_seen = True
+                if previous_battle_png:
+                    difference = self.vision.battle_frame_difference(previous_battle_png, last_png)
+                    if difference >= frame_difference_threshold:
+                        last_visual_change_at = now
+                previous_battle_png = last_png
+
+            terminal_state = BuilderScreen.UNKNOWN
+            if state == BuilderScreen.RESULT:
+                terminal_state = BuilderScreen.RESULT
+            elif stage == 1 and battle_seen and state == BuilderScreen.STAGE_PREP:
+                terminal_state = BuilderScreen.STAGE_PREP
+
+            if terminal_state != BuilderScreen.UNKNOWN:
+                if terminal_state == candidate_state:
+                    candidate_reads += 1
+                else:
+                    candidate_state = terminal_state
+                    candidate_reads = 1
+                if candidate_reads >= confirmations:
+                    return terminal_state, last_png
+            else:
+                candidate_state = BuilderScreen.UNKNOWN
+                candidate_reads = 0
+
+            if state == BuilderScreen.BATTLE:
+                self._maybe_activate_hero(last_png)
+                if now - last_log_at >= 5:
+                    damage = self.vision.read_damage(last_png)
+                    if stage == 2 and 0 <= damage < 100:
+                        damage = last_damage
+                    if damage < 0:
+                        if damage_unknown_started_at is None:
+                            damage_unknown_started_at = now
+                        unknown_seconds = now - damage_unknown_started_at
+                        if damage_unknown_timeout > 0 and unknown_seconds >= damage_unknown_timeout:
+                            self._restart_stage_watchdog(
+                                f"builder-stage{stage}-damage-unknown",
+                                last_png,
+                                f"Làng {stage}: damage '?' liên tục quá {int(unknown_seconds)}s.",
+                            )
+                            return BuilderScreen.RESTARTED, last_png
+                    else:
+                        damage_unknown_started_at = None
+                    if damage > last_damage:
+                        last_damage = damage
+                        last_damage_changed_at = now
+                    label = f"{last_damage}%" if last_damage >= 0 else "?"
+                    self.log(f"[BUILDER] Làng {stage}: damage={label}.")
+                    last_log_at = now
+
+                    damage_stalled = now - last_damage_changed_at >= damage_stall_timeout
+                    frame_frozen = now - last_visual_change_at >= damage_stall_timeout
+                    if (
+                        damage_stall_timeout > 0
+                        and last_damage >= 0
+                        and damage_stalled
+                        and frame_frozen
+                    ):
+                        self._restart_stage_watchdog(
+                            f"builder-stage{stage}-battle-frozen",
+                            last_png,
+                            f"Làng {stage}: damage đứng ở {last_damage}% và khung hình đứng "
+                            f"quá {int(damage_stall_timeout)}s.",
+                        )
+                        return BuilderScreen.RESTARTED, last_png
+            self._sleep(float(timing.get("screen_poll_seconds", 1.0)))
+        self.log(f"[BUILDER][WARN] Làng {stage} vượt thời gian theo dõi.")
+        return BuilderScreen.UNKNOWN, last_png
+
+    def _restart_stage_watchdog(self, reason: str, png: bytes, message: str) -> None:
+        self._watchdog_restarts = int(getattr(self, "_watchdog_restarts", 0)) + 1
+        maximum = max(1, int(self.builder.get("timing", {}).get("max_watchdog_restarts", 3)))
+        self.log(f"[BUILDER][WARN] {message} Restart game ({self._watchdog_restarts}/{maximum}).")
+        self._record_state_failure(reason, png, restart=False)
+        if self.stop_event.is_set():
+            return
+        if self._watchdog_restarts >= maximum:
+            self.log("[BUILDER][ERROR] Watchdog Làng đêm lỗi liên tiếp. Dừng bot.")
+            self.stop_event.set()
+            return
+        self._restart_game()
+
+    def _maybe_activate_hero(self, png: bytes) -> None:
+        deployed_at = float(getattr(self, "_hero_deployed_at", 0.0))
+        if deployed_at <= 0:
+            return
+        deploy = self.builder.get("deploy", {})
+        now = time.time()
+        first_delay = max(0.0, float(deploy.get("hero_first_skill_delay_seconds", 28.0)))
+        last_skill = float(getattr(self, "_hero_last_skill_at", 0.0))
+        if last_skill <= 0 and now - deployed_at < first_delay:
+            return
+        if last_skill > 0:
+            if not deploy.get("hero_repeat_skill", True):
+                return
+            minimum = max(1.0, float(deploy.get("hero_repeat_min_seconds", 15.0)))
+            if now - last_skill < minimum:
+                return
+
+        hero = self.builder.get("coords", {}).get("hero_slot", [162, 812])
+        if not self.vision.hero_ability_ready(png, hero):
+            return
+        self._tap(hero, jitter=0)
+        self._hero_last_skill_at = now
+        self.log("[BUILDER] Kích hoạt kỹ năng tướng.")
+
+    def _handle_result(self, png: bytes) -> None:
+        self._watchdog_restarts = 0
+        if not png:
+            png = self.adb.screencap_png()
+        result = self.vision.read_result(png)
+        raw_damage = int(result.get("damage", -1))
+        raw_gold = int(result.get("gold", -1))
+        raw_trophies = int(result.get("trophies", -1))
+        damage = max(0, raw_damage)
+        gold = max(0, raw_gold)
+        trophies = max(0, raw_trophies)
+        missing = [name for name, value in (("damage", raw_damage), ("vàng", raw_gold), ("cúp", raw_trophies)) if value < 0]
+        if missing:
+            self.log(f"[BUILDER][WARN] Không đọc được kết quả: {', '.join(missing)}.")
+        self.stats["builder_damage"] += damage
+        self.stats["builder_gold"] += gold
+        self.stats["builder_trophies"] += trophies
+        self._publish_stats()
+        self.log(f"[BUILDER] Kết quả: damage={damage}% | vàng={gold:,} | cúp={trophies}.")
+        self._tap(self.builder.get("coords", {}).get("return_home", [800, 760]))
+        self._sleep(float(self.builder.get("timing", {}).get("result_wait_seconds", 12.0)))
+        after_return = self.adb.screencap_png()
+        if self.vision.classify(after_return) == BuilderScreen.STAR_BONUS:
+            self._dismiss_star_bonus(after_return)
+
+    def _builder_wall_upgrade_due(self) -> bool:
+        settings = self.builder.get("wall_upgrade", {})
+        if not settings.get("enabled", False) or self.attacks_since_wall_upgrade < 0:
+            return False
+        if settings.get("run_after_attacks_enabled", True):
+            every = max(1, int(settings.get("run_every_n_attacks", 10)))
+            if self.attacks_since_wall_upgrade >= every:
+                return True
+
+        resources = self._read_builder_resources_stable(settings)
+        if not resources:
+            return False
+        threshold = max(1.0, min(100.0, float(settings.get("trigger_percent", 90)))) / 100.0
+        gold_capacity = max(1, int(settings.get("gold_capacity", 6000000)))
+        elixir_capacity = max(1, int(settings.get("elixir_capacity", 6000000)))
+        return (
+            resources["gold"] >= gold_capacity * threshold
+            or resources["elixir"] >= elixir_capacity * threshold
+        )
+
+    def _upgrade_builder_walls(self) -> dict[str, Any]:
+        settings = self.builder.get("wall_upgrade", {})
+        coords = settings.get("coords", {})
+        resources = self._read_builder_resources_stable(settings)
+        if not resources:
+            return {"success": False, "reason": "read_resources_failed"}
+
+        self.log(
+            f"[BUILDER][WALL] Bắt đầu. Vàng={resources['gold']:,} | "
+            f"dầu={resources['elixir']:,}."
+        )
+        self._tap(coords.get("builder_icon", [840, 50]), jitter=0)
+        self._sleep(0.8)
+        wall_position = self._find_builder_wall_row(settings)
+        if not wall_position:
+            self.log("[BUILDER][WALL] Không tìm thấy Wall trong danh sách.")
+            self._close_builder_wall_ui()
+            return {"success": False, "reason": "wall_not_found"}
+
+        self._tap(wall_position, jitter=0)
+        self._sleep(0.8)
+        add_rounds = max(1, int(settings.get("add1_rounds", 1)))
+        for _ in range(add_rounds):
+            if self.stop_event.is_set():
+                self._close_builder_wall_ui()
+                return {"success": False, "reason": "stopped"}
+            self._tap(coords.get("add1_button", [800, 700]), jitter=0)
+            self._sleep(0.25)
+        self.log(f"[BUILDER][WALL] Đã bấm +1 {add_rounds} lần.")
+
+        costs = {
+            "gold": self._read_builder_wall_cost_stable(
+                settings, coords.get("upgrade_gold_button", [980, 700])
+            ),
+            "elixir": self._read_builder_wall_cost_stable(
+                settings, coords.get("upgrade_elixir_button", [1155, 700])
+            ),
+        }
+        payment = self._select_builder_wall_payment(settings, resources, costs)
+        if not payment:
+            self.log(
+                f"[BUILDER][WALL] Không đủ ngân sách. Giá vàng/dầu: "
+                f"{costs['gold']:,}/{costs['elixir']:,}."
+            )
+            self._close_builder_wall_ui()
+            return {"success": False, "reason": "budget_unavailable"}
+        pay_with, cost = payment
+        if settings.get("dry_run", False):
+            self.log(f"[BUILDER][WALL] Mô phỏng: sẽ trả {cost:,} bằng {pay_with}.")
+            self._close_builder_wall_ui()
+            self.attacks_since_wall_upgrade = 0
+            return {"success": True, "reason": "dry_run"}
+
+        button_key = "upgrade_gold_button" if pay_with == "gold" else "upgrade_elixir_button"
+        default_button = [980, 700] if pay_with == "gold" else [1155, 700]
+        self._tap(coords.get(button_key, default_button), jitter=0)
+        self._sleep(0.8)
+        confirmation_png = self.adb.screencap_png()
+        confirmation = self.vision.read_wall_confirmation(confirmation_png)
+        if (
+            not confirmation.get("is_wall_upgrade")
+            or confirmation.get("currency") != pay_with
+            or int(confirmation.get("cost", -1)) != cost
+        ):
+            self.log(
+                "[BUILDER][WALL] Hộp xác nhận không khớp giá/loại tiền, hủy để tránh tiêu nhầm."
+            )
+            self._tap(coords.get("confirm_cancel_button", [622, 580]), jitter=0)
+            self._sleep(0.5)
+            self._close_builder_wall_ui()
+            return {"success": False, "reason": "confirmation_mismatch"}
+
+        self._tap(coords.get("confirm_okay_button", [973, 580]), jitter=0)
+        self._sleep(1.2)
+        after = self._read_builder_resources_stable(settings)
+        if not after or after[pay_with] >= resources[pay_with]:
+            self.log("[BUILDER][WALL] Không xác minh được tài nguyên đã giảm sau khi nâng.")
+            self._close_builder_wall_ui()
+            return {"success": False, "reason": "upgrade_verify_failed"}
+
+        spent = resources[pay_with] - after[pay_with]
+        self.attacks_since_wall_upgrade = 0
+        self.log(f"[BUILDER][WALL] Nâng thành công, đã dùng {spent:,} {pay_with}.")
+        self._close_builder_wall_ui()
+        return {"success": True, "reason": ""}
+
+    def _select_builder_wall_payment(
+        self,
+        settings: dict[str, Any],
+        resources: dict[str, int],
+        costs: dict[str, int],
+    ) -> tuple[str, int] | None:
+        budgets = {
+            "gold": max(0, resources["gold"] - int(settings.get("reserve_gold", 0))),
+            "elixir": max(0, resources["elixir"] - int(settings.get("reserve_elixir", 0))),
+        }
+        for kind in sorted(budgets, key=budgets.get, reverse=True):
+            cost = int(costs.get(kind, -1))
+            if cost > 0 and cost <= budgets[kind]:
+                return kind, cost
+        return None
+
+    def _find_builder_wall_row(self, settings: dict[str, Any]) -> list[int] | None:
+        maximum = max(0, int(settings.get("max_wall_search_scrolls", 9)))
+        region = settings.get("search_region", [720, 120, 420, 580])
+        swipe = settings.get("list_scroll_swipe", [930, 650, 930, 250, 500])
+        for attempt in range(maximum + 1):
+            png = self.adb.screencap_png()
+            position = self.vision.find_wall_row(png, region)
+            if position:
+                if attempt:
+                    self.log(f"[BUILDER][WALL] Tìm thấy Wall sau {attempt} lần cuộn.")
+                return position
+            if attempt < maximum:
+                self.log(f"[BUILDER][WALL] Cuộn tìm Wall ({attempt + 1}/{maximum}).")
+                self.adb.swipe(*swipe)
+                self._sleep(0.7)
+        return None
+
+    def _read_builder_resources_stable(self, settings: dict[str, Any]) -> dict[str, int] | None:
+        attempts = max(1, int(settings.get("resource_read_attempts", 3)))
+        delay = max(0.0, float(settings.get("read_attempt_delay", 0.45)))
+        samples: list[dict[str, int]] = []
+        for attempt in range(attempts):
+            self._pause_gate()
+            if self.stop_event.is_set():
+                return None
+            samples.append(self.vision.read_home_resources(self.adb.screencap_png()))
+            if attempt < attempts - 1:
+                self._sleep(delay)
+        gold = self._builder_stable_number([int(item.get("gold", -1)) for item in samples])
+        elixir = self._builder_stable_number([int(item.get("elixir", -1)) for item in samples])
+        if gold < 0 or elixir < 0:
+            self.log("[BUILDER][WALL] Không đọc ổn định được vàng/dầu.")
+            return None
+        if gold > int(settings.get("gold_capacity", 1) * 1.2) or elixir > int(
+            settings.get("elixir_capacity", 1) * 1.2
+        ):
+            self.log("[BUILDER][WALL] OCR tài nguyên vượt sức chứa hợp lý, bỏ qua.")
+            return None
+        return {"gold": gold, "elixir": elixir}
+
+    def _read_builder_wall_cost_stable(self, settings: dict[str, Any], button: list[int]) -> int:
+        attempts = max(1, int(settings.get("cost_read_attempts", 3)))
+        delay = max(0.0, float(settings.get("read_attempt_delay", 0.45)))
+        values: list[int] = []
+        for attempt in range(attempts):
+            values.append(self.vision.read_wall_upgrade_cost(self.adb.screencap_png(), button))
+            if attempt < attempts - 1:
+                self._sleep(delay)
+        return self._builder_stable_number(values)
+
+    def _builder_stable_number(self, values: list[int]) -> int:
+        valid = sorted(value for value in values if value >= 0)
+        if not valid:
+            return -1
+        counts = {value: valid.count(value) for value in set(valid)}
+        best, count = max(counts.items(), key=lambda item: item[1])
+        return best if count >= 2 else valid[len(valid) // 2]
+
+    def _backoff_builder_wall_upgrade(self, reason: str) -> None:
+        retry = max(1, int(self.builder.get("wall_upgrade", {}).get("retry_backoff_attacks", 10)))
+        self.attacks_since_wall_upgrade = -retry
+        self.log(f"[BUILDER][WALL] Thất bại ({reason}), thử lại sau {retry} trận.")
+
+    def _close_builder_wall_ui(self) -> None:
+        for _ in range(2):
+            if self.stop_event.is_set():
+                return
+            self.adb.shell("input", "keyevent", "KEYCODE_BACK", timeout=5)
+            self._sleep(0.3)
+
+    def _wait_for_states(self, states: set[str], timeout: float) -> tuple[str, bytes]:
+        deadline = time.time() + max(0.1, timeout)
+        confirmations = max(1, int(self.builder.get("timing", {}).get("state_confirmations", 2)))
+        last_png = b""
+        candidate_state = BuilderScreen.UNKNOWN
+        candidate_reads = 0
+        while not self.stop_event.is_set() and time.time() < deadline:
+            self._pause_gate()
+            last_png = self.adb.screencap_png()
+            state = self.vision.classify(last_png)
+            if state in states:
+                if state == candidate_state:
+                    candidate_reads += 1
+                else:
+                    candidate_state = state
+                    candidate_reads = 1
+                if candidate_reads >= confirmations:
+                    return state, last_png
+            else:
+                candidate_state = BuilderScreen.UNKNOWN
+                candidate_reads = 0
+            self._sleep(float(self.builder.get("timing", {}).get("screen_poll_seconds", 1.0)))
+        return BuilderScreen.UNKNOWN, last_png
+
+    def _zoom_out(self, count: int) -> None:
+        for _ in range(max(0, count)):
+            if self.stop_event.is_set():
+                return
+            if not self._ldplayer_zoom_out():
+                self.adb.shell("input", "keyevent", "KEYCODE_ZOOM_OUT", timeout=5)
+            self._sleep(0.25)
+
+    def _ldplayer_zoom_out(self) -> bool:
+        adb_path = Path(self.config.get("adb", {}).get("path", ""))
+        ldconsole = adb_path.with_name("ldconsole.exe") if adb_path.name else Path()
+        if not ldconsole.exists():
+            return False
+        index = str(int(self.config.get("game", {}).get("ldplayer_index", 0)))
+        try:
+            subprocess.run(
+                [str(ldconsole), "zoomOut", "--index", index],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+        return True
+
+    def _restart_game(self) -> None:
+        package = self.config.get("adb", {}).get("package", "com.supercell.clashofclans")
+        self.adb.force_stop_app(package)
+        self._sleep(1)
+        self.adb.start_app(package)
+        self._sleep(float(self.config.get("game", {}).get("restart_wait_seconds", 18)))
+
+    def _record_state_failure(self, reason: str, png: bytes = b"", restart: bool = True) -> None:
+        if self.stop_event.is_set():
+            return
+        self._state_failures = int(getattr(self, "_state_failures", 0)) + 1
+        timing = self.builder.get("timing", {})
+        maximum = max(1, int(timing.get("max_state_failures", 5)))
+        restart_after = max(1, int(timing.get("restart_after_state_failures", 2)))
+        self.log(
+            f"[BUILDER][WARN] Lỗi trạng thái {self._state_failures}/{maximum}: {reason}."
+        )
+        self._dump_debug(reason, png)
+        if self._state_failures >= maximum:
+            self.log("[BUILDER][ERROR] Không thể phục hồi trạng thái Làng đêm. Dừng bot.")
+            self.stop_event.set()
+            return
+        if restart and self._state_failures % restart_after == 0:
+            self.log("[BUILDER] Khởi động lại game để phục hồi trạng thái.")
+            self._restart_game()
+
+    def _clear_state_failures(self) -> None:
+        self._state_failures = 0
+
+    def _clustered_points(self, polygon: list[list[int]], count: int) -> list[list[int]]:
+        deploy = self.builder.get("deploy", {})
+        candidates = self._random_points_in_polygon(polygon, max(32, int(deploy.get("random_points", 64))))
+        anchor = random.choice(candidates)
+        minimum = max(0, int(deploy.get("point_spacing_min_px", 20)))
+        maximum = max(minimum, int(deploy.get("point_spacing_max_px", 45)))
+        points = [anchor]
+        attempts = 0
+        while len(points) < count and attempts < count * 120:
+            attempts += 1
+            distance = random.randint(minimum, maximum)
+            candidate = [
+                anchor[0] + random.randint(-distance, distance),
+                anchor[1] + random.randint(-distance, distance),
+            ]
+            if self._point_in_polygon(candidate, polygon) and self._far_enough(candidate, points, minimum):
+                points.append(candidate)
+        while len(points) < count:
+            points.append(random.choice(candidates))
+        return points
+
+    def _random_points_in_polygon(self, polygon: list[list[int]], count: int) -> list[list[int]]:
+        min_x = min(point[0] for point in polygon)
+        max_x = max(point[0] for point in polygon)
+        min_y = min(point[1] for point in polygon)
+        max_y = max(point[1] for point in polygon)
+        points: list[list[int]] = []
+        for _ in range(max(100, count * 80)):
+            candidate = [random.randint(min_x, max_x), random.randint(min_y, max_y)]
+            if self._point_in_polygon(candidate, polygon):
+                points.append(candidate)
+                if len(points) >= count:
+                    break
+        return points or polygon
+
+    def _point_in_polygon(self, point: list[int], polygon: list[list[int]]) -> bool:
+        x, y = point
+        inside = False
+        previous = len(polygon) - 1
+        for current in range(len(polygon)):
+            xi, yi = polygon[current]
+            xj, yj = polygon[previous]
+            if ((yi > y) != (yj > y)) and x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-9) + xi:
+                inside = not inside
+            previous = current
+        return inside
+
+    def _far_enough(self, point: list[int], points: list[list[int]], minimum: int) -> bool:
+        return all((point[0] - other[0]) ** 2 + (point[1] - other[1]) ** 2 >= minimum**2 for other in points)
+
+    def _valid_polygon(self, points: Any) -> list[list[int]]:
+        if not isinstance(points, list):
+            return []
+        normalized = [[int(point[0]), int(point[1])] for point in points if isinstance(point, list) and len(point) >= 2]
+        return normalized if len(normalized) >= 3 else []
+
+    def _tap(self, point: list[int], jitter: int = 4) -> None:
+        self.adb.tap(int(point[0]), int(point[1]), jitter=jitter)
+
+    def _sleep(self, seconds: float) -> None:
+        deadline = time.time() + max(0.0, float(seconds))
+        while not self.stop_event.is_set() and time.time() < deadline:
+            time.sleep(min(0.1, deadline - time.time()))
+
+    def _pause_gate(self) -> None:
+        while self.pause_event.is_set() and not self.stop_event.is_set():
+            time.sleep(0.2)
+
+    def _load_total_stats(self) -> dict[str, int]:
+        try:
+            data = json.loads(self.stats_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {key: 0 for key in self.STAT_KEYS}
+        total = data.get("total", {})
+        return {key: int(total.get(key, 0)) for key in self.STAT_KEYS}
+
+    def _publish_stats(self) -> None:
+        total = {key: self.base_total_stats.get(key, 0) + self.stats.get(key, 0) for key in self.STAT_KEYS}
+        payload = {
+            "session_started_at": self.session_started_at,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "current_session": dict(self.stats),
+            "total": total,
+        }
+        try:
+            self.stats_path.parent.mkdir(parents=True, exist_ok=True)
+            self.stats_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self.log(f"[BUILDER][WARN] Không lưu được thống kê: {exc}")
+        self.stats_callback(payload)
+
+    def _dump_debug(self, reason: str, png: bytes = b"") -> None:
+        if not png:
+            try:
+                png = self.adb.screencap_png()
+            except ADBError:
+                return
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = self.debug_dir / f"{self.safe_device}-{timestamp}-{self._safe_name(reason)}.png"
+        try:
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(png)
+            self.log(f"[BUILDER][DEBUG] Đã lưu ảnh: {path}")
+        except OSError:
+            return
+
+    def _safe_name(self, value: str) -> str:
+        return "".join(character if character.isalnum() or character in ("-", "_") else "_" for character in value)

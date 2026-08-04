@@ -10,12 +10,22 @@ from pathlib import Path
 from typing import Any
 
 from adb_client import ADBClient, ADBError
+from builder_vision import BuilderBaseVision, BuilderScreen
 from slot_detector import SlotDetector
 from vision import Vision
 
 
 class FarmBot:
-    STAT_KEYS = ("attacks", "next", "gold_seen", "elixir_seen")
+    STAT_KEYS = (
+        "attacks",
+        "next",
+        "gold_seen",
+        "elixir_seen",
+        "builder_attacks",
+        "builder_gold",
+        "builder_trophies",
+        "builder_damage",
+    )
 
     def __init__(
         self,
@@ -32,6 +42,7 @@ class FarmBot:
         resolution = tuple(config["game"].get("resolution", [1600, 900]))
         self.adb = ADBClient(config["adb"]["path"], config["adb"]["device"], log=log, resolution=resolution)
         self.vision = Vision(config, log=log)
+        self.village_vision = BuilderBaseVision(config, log=log, vision=self.vision)
         self.slot_detector = SlotDetector(config, log)
         self.stats = {key: 0 for key in self.STAT_KEYS}
         self.stats_callback = stats_callback or (lambda stats: None)
@@ -110,6 +121,8 @@ class FarmBot:
             self.log("[INFO] Bot stopped.")
 
     def _run_cycle(self) -> None:
+        if not self._ensure_main_village():
+            return
         if not self._ensure_home_attack_visible():
             self.log("[HOME] Attack button still missing. Skip this cycle.")
             return
@@ -141,6 +154,86 @@ class FarmBot:
                     wall_result = self._upgrade_walls()
                     if not wall_result["success"]:
                         self._backoff_wall_upgrade(str(wall_result["reason"]))
+
+    def _ensure_main_village(self) -> bool:
+        if not hasattr(self, "village_vision"):
+            return True
+        png = self.adb.screencap_png()
+        state = self.village_vision.classify(png)
+        if state == BuilderScreen.MAIN_HOME:
+            return True
+        if state == BuilderScreen.BUILDER_HOME:
+            return self._travel_to_main_village(png)
+        if state == BuilderScreen.RESULT:
+            self.log("[HOME] Đang ở kết quả Làng đêm. Về nhà trước.")
+            point = self.config.get("builder_base", {}).get("coords", {}).get("return_home", [800, 760])
+            self.adb.tap(int(point[0]), int(point[1]), jitter=0)
+            self._sleep(float(self.config.get("builder_base", {}).get("timing", {}).get("result_wait_seconds", 12)))
+            return False
+        if state in {BuilderScreen.STAGE_PREP, BuilderScreen.BATTLE}:
+            self.log("[HOME] Trận Làng đêm chưa kết thúc. Chờ về nhà rồi mới chạy Làng chính.")
+            return False
+        return True
+
+    def _travel_to_main_village(self, png: bytes = b"") -> bool:
+        entry = self.config.get("builder_base", {}).get("entry", {})
+        self.log("[HOME] Đang ở Làng đêm. Tìm thuyền về Làng chính.")
+        for _ in range(max(0, int(entry.get("return_zoom_out_count", 4)))):
+            if self.stop_event.is_set():
+                return False
+            if not self._ldplayer_zoom_out():
+                self.adb.shell("input", "keyevent", "KEYCODE_ZOOM_OUT", timeout=5)
+            self._sleep(0.25)
+        for swipe in entry.get("return_camera_swipes", [[950, 350, 650, 650, 500]]):
+            self.adb.swipe(*[int(value) for value in swipe])
+            self._sleep(0.8)
+
+        attempts = max(1, int(entry.get("boat_search_attempts", 3)))
+        last_png = png
+        moved_from_stage2 = False
+        for attempt in range(1, attempts + 1):
+            last_png = self.adb.screencap_png()
+            if self.village_vision.classify(last_png) == BuilderScreen.MAIN_HOME:
+                return True
+            boat = self.village_vision.find_return_boat(last_png)
+            if boat is None:
+                if not moved_from_stage2:
+                    self.log("[HOME] Chưa thấy thuyền. Có thể đang ở map 2 Làng đêm; kéo về map 1.")
+                    for swipe in entry.get(
+                        "stage2_to_stage1_swipes",
+                        [[1200, 700, 400, 200, 700]] * 3,
+                    ):
+                        self.adb.swipe(*[int(value) for value in swipe])
+                        self._sleep(0.6)
+                    for swipe in entry.get("return_camera_swipes", []):
+                        self.adb.swipe(*[int(value) for value in swipe])
+                        self._sleep(0.6)
+                    moved_from_stage2 = True
+                    continue
+                self.log(f"[HOME] Chưa thấy thuyền về Làng chính ({attempt}/{attempts}).")
+                self._sleep(1)
+                continue
+
+            x, y, score = boat
+            self.log(f"[HOME] Bấm thuyền về Làng chính tại {x},{y} (score={score:.2f}).")
+            self.adb.tap(x, y, jitter=0)
+            self._sleep(2)
+            focused_png = self.adb.screencap_png()
+            if self.village_vision.classify(focused_png) == BuilderScreen.MAIN_HOME:
+                return True
+            focused_boat = self.village_vision.find_return_boat(focused_png)
+            if focused_boat is not None:
+                self.adb.tap(focused_boat[0], focused_boat[1], jitter=0)
+            self._sleep(float(entry.get("travel_wait_seconds", 8)))
+            arrived_png = self.adb.screencap_png()
+            if self.village_vision.classify(arrived_png) == BuilderScreen.MAIN_HOME:
+                self.log("[HOME] Đã về Làng chính.")
+                return True
+            last_png = arrived_png
+
+        self._dump_debug_png("main-village-return-failed", last_png)
+        self.log("[HOME][WARN] Không thể về Làng chính bằng thuyền.")
+        return False
 
     def _too_many_cycle_errors(self, cycle_errors: int, max_cycle_errors: int) -> bool:
         if max_cycle_errors <= 0 or cycle_errors < max_cycle_errors:

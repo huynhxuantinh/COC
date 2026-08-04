@@ -5,6 +5,7 @@ import {
   Crosshair,
   FlaskConical,
   Hammer,
+  Moon,
   LayoutDashboard,
   ScanSearch,
   Settings,
@@ -16,7 +17,7 @@ import { useConfigEditor } from "../hooks/useConfigEditor";
 import type { BotStatus } from "../services/types";
 import { StatusBadge } from "./StatusBadge";
 
-const navGroups = [
+const mainNavGroups = [
   { label: "Vận hành", items: [{ to: "/", label: "Tổng quan", icon: LayoutDashboard }] },
   { label: "Chiến thuật", items: [
     { to: "/farm", label: "Farm", icon: Swords },
@@ -32,9 +33,21 @@ const navGroups = [
   { label: "Hệ thống", items: [{ to: "/settings", label: "Cài đặt", icon: Settings }] },
 ];
 
+const builderNavGroups = [
+  { label: "Vận hành", items: [{ to: "/", label: "Tổng quan", icon: LayoutDashboard }] },
+  { label: "Làng đêm", items: [
+    { to: "/builder/strategy", label: "Chiến thuật", icon: Moon },
+    { to: "/builder/coordinates", label: "Tọa độ", icon: Crosshair },
+    { to: "/builder/wall-upgrade", label: "Nâng tường", icon: Hammer },
+  ] },
+  { label: "Hệ thống", items: [{ to: "/settings", label: "Cài đặt", icon: Settings }] },
+];
+
 export function AppShell({ status }: { status: BotStatus | null }) {
   const { config, isDirty } = useConfigEditor();
   const resolution = config?.game?.resolution ?? [1600, 900];
+  const villageMode = config?.farm?.village === "builder" ? "builder" : "main";
+  const navGroups = villageMode === "builder" ? builderNavGroups : mainNavGroups;
   const resolutionLabel = Array.isArray(resolution) && resolution.length >= 2 ? `${resolution[0]}x${resolution[1]}` : "1600x900";
 
   return (
@@ -48,7 +61,7 @@ export function AppShell({ status }: { status: BotStatus | null }) {
               </span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold text-white">COC Auto Farm</p>
-                <p className="truncate text-xs text-slate-500">LDPlayer · {resolutionLabel}</p>
+                <p className="truncate text-xs text-slate-500">{villageMode === "builder" ? "Làng đêm" : "Làng chính"} · {resolutionLabel}</p>
               </div>
             </div>
             <div className="hidden sm:block lg:hidden"><StatusBadge status={status} /></div>
