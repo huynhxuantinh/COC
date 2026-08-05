@@ -582,7 +582,7 @@ class BuilderBaseTests(unittest.TestCase):
             (),
             {
                 "classify": lambda _self, _png: BuilderScreen.BATTLE,
-                "read_damage": lambda _self, _png: -1,
+                "read_damage": lambda _self, _png, stage=2: -1,
                 "battle_frame_difference": lambda _self, _previous, _current: 10.0,
             },
         )()
@@ -650,7 +650,7 @@ class BuilderBaseTests(unittest.TestCase):
             (),
             {
                 "classify": lambda _self, _png: BuilderScreen.BATTLE,
-                "read_damage": lambda _self, _png: 25,
+                "read_damage": lambda _self, _png, stage=2: 25,
                 "battle_frame_difference": lambda _self, _previous, _current: 0.0,
             },
         )()
@@ -706,6 +706,31 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertEqual(published, [])
         self.assertTrue(bot._elixir_cart_pending)
         self.assertEqual(taps, [(900, 500), (1175, 760), (1342, 88)])
+
+    def test_disabled_elixir_cart_still_closes_an_open_popup(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "elixir_cart": {
+                "enabled": False,
+                "close_button": [1342, 88],
+                "open_wait_seconds": 0,
+            }
+        }
+        bot.log = lambda _message: None
+        bot._sleep = lambda _seconds: None
+        taps: list[tuple[int, int]] = []
+        bot._tap = lambda point, jitter=0: taps.append(tuple(point))
+        bot.vision = type(
+            "Vision",
+            (),
+            {
+                "is_elixir_cart_popup": lambda _self, png: png == b"popup",
+                "read_elixir_cart_reward": lambda _self, _png: self.fail("Reward must not be read"),
+            },
+        )()
+
+        self.assertFalse(bot._collect_elixir_cart(b"popup"))
+        self.assertEqual(taps, [(1342, 88)])
 
     def test_elixir_cart_credits_when_remaining_reward_is_zero(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)
@@ -917,7 +942,7 @@ class BuilderBaseTests(unittest.TestCase):
             (),
             {
                 "classify": lambda _self, png: states[png],
-                "read_damage": lambda _self, _png: 100,
+                "read_damage": lambda _self, _png, stage=2: 100,
             },
         )()
 
@@ -959,7 +984,7 @@ class BuilderBaseTests(unittest.TestCase):
             (),
             {
                 "classify": lambda _self, png: states[png],
-                "read_damage": lambda _self, _png: 12,
+                "read_damage": lambda _self, _png, stage=2: 12,
             },
         )()
 
@@ -1074,7 +1099,7 @@ class BuilderBaseTests(unittest.TestCase):
             (),
             {
                 "classify": lambda _self, _png: BuilderScreen.BATTLE,
-                "read_damage": lambda _self, _png: 100,
+                "read_damage": lambda _self, _png, stage=2: 100,
                 "battle_frame_difference": lambda _self, _before, _after: 10,
             },
         )()
@@ -1086,6 +1111,63 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertEqual(state, BuilderScreen.RESTARTED)
         self.assertEqual(png, b"battle")
         self.assertEqual(restarted[0][0], "builder-stage1-transition-timeout")
+
+    def test_stage_one_rejects_outliers_and_requires_consecutive_completion_reads(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "timing": {
+                "battle_timeout_seconds": 20,
+                "stage_transition_timeout_seconds": 5,
+                "screen_poll_seconds": 5,
+                "state_confirmations": 1,
+                "damage_unknown_restart_seconds": 0,
+                "damage_stall_seconds": 0,
+                "unknown_state_restart_seconds": 0,
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.pause_event = threading.Event()
+        bot.log = lambda _message: None
+        bot._pause_gate = lambda: None
+        bot._maybe_activate_hero = lambda _png: None
+        clock = {"value": 0.0}
+        bot._active_time = lambda: clock["value"]
+        bot._sleep = lambda seconds: clock.__setitem__("value", clock["value"] + seconds)
+        bot.adb = type("ADB", (), {"screencap_png": lambda _self: b"battle"})()
+        readings = iter((150, 100, 50, 200, 100, 50))
+        bot.vision = type(
+            "Vision",
+            (),
+            {
+                "classify": lambda _self, _png: BuilderScreen.BATTLE,
+                "read_damage": lambda _self, _png, stage=2: next(readings),
+                "battle_frame_difference": lambda _self, _before, _after: 10,
+            },
+        )()
+        restarted: list[tuple[str, bytes, str]] = []
+        bot._restart_stage_watchdog = lambda reason, png, message: restarted.append((reason, png, message))
+
+        state, _png = bot._monitor_stage(1, initial_state=BuilderScreen.BATTLE)
+
+        self.assertEqual(state, BuilderScreen.UNKNOWN)
+        self.assertEqual(restarted, [])
+
+    def test_builder_damage_ocr_uses_stage_specific_maximum(self) -> None:
+        vision = BuilderBaseVision.__new__(BuilderBaseVision)
+        vision.builder = {"ocr_regions": {"damage_percent": [1, 2, 3, 4]}}
+        limits: list[int] = []
+        vision.vision = type(
+            "Vision",
+            (),
+            {
+                "image_from_png": lambda _self, _png: object(),
+                "read_percent": lambda _self, _image, _region, max_percent: limits.append(max_percent) or 50,
+            },
+        )()
+
+        self.assertEqual(vision.read_damage(b"frame", stage=1), 50)
+        self.assertEqual(vision.read_damage(b"frame", stage=2), 50)
+        self.assertEqual(limits, [100, 200])
 
     def test_stage_two_deploys_survivors_before_reinforcements(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)

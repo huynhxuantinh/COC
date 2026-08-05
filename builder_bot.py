@@ -327,10 +327,14 @@ class BuilderBaseBot:
 
     def _collect_elixir_cart(self, png: bytes = b"") -> bool:
         cart = self.builder.get("elixir_cart", {})
+        current = png or self._screencap_png()
         if not cart.get("enabled", True):
+            if self.vision.is_elixir_cart_popup(current):
+                self.log("[BUILDER] Tự nhận dầu đang tắt; đóng popup Elixir Cart.")
+                self._tap(cart.get("close_button", [1342, 88]), jitter=0)
+                self._sleep(float(cart.get("open_wait_seconds", 1.0)))
             return False
 
-        current = png or self._screencap_png()
         if self.vision.is_elixir_cart_popup(current):
             self.log("[BUILDER] Elixir Cart đang mở; đóng để đọc dầu trước khi nhận.")
             self._tap(cart.get("close_button", [1342, 88]), jitter=0)
@@ -636,6 +640,7 @@ class BuilderBaseBot:
         home_state_started_at: float | None = None
         home_state_reads = 0
         stage_transition_started_at: float | None = None
+        stage_completion_reads = 0
         while not self.stop_event.is_set() and self._active_time() - started < timeout:
             self._pause_gate()
             if self.stop_event.is_set():
@@ -712,9 +717,11 @@ class BuilderBaseBot:
             if state == BuilderScreen.BATTLE:
                 self._maybe_activate_hero(last_png)
                 if now - last_log_at >= 5:
-                    damage = self.vision.read_damage(last_png)
-                    if stage == 2 and 0 <= damage < 100:
+                    damage = self.vision.read_damage(last_png, stage=stage)
+                    if stage == 2 and not 100 <= damage <= 200:
                         damage = last_damage
+                    elif stage == 1 and not 0 <= damage <= 100:
+                        damage = -1
                     if damage < 0:
                         if damage_unknown_started_at is None:
                             damage_unknown_started_at = now
@@ -731,8 +738,13 @@ class BuilderBaseBot:
                     if damage > last_damage:
                         last_damage = damage
                         last_damage_changed_at = now
-                    if stage == 1 and last_damage >= 100 and stage_transition_started_at is None:
-                        stage_transition_started_at = now
+                    if stage == 1:
+                        if damage == 100:
+                            stage_completion_reads += 1
+                        else:
+                            stage_completion_reads = 0
+                        if stage_completion_reads >= 2 and stage_transition_started_at is None:
+                            stage_transition_started_at = now
                     label = f"{last_damage}%" if last_damage >= 0 else "?"
                     self.log(f"[BUILDER] Làng {stage}: damage={label}.")
                     last_log_at = now

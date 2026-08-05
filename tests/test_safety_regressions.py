@@ -119,6 +119,45 @@ class SafetyRegressionTests(unittest.TestCase):
         with patch("bot.time.time", return_value=110.0):
             self.assertEqual(bot._active_time(), 105.0)
 
+    def test_home_pause_blocks_ldconsole_zoom_until_resume(self) -> None:
+        bot = self._bare_bot()
+        bot.config["adb"] = {"path": "C:/LDPlayer/adb.exe"}
+        bot.config["game"] = {"ldplayer_index": 0}
+        bot.auto_stop_at = 0.0
+        bot.next_periodic_restart_at = 0.0
+        bot._paused_seconds_total = 0.0
+        bot.pause_event.set()
+        zoom_calls: list[list[str]] = []
+
+        def resume_after_wait(_seconds: float) -> None:
+            self.assertEqual(zoom_calls, [])
+            bot.pause_event.clear()
+
+        def record_zoom(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
+            zoom_calls.append(command)
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch("bot.Path.exists", return_value=True), patch(
+            "bot.time.time", side_effect=[100.0, 105.0]
+        ), patch("bot.time.sleep", side_effect=resume_after_wait), patch(
+            "bot.subprocess.run", side_effect=record_zoom
+        ):
+            self.assertTrue(bot._ldplayer_zoom_out())
+
+        self.assertEqual(len(zoom_calls), 1)
+        self.assertEqual(bot._paused_seconds_total, 5.0)
+
+    def test_home_stop_skips_ldconsole_zoom(self) -> None:
+        bot = self._bare_bot()
+        bot.config["adb"] = {"path": "C:/LDPlayer/adb.exe"}
+        bot.config["game"] = {"ldplayer_index": 0}
+        bot.stop_event.set()
+
+        with patch("bot.Path.exists", return_value=True), patch("bot.subprocess.run") as run:
+            self.assertFalse(bot._ldplayer_zoom_out())
+
+        run.assert_not_called()
+
     def test_backend_rejects_active_slot_without_template_or_fallback(self) -> None:
         service = BotService.__new__(BotService)
         config = normalize_config({})
@@ -512,14 +551,93 @@ class SafetyRegressionTests(unittest.TestCase):
         bot._close_wall_popup = lambda: None
         bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
         bot._find_wall_row = lambda _settings: [100, 100]
-        bot._read_wall_cost_stable = lambda _settings, _button: 800_000
-
         result = bot._upgrade_walls()
 
         self.assertFalse(result["success"])
-        self.assertEqual(result["reason"], "confirmation_mismatch")
+        self.assertEqual(result["reason"], "cost_over_budget")
         self.assertIn((80, 80), bot.adb.taps)
         self.assertNotIn((70, 70), bot.adb.taps)
+
+    def test_home_wall_dry_run_opens_confirmation_then_cancels(self) -> None:
+        bot = self._bare_bot()
+        bot.config["wall_upgrade"] = {
+            "use_add10": False,
+            "add1_rounds": 2,
+            "dry_run": True,
+            "coords": {
+                "builder_icon": [10, 10],
+                "upgrade_more_button": [20, 20],
+                "add1_button": [30, 30],
+                "add10_button": [31, 31],
+                "remove_button": [40, 40],
+                "upgrade_gold_button": [50, 50],
+                "upgrade_elixir_button": [60, 60],
+                "confirm_okay_button": [70, 70],
+                "confirm_cancel_button": [80, 80],
+            },
+        }
+        bot.adb = _ScreenshotADB(b"confirmation")
+        bot.vision = _WallVision(
+            {"is_wall_upgrade": True, "currency": "gold", "cost": 800_000}
+        )
+        bot._sleep = lambda _seconds: None
+        bot._pause_gate = lambda: 0
+        bot._close_wall_popup = lambda: None
+        bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
+        bot._find_wall_row = lambda _settings: [100, 100]
+
+        result = bot._upgrade_walls()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(bot.adb.taps.count((30, 30)), 2)
+        self.assertIn((50, 50), bot.adb.taps)
+        self.assertIn((80, 80), bot.adb.taps)
+        self.assertNotIn((70, 70), bot.adb.taps)
+
+    def test_home_wall_row_uses_safe_horizontal_tap_position(self) -> None:
+        bot = self._bare_bot()
+        bot.adb = _ScreenshotADB(b"builder-list")
+        bot.vision = type(
+            "WallRowVision",
+            (),
+            {"find_wall_row": lambda _self, _png, _region: [617, 558]},
+        )()
+        bot._pause_gate = lambda: 0
+
+        position = bot._find_wall_row(
+            {
+                "search_region": [560, 100, 500, 600],
+                "wall_row_tap_x": 780,
+                "max_wall_search_scrolls": 0,
+            }
+        )
+
+        self.assertEqual(position, [780, 558])
+
+    def test_wall_row_detection_requires_price_on_same_line(self) -> None:
+        vision = Vision.__new__(Vision)
+        vision.available = True
+        vision.image_from_png = lambda _png: type("Image", (), {"crop": lambda _self, _box: object()})()
+        data = {
+            "text": ["Wall", "Wall-x283", "@2", "000", "000"],
+            "left": [310, 57, 314, 355, 412],
+            "top": [300, 458, 460, 461, 461],
+            "width": [50, 103, 30, 35, 35],
+            "height": [18, 17, 14, 14, 14],
+            "conf": [95, 69, 80, 90, 90],
+        }
+        vision.pytesseract = type(
+            "Tesseract",
+            (),
+            {
+                "Output": type("Output", (), {"DICT": "dict"}),
+                "image_to_data": lambda _self, _crop, output_type: data,
+            },
+        )()
+
+        position = vision.find_wall_row(b"builder-list", [560, 100, 500, 600])
+
+        self.assertEqual(position, [668, 566])
 
     def test_home_wall_confirmation_accepts_body_when_stylized_title_is_garbled(self) -> None:
         vision = Vision.__new__(Vision)

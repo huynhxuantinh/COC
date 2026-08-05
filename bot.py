@@ -283,6 +283,9 @@ class FarmBot:
         if not ldconsole.exists():
             return False
         index = str(int(self.config.get("game", {}).get("ldplayer_index", 0)))
+        self._pause_gate()
+        if self.stop_event.is_set():
+            return False
         try:
             subprocess.run(
                 [str(ldconsole), "zoomOut", "--index", index],
@@ -1255,54 +1258,18 @@ class FarmBot:
             int(settings.get("max_add_rounds" if use_add10 else "add1_rounds", 60 if use_add10 else 1)),
         )
         self.log(f"[WALL] Dung nut {add_label}, toi da {max_rounds} lan bam.")
-        last_safe_cost = 0
-        last_add_increment = 0
         rounds = 0
         while rounds < max_rounds and not self.stop_event.is_set():
-            if last_safe_cost > 0 and last_add_increment > 0 and last_safe_cost + last_add_increment > budget:
-                self.log(
-                    f"[WALL] Lan bam tiep theo du kien vuot ngan sach "
-                    f"({last_safe_cost + last_add_increment:,}/{budget:,}), dung them."
-                )
-                break
             self._tap(add_button)
             self._sleep(0.5)
-            cost = self._read_wall_cost_stable(settings, upgrade_button)
-            if cost < 0:
-                self.log("[WALL] Khong doc duoc gia nang tuong, huy de tranh tieu nham.")
-                self._close_wall_popup()
-                return self._wall_result(False, "read_cost_failed")
-            if cost > budget:
-                self.log(f"[WALL] Gia {cost:,} vuot ngan sach {budget:,}, lui lai.")
-                cost = self._rollback_wall_selection_to_budget(settings, coords, upgrade_button, budget, use_add10)
-                if cost <= 0:
-                    self.log("[WALL] Khong xac nhan duoc gia sau khi lui, huy de tranh tieu nham.")
-                    self._close_wall_popup()
-                    return self._wall_result(False, "rollback_read_failed")
-                last_safe_cost = cost
-                break
-            if cost > last_safe_cost:
-                last_add_increment = cost - last_safe_cost
-            last_safe_cost = cost
             rounds += 1
 
-        if last_safe_cost <= 0:
-            self.log("[WALL] Khong du tai nguyen de nang tuong, huy.")
-            self._close_wall_popup()
-            return self._wall_result(False, "budget_unavailable")
+        if self.stop_event.is_set():
+            return self._wall_result(False, "stopped")
 
-        if last_safe_cost > budget:
-            self.log(f"[WALL] Gia {last_safe_cost:,} vuot ngan sach {budget:,} {pay_with}, huy.")
-            self._close_wall_popup()
-            return self._wall_result(False, "cost_over_budget")
-
-        if settings.get("dry_run", False):
-            self.log(f"[WALL] Dry-run: se nang tuong {last_safe_cost:,} {pay_with}, khong bam xac nhan.")
-            self._close_wall_popup()
-            self.attacks_since_wall_upgrade = 0
-            return self._wall_result(True)
-
-        self.log(f"[WALL] Xac nhan nang tuong: {last_safe_cost:,} {pay_with}.")
+        # The price text on the wall toolbar is highly stylized and proved
+        # unreliable in live OCR. Open the confirmation first, then validate
+        # its wall label, currency and total before any irreversible tap.
         self._tap(upgrade_button)
         self._sleep(1.0)
         try:
@@ -1311,24 +1278,38 @@ class FarmBot:
             self.log(f"[WALL] Khong chup duoc hop xac nhan: {exc}")
             self._tap(coords["confirm_cancel_button"])
             self._sleep(0.4)
-            self._close_wall_popup()
             return self._wall_result(False, "confirmation_read_failed")
         confirmation = self.vision.read_wall_confirmation(confirmation_png, settings)
-        if (
-            not confirmation.get("is_wall_upgrade")
-            or confirmation.get("currency") != pay_with
-            or int(confirmation.get("cost", -1)) != last_safe_cost
-        ):
+        confirmation_cost = int(confirmation.get("cost", -1))
+        if not confirmation.get("is_wall_upgrade") or confirmation.get("currency") != pay_with or confirmation_cost <= 0:
             self.log(
                 f"[WALL] Hop xac nhan khong khop: "
                 f"wall={bool(confirmation.get('is_wall_upgrade'))} | "
                 f"currency={confirmation.get('currency') or '?'} | "
-                f"cost={int(confirmation.get('cost', -1)):,}. Huy de tranh tieu nham."
+                f"cost={confirmation_cost:,}. Huy de tranh tieu nham."
             )
             self._tap(coords["confirm_cancel_button"])
             self._sleep(0.4)
-            self._close_wall_popup()
             return self._wall_result(False, "confirmation_mismatch")
+        if confirmation_cost > budget:
+            self.log(
+                f"[WALL] Gia xac nhan {confirmation_cost:,} vuot ngan sach "
+                f"{budget:,} {pay_with}, huy."
+            )
+            self._tap(coords["confirm_cancel_button"])
+            self._sleep(0.4)
+            return self._wall_result(False, "cost_over_budget")
+        if settings.get("dry_run", False):
+            self.log(
+                f"[WALL] Dry-run hop le: {confirmation_cost:,} {pay_with}; "
+                "da huy truoc nut Okay."
+            )
+            self._tap(coords["confirm_cancel_button"])
+            self._sleep(0.4)
+            self.attacks_since_wall_upgrade = 0
+            return self._wall_result(True)
+
+        self.log(f"[WALL] Xac nhan nang tuong: {confirmation_cost:,} {pay_with}.")
         self._tap(coords["confirm_okay_button"])
         self._sleep(1.2)
         if self.stop_event.is_set():
@@ -1367,6 +1348,8 @@ class FarmBot:
                 return None
             wall_pos = self.vision.find_wall_row(png, search_region)
             if wall_pos:
+                row_tap_x = int(settings.get("wall_row_tap_x", search_region[0] + search_region[2] // 2))
+                wall_pos = [row_tap_x, int(wall_pos[1])]
                 if attempt > 0:
                     self.log(f"[WALL] Tim thay Wall sau {attempt} lan cuon.")
                 return wall_pos
@@ -1496,8 +1479,6 @@ class FarmBot:
 
     def _close_wall_popup(self) -> None:
         try:
-            self._shell("input", "keyevent", "KEYCODE_BACK", timeout=5)
-            self._sleep(0.3)
             self._shell("input", "keyevent", "KEYCODE_BACK", timeout=5)
             self._sleep(0.3)
         except ADBError as exc:

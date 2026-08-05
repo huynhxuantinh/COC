@@ -256,10 +256,10 @@ class BuilderBaseVision:
                     best = center
         return best
 
-    def read_damage(self, png: bytes) -> int:
+    def read_damage(self, png: bytes, stage: int = 2) -> int:
         image = self.vision.image_from_png(png)
         region = self.builder.get("ocr_regions", {}).get("damage_percent", [1450, 630, 135, 70])
-        return self.vision.read_percent(image, region, max_percent=200)
+        return self.vision.read_percent(image, region, max_percent=100 if stage == 1 else 200)
 
     def battle_frame_difference(self, previous_png: bytes, current_png: bytes) -> float:
         previous = cv2.imdecode(np.frombuffer(previous_png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)

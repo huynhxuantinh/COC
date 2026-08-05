@@ -409,14 +409,42 @@ class Vision:
         x, y, w, h = search_region
         crop = image.crop((x, y, x + w, y + h))
         data = self.pytesseract.image_to_data(crop, output_type=self.pytesseract.Output.DICT)
+        candidates: list[tuple[float, int, int]] = []
         for index, text in enumerate(data.get("text", [])):
-            if text.strip().lower().startswith("wall"):
-                bx = int(data["left"][index])
-                by = int(data["top"][index])
-                bw = int(data["width"][index])
-                bh = int(data["height"][index])
-                return [x + bx + bw // 2, y + by + bh // 2]
-        return None
+            if not text.strip().lower().startswith("wall"):
+                continue
+            bx = int(data["left"][index])
+            by = int(data["top"][index])
+            bw = int(data["width"][index])
+            bh = int(data["height"][index])
+            center_y = by + bh // 2
+
+            # The list is translucent, so reject village labels behind it.
+            # A real Wall row starts on the left and has a price on the right.
+            if bx > int(w * 0.5):
+                continue
+            has_price = False
+            for price_index, price_text in enumerate(data.get("text", [])):
+                if price_index == index or not any(character.isdigit() for character in price_text):
+                    continue
+                price_x = int(data["left"][price_index])
+                price_y = int(data["top"][price_index])
+                price_h = int(data["height"][price_index])
+                price_center_y = price_y + price_h // 2
+                if price_x >= int(w * 0.55) and abs(price_center_y - center_y) <= max(18, bh):
+                    has_price = True
+                    break
+            if not has_price:
+                continue
+            try:
+                confidence = float(data["conf"][index])
+            except (TypeError, ValueError):
+                confidence = 0.0
+            candidates.append((confidence, x + bx + bw // 2, y + center_y))
+        if not candidates:
+            return None
+        _, center_x, center_y = max(candidates, key=lambda candidate: candidate[0])
+        return [center_x, center_y]
 
     def read_wall_upgrade_cost(self, png: bytes, button_center: list[int]) -> int:
         image = self.image_from_png(png)
