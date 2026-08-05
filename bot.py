@@ -5,6 +5,7 @@ import random
 import subprocess
 import threading
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -1272,14 +1273,12 @@ class FarmBot:
         # its wall label, currency and total before any irreversible tap.
         self._tap(upgrade_button)
         self._sleep(1.0)
-        try:
-            confirmation_png = self._screencap_png()
-        except ADBError as exc:
-            self.log(f"[WALL] Khong chup duoc hop xac nhan: {exc}")
+        confirmation = self._read_wall_confirmation_stable(settings, pay_with)
+        if confirmation is None:
+            self.log("[WALL] Hop xac nhan khong dat dong thuan an toan, huy.")
             self._tap(coords["confirm_cancel_button"])
             self._sleep(0.4)
             return self._wall_result(False, "confirmation_read_failed")
-        confirmation = self.vision.read_wall_confirmation(confirmation_png, settings)
         confirmation_cost = int(confirmation.get("cost", -1))
         if not confirmation.get("is_wall_upgrade") or confirmation.get("currency") != pay_with or confirmation_cost <= 0:
             self.log(
@@ -1329,9 +1328,74 @@ class FarmBot:
                 f"({before_value:,} -> {after_value:,})."
             )
             return self._wall_result(False, "upgrade_not_confirmed")
-        self.log(f"[WALL] Da xac minh {pay_with} giam {before_value - after_value:,}.")
+        spent = before_value - after_value
+        spend_tolerance = max(
+            max(0, int(settings.get("spend_verify_tolerance_absolute", 1_000))),
+            int(
+                confirmation_cost
+                * max(0.0, float(settings.get("spend_verify_tolerance_percent", 0.1)))
+                / 100.0
+            ),
+        )
+        if spent > budget or abs(spent - confirmation_cost) > spend_tolerance:
+            message = (
+                f"Chi tieu nang tuong bat thuong: modal={confirmation_cost:,} | "
+                f"thuc_te={spent:,} | ngan_sach={budget:,} {pay_with}. Bot da dung."
+            )
+            self.log(f"[WALL][CRITICAL] {message}")
+            self._notify_lifecycle("error", message)
+            self.stop_event.set()
+            return self._wall_result(False, "unsafe_spend_detected")
+        self.log(f"[WALL] Da xac minh {pay_with} giam {spent:,}.")
         self.attacks_since_wall_upgrade = 0
         return self._wall_result(True)
+
+    def _read_wall_confirmation_stable(
+        self,
+        settings: dict[str, Any],
+        expected_currency: str,
+    ) -> dict[str, Any] | None:
+        attempts = max(3, int(settings.get("confirmation_read_attempts", 3)))
+        min_agree = max(2, int(settings.get("confirmation_min_agree", 2)))
+        delay = max(0.0, float(settings.get("confirmation_read_delay", 0.35)))
+        valid: list[tuple[bool, str, int]] = []
+        details: list[str] = []
+        for attempt in range(attempts):
+            self._pause_gate()
+            if self.stop_event.is_set():
+                return None
+            try:
+                png = self._screencap_png()
+            except ADBError as exc:
+                details.append(f"adb={exc}")
+            else:
+                sample = self.vision.read_wall_confirmation(png, settings)
+                wall_ok = bool(sample.get("is_wall_upgrade"))
+                currency = str(sample.get("currency", ""))
+                cost = int(sample.get("cost", -1))
+                text_cost = int(sample.get("text_cost", -1))
+                region_cost = int(sample.get("region_cost", -1))
+                sources_match = bool(sample.get("sources_match", False))
+                details.append(
+                    f"wall={wall_ok},currency={currency or '?'},"
+                    f"text={text_cost},region={region_cost}"
+                )
+                if wall_ok and currency == expected_currency and sources_match and cost > 0:
+                    valid.append((wall_ok, currency, cost))
+            if attempt < attempts - 1:
+                self._sleep(delay)
+
+        self.log(f"[WALL] Mau hop xac nhan: {' | '.join(details)}.")
+        if not valid or min_agree > attempts:
+            return None
+        candidate, count = Counter(valid).most_common(1)[0]
+        if count < min_agree:
+            return None
+        return {
+            "is_wall_upgrade": candidate[0],
+            "currency": candidate[1],
+            "cost": candidate[2],
+        }
 
     def _find_wall_row(self, settings: dict[str, Any]) -> list[int] | None:
         search_region = settings.get("search_region", [560, 100, 500, 600])

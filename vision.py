@@ -463,20 +463,23 @@ class Vision:
         text = self.read_text(image, region, psm=6)
         compact = "".join(character for character in text if character.isalnum())
         currency = "elixir" if "elixir" in compact else "gold" if "gold" in compact else ""
-        cost = -1
+        text_cost = -1
         if currency:
             match = re.search(rf"for(\d{{1,12}}){currency}", compact)
             if match:
-                cost = int(match.group(1))
-        if cost < 0:
-            cost = self.read_number(image, cost_region)
+                text_cost = int(match.group(1))
+        region_cost = self.read_number(image, cost_region)
+        sources_match = text_cost > 0 and region_cost > 0 and text_cost == region_cost
         is_wall_upgrade = "upgradewalls" in compact or (
             "upgrade" in compact and "selectedwalls" in compact
         )
         return {
             "is_wall_upgrade": is_wall_upgrade,
             "currency": currency,
-            "cost": cost,
+            "cost": text_cost if sources_match else -1,
+            "text_cost": text_cost,
+            "region_cost": region_cost,
+            "sources_match": sources_match,
         }
 
     def read_damage_percent(self, png: bytes) -> int:

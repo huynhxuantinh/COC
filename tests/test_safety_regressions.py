@@ -43,11 +43,18 @@ class _ScreenshotADB(_TapRecorder):
 class _WallVision:
     available = True
 
-    def __init__(self, confirmation: dict[str, object]) -> None:
-        self.confirmation = confirmation
+    def __init__(self, confirmation: dict[str, object] | list[dict[str, object]]) -> None:
+        self.confirmations = confirmation if isinstance(confirmation, list) else [confirmation]
+        self.index = 0
 
     def read_wall_confirmation(self, _png: bytes, _settings: dict[str, object]) -> dict[str, object]:
-        return self.confirmation
+        sample = dict(self.confirmations[min(self.index, len(self.confirmations) - 1)])
+        self.index += 1
+        cost = int(sample.get("cost", -1))
+        sample.setdefault("text_cost", cost)
+        sample.setdefault("region_cost", cost)
+        sample.setdefault("sources_match", cost > 0)
+        return sample
 
 
 class SafetyRegressionTests(unittest.TestCase):
@@ -594,6 +601,78 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertIn((80, 80), bot.adb.taps)
         self.assertNotIn((70, 70), bot.adb.taps)
 
+    def test_home_wall_confirmation_requires_two_agreeing_samples(self) -> None:
+        bot = self._bare_bot()
+        bot.config["wall_upgrade"] = {
+            "use_add10": False,
+            "add1_rounds": 1,
+            "dry_run": False,
+            "coords": {
+                "builder_icon": [10, 10],
+                "upgrade_more_button": [20, 20],
+                "add1_button": [30, 30],
+                "add10_button": [31, 31],
+                "upgrade_gold_button": [50, 50],
+                "upgrade_elixir_button": [60, 60],
+                "confirm_okay_button": [70, 70],
+                "confirm_cancel_button": [80, 80],
+            },
+        }
+        bot.adb = _ScreenshotADB(b"confirmation")
+        bot.vision = _WallVision(
+            [
+                {"is_wall_upgrade": True, "currency": "gold", "cost": 700_000},
+                {"is_wall_upgrade": True, "currency": "gold", "cost": 800_000},
+                {"is_wall_upgrade": True, "currency": "gold", "cost": 900_000},
+            ]
+        )
+        bot._sleep = lambda _seconds: None
+        bot._pause_gate = lambda: 0
+        bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
+        bot._find_wall_row = lambda _settings: [100, 100]
+
+        result = bot._upgrade_walls()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["reason"], "confirmation_read_failed")
+        self.assertIn((80, 80), bot.adb.taps)
+        self.assertNotIn((70, 70), bot.adb.taps)
+
+    def test_home_wall_stops_when_actual_spend_exceeds_confirmed_cost(self) -> None:
+        bot = self._bare_bot()
+        bot.config["wall_upgrade"] = {
+            "use_add10": False,
+            "add1_rounds": 1,
+            "dry_run": False,
+            "coords": {
+                "builder_icon": [10, 10],
+                "upgrade_more_button": [20, 20],
+                "add1_button": [30, 30],
+                "add10_button": [31, 31],
+                "upgrade_gold_button": [50, 50],
+                "upgrade_elixir_button": [60, 60],
+                "confirm_okay_button": [70, 70],
+                "confirm_cancel_button": [80, 80],
+            },
+        }
+        bot.adb = _ScreenshotADB(b"confirmation")
+        bot.vision = _WallVision(
+            {"is_wall_upgrade": True, "currency": "gold", "cost": 800_000}
+        )
+        bot._sleep = lambda _seconds: None
+        bot._pause_gate = lambda: 0
+        bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
+        bot._find_wall_row = lambda _settings: [100, 100]
+        bot._read_home_resources_stable = lambda _settings: {"gold": 1_000_000, "elixir": 0}
+
+        result = bot._upgrade_walls()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["reason"], "unsafe_spend_detected")
+        self.assertTrue(bot.stop_event.is_set())
+        self.assertIn((70, 70), bot.adb.taps)
+        self.assertTrue(any("[WALL][CRITICAL]" in message for message in bot.log_messages))
+
     def test_home_wall_row_uses_safe_horizontal_tap_position(self) -> None:
         bot = self._bare_bot()
         bot.adb = _ScreenshotADB(b"builder-list")
@@ -647,13 +726,31 @@ class SafetyRegressionTests(unittest.TestCase):
             "spiradeiwgas do you really want to upgrade the selected "
             "walls for 8400000 elixir?"
         )
-        vision.read_number = lambda _image, _region: self.fail("cost should come from modal text")
+        vision.read_number = lambda _image, _region: 8_400_000
 
         confirmation = vision.read_wall_confirmation(b"modal")
 
         self.assertTrue(confirmation["is_wall_upgrade"])
         self.assertEqual(confirmation["currency"], "elixir")
         self.assertEqual(confirmation["cost"], 8_400_000)
+        self.assertTrue(confirmation["sources_match"])
+
+    def test_home_wall_confirmation_rejects_cost_source_mismatch(self) -> None:
+        vision = Vision.__new__(Vision)
+        vision.config = {"wall_upgrade": {}}
+        vision.image_from_png = lambda _png: object()
+        vision.read_text = lambda _image, _region, psm=7: (
+            "upgrade walls do you really want to upgrade the selected walls for 800000 gold?"
+        )
+        vision.read_number = lambda _image, _region: 5_000_000
+
+        confirmation = vision.read_wall_confirmation(b"modal")
+
+        self.assertTrue(confirmation["is_wall_upgrade"])
+        self.assertEqual(confirmation["text_cost"], 800_000)
+        self.assertEqual(confirmation["region_cost"], 5_000_000)
+        self.assertFalse(confirmation["sources_match"])
+        self.assertEqual(confirmation["cost"], -1)
 
     def test_debug_dump_can_capture_its_own_screenshot(self) -> None:
         bot = self._bare_bot()

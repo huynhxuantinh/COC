@@ -612,6 +612,18 @@ class BotService:
                 raise ValueError("Nâng tường: số trận nghỉ lỗi tạm thời phải >= 1.")
             if int(wall_upgrade.get("retry_backoff_attacks", 1)) < 1:
                 raise ValueError("Nâng tường: số trận nghỉ sau lỗi phải >= 1.")
+            confirmation_attempts = int(wall_upgrade.get("confirmation_read_attempts", 3))
+            confirmation_min_agree = int(wall_upgrade.get("confirmation_min_agree", 2))
+            if confirmation_attempts < 3:
+                raise ValueError("Nâng tường: phải đọc hộp xác nhận ít nhất 3 lần.")
+            if confirmation_min_agree < 2 or confirmation_min_agree > confirmation_attempts:
+                raise ValueError("Nâng tường: số mẫu đồng thuận phải từ 2 đến số lần đọc.")
+            if float(wall_upgrade.get("confirmation_read_delay", 0.35)) < 0:
+                raise ValueError("Nâng tường: delay đọc hộp xác nhận phải >= 0.")
+            if float(wall_upgrade.get("spend_verify_tolerance_percent", 0.1)) < 0:
+                raise ValueError("Nâng tường: tolerance phần trăm phải >= 0.")
+            if int(wall_upgrade.get("spend_verify_tolerance_absolute", 1000)) < 0:
+                raise ValueError("Nâng tường: tolerance tuyệt đối phải >= 0.")
             if str(wall_upgrade.get("pay_with", "auto")) not in {"auto", "gold", "elixir"}:
                 raise ValueError("Nâng tường: tài nguyên dùng phải là auto/gold/elixir.")
         counts = manual_army.get("counts", {})

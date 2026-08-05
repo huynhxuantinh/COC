@@ -1081,8 +1081,13 @@
     "resource_read_attempts": 3,
     "cost_read_attempts": 3,
     "read_attempt_delay": 0.45,
+    "confirmation_read_attempts": 3,
+    "confirmation_min_agree": 2,
+    "confirmation_read_delay": 0.35,
     "stable_read_tolerance_percent": 0.1,
     "stable_read_tolerance_absolute": 1000,
+    "spend_verify_tolerance_percent": 0.1,
+    "spend_verify_tolerance_absolute": 1000,
     "search_region": [
       560,
       100,
