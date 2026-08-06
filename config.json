@@ -1067,7 +1067,7 @@
     "dry_run": false,
     "dry_run_retry_attacks": 10,
     "run_after_attacks_enabled": false,
-    "run_every_n_attacks": 15,
+    "run_every_n_attacks": 1,
     "gold_capacity": 10000000,
     "elixir_capacity": 10000000,
     "trigger_percent": 85,
