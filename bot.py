@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import random
 import subprocess
 import threading
@@ -13,7 +12,7 @@ from typing import Any
 from adb_client import ADBClient, ADBError
 from builder_vision import BuilderBaseVision, BuilderScreen
 from slot_detector import SlotDetector
-from stats_store import STAT_KEYS, load_total_stats, merge_existing_stats
+from stats_store import STAT_KEYS, atomic_write_json, load_total_stats, merge_existing_stats
 from vision import Vision
 
 
@@ -1266,6 +1265,7 @@ class FarmBot:
             rounds += 1
 
         if self.stop_event.is_set():
+            self._close_wall_popup()
             return self._wall_result(False, "stopped")
 
         # The price text on the wall toolbar is highly stylized and proved
@@ -1276,8 +1276,7 @@ class FarmBot:
         confirmation = self._read_wall_confirmation_stable(settings, pay_with)
         if confirmation is None:
             self.log("[WALL] Hop xac nhan khong dat dong thuan an toan, huy.")
-            self._tap(coords["confirm_cancel_button"])
-            self._sleep(0.4)
+            self._cancel_confirmation_and_close_wall_ui(coords)
             return self._wall_result(False, "confirmation_read_failed")
         confirmation_cost = int(confirmation.get("cost", -1))
         if not confirmation.get("is_wall_upgrade") or confirmation.get("currency") != pay_with or confirmation_cost <= 0:
@@ -1287,30 +1286,39 @@ class FarmBot:
                 f"currency={confirmation.get('currency') or '?'} | "
                 f"cost={confirmation_cost:,}. Huy de tranh tieu nham."
             )
-            self._tap(coords["confirm_cancel_button"])
-            self._sleep(0.4)
+            self._cancel_confirmation_and_close_wall_ui(coords)
             return self._wall_result(False, "confirmation_mismatch")
         if confirmation_cost > budget:
             self.log(
                 f"[WALL] Gia xac nhan {confirmation_cost:,} vuot ngan sach "
-                f"{budget:,} {pay_with}, huy."
+                f"{budget:,} {pay_with}, giam so tuong da chon."
             )
-            self._tap(coords["confirm_cancel_button"])
-            self._sleep(0.4)
-            return self._wall_result(False, "cost_over_budget")
+            confirmation, rollback_reason = self._rollback_wall_selection_to_budget(
+                settings,
+                coords,
+                upgrade_button,
+                pay_with,
+                budget,
+                use_add10,
+                rounds,
+            )
+            if confirmation is None:
+                return self._wall_result(False, rollback_reason)
+            confirmation_cost = int(confirmation["cost"])
         if settings.get("dry_run", False):
+            retry_after = max(1, int(settings.get("dry_run_retry_attacks", 10)))
             self.log(
                 f"[WALL] Dry-run hop le: {confirmation_cost:,} {pay_with}; "
-                "da huy truoc nut Okay."
+                f"da huy truoc nut Okay, thu lai sau {retry_after} tran."
             )
-            self._tap(coords["confirm_cancel_button"])
-            self._sleep(0.4)
-            self.attacks_since_wall_upgrade = 0
+            self._cancel_confirmation_and_close_wall_ui(coords)
+            self.attacks_since_wall_upgrade = -retry_after
             return self._wall_result(True)
 
         self.log(f"[WALL] Xac nhan nang tuong: {confirmation_cost:,} {pay_with}.")
         self._tap(coords["confirm_okay_button"])
         self._sleep(1.2)
+        self._close_wall_popup()
         if self.stop_event.is_set():
             return self._wall_result(False, "stopped")
         resources_after = self._read_home_resources_stable(settings)
@@ -1468,29 +1476,6 @@ class FarmBot:
             return None
         return {"gold": gold, "elixir": elixir}
 
-    def _read_wall_cost_stable(self, settings: dict[str, Any], button_center: list[int]) -> int:
-        attempts = max(1, int(settings.get("cost_read_attempts", 3)))
-        delay = max(0.0, float(settings.get("read_attempt_delay", 0.45)))
-        values: list[int] = []
-        for attempt in range(attempts):
-            self._pause_gate()
-            if self.stop_event.is_set():
-                return -1
-            try:
-                png = self._screencap_png()
-            except ADBError as exc:
-                self.log(f"[WALL] Khong chup duoc gia nang tuong: {exc}")
-                return -1
-            values.append(int(self.vision.read_wall_upgrade_cost(png, button_center)))
-            if attempt < attempts - 1:
-                self._sleep(delay)
-        self.log(f"[WALL] Mau gia nang: {', '.join(str(value) for value in values)}.")
-        return self._stable_number(
-            values,
-            max(0.0, float(settings.get("stable_read_tolerance_percent", 0.1))),
-            max(0, int(settings.get("stable_read_tolerance_absolute", 1_000))),
-        )
-
     def _stable_number(
         self,
         values: list[int],
@@ -1529,17 +1514,54 @@ class FarmBot:
         settings: dict[str, Any],
         coords: dict[str, Any],
         upgrade_button: list[int],
+        expected_currency: str,
         budget: int,
         use_add10: bool,
-    ) -> int:
-        rollback_clicks = 10 if use_add10 else 1
-        for _ in range(rollback_clicks):
-            self._tap(coords["remove_button"])
-            self._sleep(0.5)
-            cost = self._read_wall_cost_stable(settings, upgrade_button)
+        add_rounds: int,
+    ) -> tuple[dict[str, Any] | None, str]:
+        self._tap(coords["confirm_cancel_button"])
+        self._sleep(0.4)
+        rollback_batch = 10 if use_add10 else 1
+        remaining = max(0, int(add_rounds)) * rollback_batch
+        while remaining > 0 and not self.stop_event.is_set():
+            remove_count = min(rollback_batch, remaining)
+            for _ in range(remove_count):
+                self._tap(coords["remove_button"])
+                self._sleep(0.15)
+            remaining -= remove_count
+            self.log(
+                f"[WALL] Da bo bot {remove_count} tuong, kiem tra lai ngan sach."
+            )
+            self._tap(upgrade_button)
+            self._sleep(1.0)
+            confirmation = self._read_wall_confirmation_stable(settings, expected_currency)
+            if confirmation is None:
+                self.log("[WALL] Khong doc on dinh modal sau rollback, huy.")
+                self._cancel_confirmation_and_close_wall_ui(coords)
+                return None, "confirmation_read_failed"
+            cost = int(confirmation.get("cost", -1))
             if 0 < cost <= budget:
-                return cost
-        return 0
+                self.log(
+                    f"[WALL] Rollback thanh cong: gia {cost:,} / ngan sach {budget:,}."
+                )
+                return confirmation, ""
+            self.log(
+                f"[WALL] Gia sau rollback van vuot ngan sach: {cost:,} / {budget:,}."
+            )
+            self._tap(coords["confirm_cancel_button"])
+            self._sleep(0.4)
+
+        if self.stop_event.is_set():
+            self._close_wall_popup()
+            return None, "stopped"
+        self.log("[WALL] Mot tuong van vuot ngan sach, bo qua lan nang nay.")
+        self._close_wall_popup()
+        return None, "cost_over_budget"
+
+    def _cancel_confirmation_and_close_wall_ui(self, coords: dict[str, Any]) -> None:
+        self._tap(coords["confirm_cancel_button"])
+        self._sleep(0.4)
+        self._close_wall_popup()
 
     def _close_wall_popup(self) -> None:
         try:
@@ -1960,9 +1982,7 @@ class FarmBot:
     def _save_stats(self, payload: dict[str, Any]) -> dict[str, Any]:
         merged = merge_existing_stats(self.stats_path, payload)
         try:
-            self.stats_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.stats_path.open("w", encoding="utf-8") as file:
-                json.dump(merged, file, ensure_ascii=True, indent=2)
+            atomic_write_json(self.stats_path, merged)
         except OSError as exc:
             self.log(f"[WARN] Không ghi được stats.json: {exc}")
             return payload

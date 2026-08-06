@@ -5,8 +5,10 @@ from urllib.parse import unquote
 from fastapi import APIRouter, HTTPException
 
 from backend.models.schemas import (
+    ConfigPayload,
     SlotDetectPayload,
     SlotDetectionsPayload,
+    SlotKindRenamePayload,
     SlotTemplateSavePayload,
     SlotTemplatesPayload,
 )
@@ -42,6 +44,16 @@ def save_template(payload: SlotTemplateSavePayload) -> SlotTemplatesPayload:
 def delete_template(kind: str, filename: str) -> SlotTemplatesPayload:
     try:
         return SlotTemplatesPayload(**bot_service.delete_slot_template(kind, unquote(filename)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/kinds/rename", response_model=ConfigPayload)
+def rename_kind(payload: SlotKindRenamePayload) -> ConfigPayload:
+    try:
+        return ConfigPayload(
+            config=bot_service.rename_slot_kind(payload.old_kind, payload.new_kind)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

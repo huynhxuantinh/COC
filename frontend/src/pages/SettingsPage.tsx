@@ -64,7 +64,7 @@ export function SettingsPage() {
                 <TextInput type="number" min={1} suffix="lần" label="Restart OCR loot tối đa" value={String(farm.max_ocr_restarts ?? 3)} onChange={(event) => updatePath(["farm", "max_ocr_restarts"], numberValue(event.target.value))} />
                 <TextInput type="number" min={1} suffix="lần" label="Lỗi cycle tối đa" value={String(game.max_consecutive_cycle_errors)} onChange={(event) => updatePath(["game", "max_consecutive_cycle_errors"], numberValue(event.target.value))} />
                 <TextInput type="number" min={1} suffix="lần" label="Home restart fail tối đa" value={String(game.max_home_restart_failures ?? 3)} onChange={(event) => updatePath(["game", "max_home_restart_failures"], numberValue(event.target.value))} />
-                <TextInput type="number" min={0} suffix="giây" label="Chờ restart game" value={String(game.restart_wait_seconds)} onChange={(event) => updatePath(["game", "restart_wait_seconds"], numberValue(event.target.value))} />
+                <TextInput type="number" min={1} suffix="giây" label="Chờ restart game" value={String(game.restart_wait_seconds)} onChange={(event) => updatePath(["game", "restart_wait_seconds"], numberValue(event.target.value))} />
                 <TextInput type="number" min={1} suffix="giây" label="Chờ màn hình kết quả" value={String(game.result_wait_seconds ?? 15)} onChange={(event) => updatePath(["game", "result_wait_seconds"], numberValue(event.target.value))} />
               </div>
             </details>
@@ -94,7 +94,7 @@ export function SettingsPage() {
                   <TextInput type="number" min={0} suffix="ms" label="Băng đến" value={String(attackTiming.freeze_random_max_ms ?? 250)} onChange={(event) => updatePath(["attack_timing", "freeze_random_max_ms"], numberValue(event.target.value))} />
                   <TextInput type="number" min={0} suffix="ms" label="Nộ từ" value={String(attackTiming.rage_random_min_ms ?? 500)} onChange={(event) => updatePath(["attack_timing", "rage_random_min_ms"], numberValue(event.target.value))} />
                   <TextInput type="number" min={0} suffix="ms" label="Nộ đến" value={String(attackTiming.rage_random_max_ms ?? 1200)} onChange={(event) => updatePath(["attack_timing", "rage_random_max_ms"], numberValue(event.target.value))} />
-                  <TextInput type="number" min={0} step={0.01} suffix="giây" label="Delay quét ADB" value={String(attackTiming.adb_delay_seconds ?? 0.18)} onChange={(event) => updatePath(["attack_timing", "adb_delay_seconds"], Number(event.target.value || 0))} />
+                  <TextInput type="number" min={0.01} step={0.01} suffix="giây" label="Delay quét ADB" value={String(attackTiming.adb_delay_seconds ?? 0.18)} onChange={(event) => updatePath(["attack_timing", "adb_delay_seconds"], Number(event.target.value || 0))} />
                 </div>
               ) : null}
             </div>

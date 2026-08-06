@@ -176,7 +176,31 @@ class BotService:
         return self.get_status()
 
     def _validate_start_requirements(self, config: dict[str, Any]) -> None:
-        if config.get("farm", {}).get("village", "main") != "builder":
+        farm = config.get("farm", {})
+        if farm.get("village", "main") != "builder":
+            views = (
+                ("trenbenphai", "Trên phải"),
+                ("trenbentrai", "Trên trái"),
+                ("duoibenphai", "Dưới phải"),
+                ("duoibentrai", "Dưới trái"),
+            )
+            zones = config.get("deploy", {}).get("deploy_zones", {})
+            attack_view = str(farm.get("attack_view", "random"))
+            if attack_view in {"random", "auto"}:
+                if not any(self._polygon_ready(zones.get(key, [])) for key, _label in views):
+                    labels = ", ".join(label for _key, label in views)
+                    raise ValueError(
+                        f"Chưa thiết lập vùng thả quân Làng chính. "
+                        f"Chế độ {attack_view} cần ít nhất một vùng: {labels}."
+                    )
+                return
+            labels_by_view = dict(views)
+            if attack_view not in labels_by_view:
+                raise ValueError(f"Góc đánh Làng chính không hợp lệ: {attack_view}.")
+            if not self._polygon_ready(zones.get(attack_view, [])):
+                raise ValueError(
+                    f"Chưa thiết lập vùng thả quân Làng chính: {labels_by_view[attack_view]}."
+                )
             return
         deploy = config.get("builder_base", {}).get("deploy", {})
         missing = [
@@ -186,6 +210,22 @@ class BotService:
         ]
         if missing:
             raise ValueError(f"Chưa thiết lập vùng thả quân: {', '.join(missing)}.")
+
+    @staticmethod
+    def _polygon_ready(points: Any) -> bool:
+        if not isinstance(points, list) or len(points) < 3:
+            return False
+        try:
+            normalized = [(int(point[0]), int(point[1])) for point in points if len(point) >= 2]
+        except (TypeError, ValueError):
+            return False
+        if len(normalized) < 3 or len(set(normalized)) < 3:
+            return False
+        area_twice = sum(
+            x1 * y2 - x2 * y1
+            for (x1, y1), (x2, y2) in zip(normalized, normalized[1:] + normalized[:1])
+        )
+        return area_twice != 0
 
     def toggle_pause(self) -> dict[str, Any]:
         with self.lock:
@@ -289,7 +329,7 @@ class BotService:
             client.tap(int(x), int(y), jitter=0)
         self._log(f"[COORD] Test tap {int(x)},{int(y)}.")
 
-    def save_points(self, target: str, points: list[list[int]], combo_name: str = "") -> dict[str, Any]:
+    def save_points(self, target: str, points: list[list[int]] | list[tuple[int, int]], combo_name: str = "") -> dict[str, Any]:
         deploy_zone_targets = {
             "zone_trenbenphai": ["deploy", "deploy_zones", "trenbenphai"],
             "zone_trenbentrai": ["deploy", "deploy_zones", "trenbentrai"],
@@ -300,7 +340,15 @@ class BotService:
         }
         allowed = dict(deploy_zone_targets)
         spell_match = re.fullmatch(r"spell_group_(\d+)_zone_(trenbenphai|trenbentrai|duoibenphai|duoibentrai)", target)
-        normalized = [[int(point[0]), int(point[1])] for point in points]
+        if not isinstance(points, list):
+            raise ValueError("Danh sách tọa độ không hợp lệ.")
+        normalized: list[list[int]] = []
+        for index, point in enumerate(points, start=1):
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                raise ValueError(f"Điểm {index} phải có đúng hai tọa độ [x, y].")
+            if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in point):
+                raise ValueError(f"Điểm {index} phải chứa hai giá trị số.")
+            normalized.append([int(point[0]), int(point[1])])
         with self.lock:
             if self._bot_running_locked():
                 raise ValueError("Hãy dừng bot trước khi lưu tọa độ.")
@@ -348,6 +396,97 @@ class BotService:
         path = detector.delete_template(kind, filename)
         self._log(f"[SLOT] Deleted template {kind}: {path.name}.")
         return self.slot_templates()
+
+    def rename_slot_kind(self, old_kind: str, new_kind: str) -> dict[str, Any]:
+        old_kind = self._normalize_slot_kind(old_kind)
+        new_kind = self._normalize_slot_kind(new_kind)
+        if old_kind == new_kind:
+            raise ValueError("Tên lính mới phải khác tên hiện tại.")
+
+        with self.lock:
+            if self._bot_running_locked():
+                raise ValueError("Hãy dừng bot trước khi đổi tên lính.")
+            kinds = list(self.config_data.get("slot_detection", {}).get("kinds", []))
+            if old_kind not in kinds:
+                raise ValueError(f"Không tìm thấy loại lính: {old_kind}.")
+            if new_kind in kinds:
+                raise ValueError(f"Loại lính đã tồn tại: {new_kind}.")
+
+            candidate = copy.deepcopy(self.config_data)
+            self._remap_slot_kind(candidate, old_kind, new_kind)
+            template_root = Path(
+                candidate.get("slot_detection", {}).get("template_dir", "img/slots")
+            )
+            old_directory = template_root / old_kind
+            new_directory = template_root / new_kind
+            if new_directory.exists():
+                raise ValueError(f"Thư mục template đã tồn tại: {new_directory}.")
+
+            directory_renamed = False
+            try:
+                if old_directory.exists():
+                    if not old_directory.is_dir():
+                        raise ValueError(f"Đường dẫn template không phải thư mục: {old_directory}.")
+                    old_directory.rename(new_directory)
+                    directory_renamed = True
+                candidate = normalize_config(candidate)
+                self._validate_config(candidate)
+                save_config(candidate)
+            except Exception:
+                if directory_renamed and new_directory.exists() and not old_directory.exists():
+                    new_directory.rename(old_directory)
+                raise
+
+            self.config_data = candidate
+            self.config_revision += 1
+            self.adb_ready = False
+            self.status = "Đã đổi tên lính. Quét ADB lại."
+            SlotDetector._template_cache.clear()
+
+        self._log(f"[SLOT] Renamed kind {old_kind} -> {new_kind}.")
+        return self.get_config()
+
+    @staticmethod
+    def _normalize_slot_kind(kind: str) -> str:
+        normalized = "".join(
+            char for char in str(kind).lower().strip() if char.isalnum() or char in ("_", "-")
+        )
+        if not normalized or normalized != str(kind).lower().strip():
+            raise ValueError("Mã loại lính chỉ được chứa chữ, số, dấu gạch dưới hoặc gạch ngang.")
+        return normalized
+
+    @staticmethod
+    def _remap_slot_kind(config: dict[str, Any], old_kind: str, new_kind: str) -> None:
+        detection = config.setdefault("slot_detection", {})
+        detection["kinds"] = [
+            new_kind if kind == old_kind else kind for kind in detection.get("kinds", [])
+        ]
+        for section, key in (
+            (detection, "count_max_by_kind"),
+            (config.setdefault("manual_army", {}), "counts"),
+            (config.setdefault("coords", {}), "slots"),
+        ):
+            values = section.setdefault(key, {})
+            if old_kind in values:
+                values[new_kind] = values.pop(old_kind)
+
+        def remap_deploy(deploy: Any) -> None:
+            if not isinstance(deploy, dict):
+                return
+            for step in deploy.get("sequence", []):
+                if isinstance(step, dict) and step.get("slot") == old_kind:
+                    step["slot"] = new_kind
+            for group in deploy.get("spell_groups", []):
+                if isinstance(group, dict):
+                    group["slots"] = [
+                        new_kind if slot == old_kind else slot
+                        for slot in group.get("slots", [])
+                    ]
+
+        remap_deploy(config.get("deploy"))
+        for combo in config.get("combos", {}).values():
+            if isinstance(combo, dict):
+                remap_deploy(combo.get("deploy", combo))
 
     def detect_slots(self, image_base64: str = "") -> dict[str, Any]:
         config = self.get_config()
@@ -612,6 +751,8 @@ class BotService:
                 raise ValueError("Nâng tường: số trận nghỉ lỗi tạm thời phải >= 1.")
             if int(wall_upgrade.get("retry_backoff_attacks", 1)) < 1:
                 raise ValueError("Nâng tường: số trận nghỉ sau lỗi phải >= 1.")
+            if int(wall_upgrade.get("dry_run_retry_attacks", 1)) < 1:
+                raise ValueError("Nâng tường: cooldown mô phỏng phải >= 1.")
             confirmation_attempts = int(wall_upgrade.get("confirmation_read_attempts", 3))
             confirmation_min_agree = int(wall_upgrade.get("confirmation_min_agree", 2))
             if confirmation_attempts < 3:

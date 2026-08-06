@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import random
 import subprocess
 import threading
@@ -11,7 +10,7 @@ from typing import Any
 
 from adb_client import ADBClient, ADBError
 from builder_vision import BuilderBaseVision, BuilderScreen
-from stats_store import STAT_KEYS, load_total_stats, merge_existing_stats
+from stats_store import STAT_KEYS, atomic_write_json, load_total_stats, merge_existing_stats
 
 
 class BuilderBaseBot:
@@ -718,8 +717,9 @@ class BuilderBaseBot:
                 self._maybe_activate_hero(last_png)
                 if now - last_log_at >= 5:
                     damage = self.vision.read_damage(last_png, stage=stage)
-                    if stage == 2 and not 100 <= damage <= 200:
-                        damage = last_damage
+                    if stage == 2:
+                        if damage >= 0 and not 100 <= damage <= 200:
+                            damage = last_damage
                     elif stage == 1 and not 0 <= damage <= 100:
                         damage = -1
                     if damage < 0:
@@ -1402,8 +1402,7 @@ class BuilderBaseBot:
         }
         merged = merge_existing_stats(self.stats_path, payload)
         try:
-            self.stats_path.parent.mkdir(parents=True, exist_ok=True)
-            self.stats_path.write_text(json.dumps(merged, ensure_ascii=True, indent=2), encoding="utf-8")
+            atomic_write_json(self.stats_path, merged)
         except OSError as exc:
             self.log(f"[BUILDER][WARN] Không lưu được thống kê: {exc}")
             self.stats_callback(payload)

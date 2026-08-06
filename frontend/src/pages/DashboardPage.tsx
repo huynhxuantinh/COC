@@ -33,7 +33,7 @@ export function DashboardPage({ status, refreshStatus }: Props) {
   const [pollError, setPollError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const afterRef = useRef(0);
-  const { config, saving, error, savedMessage, isDirty, updatePath, save } = useConfigEditor();
+  const { config, saving, error, savedMessage, isDirty, updatePath, save, reload } = useConfigEditor();
   const selectedCombo = config?.farm?.combo ?? "";
   const villageMode = config?.farm?.village === "builder" ? "builder" : "main";
 
@@ -81,6 +81,11 @@ export function DashboardPage({ status, refreshStatus }: Props) {
     return startBot();
   }
 
+  async function handleScanAdb() {
+    await scanAdb();
+    await reload();
+  }
+
   async function handleClearLogs() {
     try {
       await clearLogs();
@@ -122,7 +127,7 @@ export function DashboardPage({ status, refreshStatus }: Props) {
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Thiết bị</p>
                 <p className="mt-1 truncate font-mono text-sm text-white">{status?.active_devices?.[0] ?? config?.adb?.device ?? "Chưa có thiết bị"}</p>
               </div>
-              <Button size="sm" variant="muted" loading={busyAction === "scan"} disabled={Boolean(busyAction) || Boolean(status?.running)} onClick={() => runAction("scan", scanAdb)}>
+              <Button size="sm" variant="muted" loading={busyAction === "scan"} disabled={Boolean(busyAction) || Boolean(status?.running)} onClick={() => runAction("scan", handleScanAdb)}>
                 <RefreshCw className="h-4 w-4" />Quét ADB
               </Button>
             </div>

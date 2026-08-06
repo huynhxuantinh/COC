@@ -1064,6 +1064,7 @@
   "wall_upgrade": {
     "enabled": true,
     "dry_run": false,
+    "dry_run_retry_attacks": 10,
     "run_after_attacks_enabled": false,
     "run_every_n_attacks": 15,
     "gold_capacity": 10000000,
@@ -1079,7 +1080,6 @@
     "retry_backoff_attacks": 2,
     "max_wall_search_scrolls": 8,
     "resource_read_attempts": 3,
-    "cost_read_attempts": 3,
     "read_attempt_delay": 0.45,
     "confirmation_read_attempts": 3,
     "confirmation_min_agree": 2,
@@ -1142,10 +1142,6 @@
       "upgrade_elixir_button": [
         1145,
         700
-      ],
-      "confirm_upgrade_button": [
-        1120,
-        786
       ],
       "confirm_okay_button": [
         972,

@@ -156,7 +156,7 @@ class TapPayload(BaseModel):
 
 class SavePointsPayload(BaseModel):
     target: str
-    points: list[list[int]]
+    points: list[tuple[int, int]]
     combo_name: str = ""
 
 
@@ -184,6 +184,11 @@ class SlotTemplateSavePayload(BaseModel):
     y: int
     size: int = 76
     crop_region: list[int] = Field(default_factory=list)
+
+
+class SlotKindRenamePayload(BaseModel):
+    old_kind: str
+    new_kind: str
 
 
 class SlotDetectPayload(BaseModel):

@@ -57,7 +57,7 @@ export function FarmPage() {
           <div>
             <Card title="Tìm và triển khai">
               <div className="space-y-5">
-                <TextInput type="number" min={0} label="Số lần Next tối đa" hint="Bot dừng tìm khi đã bỏ qua đủ số nhà này." value={String(farm.max_next)} onChange={(event) => updatePath(["farm", "max_next"], numberValue(event.target.value))} />
+                <TextInput type="number" min={1} label="Số lần Next tối đa" hint="Bot dừng tìm khi đã bỏ qua đủ số nhà này." value={String(farm.max_next)} onChange={(event) => updatePath(["farm", "max_next"], numberValue(event.target.value))} />
                 <div className="border-t border-white/10 pt-5">
                   <p className="mb-2 text-sm font-medium text-slate-300">Góc đánh</p>
                   <SegmentedControl value={farm.attack_view ?? "random"} columns={2} options={viewOptions} onChange={(value) => updatePath(["farm", "attack_view"], value)} />

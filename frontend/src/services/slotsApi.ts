@@ -1,4 +1,5 @@
 import { http } from "./http";
+import type { AppConfig } from "./types";
 
 export type SlotTemplateItem = {
   kind: string;
@@ -50,6 +51,14 @@ export async function saveSlotTemplate(
 export async function deleteSlotTemplate(kind: string, filename: string): Promise<SlotTemplatesPayload> {
   const response = await http.delete<SlotTemplatesPayload>(`/api/slots/templates/${encodeURIComponent(kind)}/${encodeURIComponent(filename)}`);
   return response.data;
+}
+
+export async function renameSlotKind(oldKind: string, newKind: string): Promise<AppConfig> {
+  const response = await http.post<{ config: AppConfig }>("/api/slots/kinds/rename", {
+    old_kind: oldKind,
+    new_kind: newKind,
+  });
+  return response.data.config;
 }
 
 export async function detectSlots(imageBase64 = ""): Promise<SlotDetectionItem[]> {

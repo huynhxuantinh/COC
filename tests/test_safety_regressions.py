@@ -14,12 +14,13 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from adb_client import ADBClient, ADBError
-from backend.models.schemas import ConfigPayload
+from backend.models.schemas import ConfigPayload, SavePointsPayload
 from backend.routers import bot as bot_router
 from backend.services.bot_service import BotService
 from bot import FarmBot
 from config_manager import normalize_config
 from slot_detector import SlotDetector
+from stats_store import atomic_write_json
 from vision import Vision
 
 
@@ -86,6 +87,19 @@ class SafetyRegressionTests(unittest.TestCase):
         with patch("adb_client.subprocess.run", return_value=failed):
             with self.assertRaisesRegex(ADBError, "device offline"):
                 client._run(["devices"])
+
+    def test_save_points_schema_rejects_invalid_point_shape(self) -> None:
+        with self.assertRaises(ValidationError):
+            SavePointsPayload(target="zone_trenbenphai", points=[[]])
+
+        with self.assertRaises(ValidationError):
+            SavePointsPayload(target="zone_trenbenphai", points=[[1, 2, 3]])
+
+    def test_save_points_service_rejects_invalid_point_shape(self) -> None:
+        service = BotService.__new__(BotService)
+
+        with self.assertRaisesRegex(ValueError, "đúng hai tọa độ"):
+            service.save_points("zone_trenbenphai", [[]])
 
     def test_missing_custom_slot_fallback_is_skipped(self) -> None:
         bot = self._bare_bot()
@@ -241,6 +255,11 @@ class SafetyRegressionTests(unittest.TestCase):
     def test_start_bot_rolls_back_when_adb_disappears_after_scan(self) -> None:
         service = BotService()
         service.config_data = normalize_config({})
+        service.config_data["deploy"]["deploy_zones"]["trenbenphai"] = [
+            [0, 0],
+            [10, 0],
+            [0, 10],
+        ]
         service.adb_ready = True
         service.status = "ADB đã kết nối."
 
@@ -298,6 +317,21 @@ class SafetyRegressionTests(unittest.TestCase):
             self.assertEqual(saved["total"]["future_metric"], 99)
             self.assertEqual(saved["current_session"]["future_metric"], 7)
 
+    def test_atomic_stats_write_preserves_old_file_when_replace_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stats_path = Path(directory) / "device.json"
+            stats_path.write_text('{"total":{"attacks":9}}', encoding="utf-8")
+
+            with patch("stats_store.os.replace", side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    atomic_write_json(stats_path, {"total": {"attacks": 10}})
+
+            self.assertEqual(
+                json.loads(stats_path.read_text(encoding="utf-8")),
+                {"total": {"attacks": 9}},
+            )
+            self.assertEqual(list(Path(directory).glob(".device.json.*.tmp")), [])
+
     def test_runtime_preflight_stops_when_active_slot_has_no_input(self) -> None:
         bot = self._bare_bot()
         bot.active_combo = "Broken"
@@ -328,6 +362,66 @@ class SafetyRegressionTests(unittest.TestCase):
             self.assertFalse(detector.has_usable_template("custom"))
             Image.new("RGB", (40, 40), "white").save(template_dir / "valid.png")
             self.assertTrue(detector.has_usable_template("custom"))
+
+    def test_rename_slot_kind_moves_templates_and_all_config_references(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = normalize_config({})
+            config["slot_detection"]["template_dir"] = directory
+            config["slot_detection"]["kinds"].append("spvalkyrie")
+            config["slot_detection"]["count_max_by_kind"]["spvalkyrie"] = 8
+            config["manual_army"]["counts"]["spvalkyrie"] = 6
+            config["coords"]["slots"]["spvalkyrie"] = [170, 810]
+            config["deploy"]["sequence"] = [
+                {"slot": "spvalkyrie", "count": "all", "max_taps": 8, "delay": 0.1}
+            ]
+            config["combos"]["Custom"] = {
+                "deploy": {
+                    "sequence": [
+                        {"slot": "spvalkyrie", "count": "all", "max_taps": 8, "delay": 0.1}
+                    ]
+                }
+            }
+            old_directory = Path(directory) / "spvalkyrie"
+            old_directory.mkdir()
+            (old_directory / "sample.png").write_bytes(b"template")
+            service = BotService()
+            service.config_data = config
+
+            with patch("backend.services.bot_service.save_config"):
+                updated = service.rename_slot_kind("spvalkyrie", "super_valkyrie")
+
+            self.assertFalse(old_directory.exists())
+            self.assertTrue((Path(directory) / "super_valkyrie" / "sample.png").exists())
+            self.assertIn("super_valkyrie", updated["slot_detection"]["kinds"])
+            self.assertNotIn("spvalkyrie", updated["slot_detection"]["kinds"])
+            self.assertEqual(updated["slot_detection"]["count_max_by_kind"]["super_valkyrie"], 8)
+            self.assertEqual(updated["manual_army"]["counts"]["super_valkyrie"], 6)
+            self.assertEqual(updated["coords"]["slots"]["super_valkyrie"], [170, 810])
+            self.assertEqual(updated["deploy"]["sequence"][0]["slot"], "super_valkyrie")
+            self.assertEqual(
+                updated["combos"]["Custom"]["deploy"]["sequence"][0]["slot"],
+                "super_valkyrie",
+            )
+
+    def test_rename_slot_kind_rolls_back_template_directory_when_save_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = normalize_config({})
+            config["slot_detection"]["template_dir"] = directory
+            config["slot_detection"]["kinds"].append("spvalkyrie")
+            config["coords"]["slots"]["spvalkyrie"] = [170, 810]
+            old_directory = Path(directory) / "spvalkyrie"
+            old_directory.mkdir()
+            (old_directory / "sample.png").write_bytes(b"template")
+            service = BotService()
+            service.config_data = config
+
+            with patch("backend.services.bot_service.save_config", side_effect=OSError("disk full")):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    service.rename_slot_kind("spvalkyrie", "super_valkyrie")
+
+            self.assertTrue((old_directory / "sample.png").exists())
+            self.assertFalse((Path(directory) / "super_valkyrie").exists())
+            self.assertIn("spvalkyrie", service.config_data["slot_detection"]["kinds"])
 
     def test_attack_threshold_zero_is_ignored_in_any_mode(self) -> None:
         bot = self._bare_bot()
@@ -555,15 +649,18 @@ class SafetyRegressionTests(unittest.TestCase):
         )
         bot._sleep = lambda _seconds: None
         bot._pause_gate = lambda: 0
-        bot._close_wall_popup = lambda: None
+        close_calls: list[bool] = []
+        bot._close_wall_popup = lambda: close_calls.append(True)
         bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
         bot._find_wall_row = lambda _settings: [100, 100]
         result = bot._upgrade_walls()
 
         self.assertFalse(result["success"])
         self.assertEqual(result["reason"], "cost_over_budget")
+        self.assertEqual(bot.adb.taps.count((40, 40)), 1)
         self.assertIn((80, 80), bot.adb.taps)
         self.assertNotIn((70, 70), bot.adb.taps)
+        self.assertEqual(close_calls, [True])
 
     def test_home_wall_dry_run_opens_confirmation_then_cancels(self) -> None:
         bot = self._bare_bot()
@@ -571,6 +668,7 @@ class SafetyRegressionTests(unittest.TestCase):
             "use_add10": False,
             "add1_rounds": 2,
             "dry_run": True,
+            "dry_run_retry_attacks": 6,
             "coords": {
                 "builder_icon": [10, 10],
                 "upgrade_more_button": [20, 20],
@@ -589,7 +687,8 @@ class SafetyRegressionTests(unittest.TestCase):
         )
         bot._sleep = lambda _seconds: None
         bot._pause_gate = lambda: 0
-        bot._close_wall_popup = lambda: None
+        close_calls: list[bool] = []
+        bot._close_wall_popup = lambda: close_calls.append(True)
         bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
         bot._find_wall_row = lambda _settings: [100, 100]
 
@@ -599,6 +698,109 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertEqual(bot.adb.taps.count((30, 30)), 2)
         self.assertIn((50, 50), bot.adb.taps)
         self.assertIn((80, 80), bot.adb.taps)
+        self.assertNotIn((70, 70), bot.adb.taps)
+        self.assertEqual(close_calls, [True])
+        self.assertEqual(bot.attacks_since_wall_upgrade, -6)
+
+    def test_home_wall_rolls_back_one_wall_until_cost_fits_budget(self) -> None:
+        bot = self._bare_bot()
+        bot.config["wall_upgrade"] = {
+            "use_add10": False,
+            "add1_rounds": 3,
+            "dry_run": True,
+            "coords": {
+                "builder_icon": [10, 10],
+                "upgrade_more_button": [20, 20],
+                "add1_button": [30, 30],
+                "add10_button": [31, 31],
+                "remove_button": [40, 40],
+                "upgrade_gold_button": [50, 50],
+                "upgrade_elixir_button": [60, 60],
+                "confirm_okay_button": [70, 70],
+                "confirm_cancel_button": [80, 80],
+            },
+        }
+        bot.adb = _ScreenshotADB(b"confirmation")
+        bot.vision = _WallVision(
+            [
+                *[
+                    {"is_wall_upgrade": True, "currency": "gold", "cost": 12_000_000}
+                    for _ in range(3)
+                ],
+                *[
+                    {"is_wall_upgrade": True, "currency": "gold", "cost": 8_000_000}
+                    for _ in range(3)
+                ],
+            ]
+        )
+        bot._sleep = lambda _seconds: None
+        bot._pause_gate = lambda: 0
+        bot._close_wall_popup = lambda: None
+        bot._wall_upgrade_budget = lambda: (
+            "gold",
+            9_400_000,
+            "",
+            {"gold": 10_000_000, "elixir": 0},
+        )
+        bot._find_wall_row = lambda _settings: [100, 100]
+
+        result = bot._upgrade_walls()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(bot.adb.taps.count((30, 30)), 3)
+        self.assertEqual(bot.adb.taps.count((40, 40)), 1)
+        self.assertEqual(bot.adb.taps.count((50, 50)), 2)
+        self.assertEqual(bot.adb.taps.count((80, 80)), 2)
+        self.assertNotIn((70, 70), bot.adb.taps)
+
+    def test_home_wall_add10_rolls_back_one_batch(self) -> None:
+        bot = self._bare_bot()
+        bot.config["wall_upgrade"] = {
+            "use_add10": True,
+            "max_add_rounds": 1,
+            "dry_run": True,
+            "coords": {
+                "builder_icon": [10, 10],
+                "upgrade_more_button": [20, 20],
+                "add1_button": [30, 30],
+                "add10_button": [31, 31],
+                "remove_button": [40, 40],
+                "upgrade_gold_button": [50, 50],
+                "upgrade_elixir_button": [60, 60],
+                "confirm_okay_button": [70, 70],
+                "confirm_cancel_button": [80, 80],
+            },
+        }
+        bot.adb = _ScreenshotADB(b"confirmation")
+        bot.vision = _WallVision(
+            [
+                *[
+                    {"is_wall_upgrade": True, "currency": "gold", "cost": 30_000_000}
+                    for _ in range(3)
+                ],
+                *[
+                    {"is_wall_upgrade": True, "currency": "gold", "cost": 8_000_000}
+                    for _ in range(3)
+                ],
+            ]
+        )
+        bot._sleep = lambda _seconds: None
+        bot._pause_gate = lambda: 0
+        bot._close_wall_popup = lambda: None
+        bot._wall_upgrade_budget = lambda: (
+            "gold",
+            9_400_000,
+            "",
+            {"gold": 10_000_000, "elixir": 0},
+        )
+        bot._find_wall_row = lambda _settings: [100, 100]
+
+        result = bot._upgrade_walls()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(bot.adb.taps.count((31, 31)), 1)
+        self.assertEqual(bot.adb.taps.count((40, 40)), 10)
+        self.assertEqual(bot.adb.taps.count((50, 50)), 2)
         self.assertNotIn((70, 70), bot.adb.taps)
 
     def test_home_wall_confirmation_requires_two_agreeing_samples(self) -> None:
@@ -628,6 +830,8 @@ class SafetyRegressionTests(unittest.TestCase):
         )
         bot._sleep = lambda _seconds: None
         bot._pause_gate = lambda: 0
+        close_calls: list[bool] = []
+        bot._close_wall_popup = lambda: close_calls.append(True)
         bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
         bot._find_wall_row = lambda _settings: [100, 100]
 
@@ -637,6 +841,7 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertEqual(result["reason"], "confirmation_read_failed")
         self.assertIn((80, 80), bot.adb.taps)
         self.assertNotIn((70, 70), bot.adb.taps)
+        self.assertEqual(close_calls, [True])
 
     def test_home_wall_stops_when_actual_spend_exceeds_confirmed_cost(self) -> None:
         bot = self._bare_bot()
@@ -661,6 +866,8 @@ class SafetyRegressionTests(unittest.TestCase):
         )
         bot._sleep = lambda _seconds: None
         bot._pause_gate = lambda: 0
+        close_calls: list[bool] = []
+        bot._close_wall_popup = lambda: close_calls.append(True)
         bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
         bot._find_wall_row = lambda _settings: [100, 100]
         bot._read_home_resources_stable = lambda _settings: {"gold": 1_000_000, "elixir": 0}
@@ -672,6 +879,7 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertTrue(bot.stop_event.is_set())
         self.assertIn((70, 70), bot.adb.taps)
         self.assertTrue(any("[WALL][CRITICAL]" in message for message in bot.log_messages))
+        self.assertEqual(close_calls, [True])
 
     def test_home_wall_row_uses_safe_horizontal_tap_position(self) -> None:
         bot = self._bare_bot()
@@ -768,6 +976,20 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertEqual(config["game"]["result_wait_seconds"], 15)
         self.assertEqual(config["farm"]["max_ocr_restarts"], 3)
         self.assertEqual(config["surrender"]["max_damage_ocr_restarts"], 3)
+
+    def test_old_home_wall_cost_options_are_removed_without_touching_builder(self) -> None:
+        config = normalize_config(
+            {
+                "wall_upgrade": {
+                    "cost_read_attempts": 7,
+                    "coords": {"confirm_upgrade_button": [100, 100]},
+                },
+                "builder_base": {"wall_upgrade": {"cost_read_attempts": 5}},
+            }
+        )
+        self.assertNotIn("cost_read_attempts", config["wall_upgrade"])
+        self.assertNotIn("confirm_upgrade_button", config["wall_upgrade"]["coords"])
+        self.assertEqual(config["builder_base"]["wall_upgrade"]["cost_read_attempts"], 5)
 
     def test_restart_state_does_not_enter_result_flow(self) -> None:
         bot = self._bare_bot()

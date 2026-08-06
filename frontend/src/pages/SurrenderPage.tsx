@@ -33,7 +33,7 @@ export function SurrenderPage() {
               <div className="grid gap-4 sm:grid-cols-3">
                 <TextInput type="number" min={0} suffix="giây" label="Từ" value={String(surrender.time_min_seconds)} onChange={(event) => updatePath(["surrender", "time_min_seconds"], numberValue(event.target.value))} />
                 <TextInput type="number" min={0} suffix="giây" label="Đến" value={String(surrender.time_max_seconds)} onChange={(event) => updatePath(["surrender", "time_max_seconds"], numberValue(event.target.value))} />
-                <TextInput type="number" min={1} max={180} suffix="giây" label="Trận tối đa" value={String(surrender.max_battle_seconds)} onChange={(event) => updatePath(["surrender", "max_battle_seconds"], numberValue(event.target.value))} />
+                <TextInput type="number" min={1} max={175} suffix="giây" label="Trận tối đa" value={String(surrender.max_battle_seconds)} onChange={(event) => updatePath(["surrender", "max_battle_seconds"], numberValue(event.target.value))} />
               </div>
             </Card>
           ) : null}

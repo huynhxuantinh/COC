@@ -319,6 +319,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "wall_upgrade": {
         "enabled": False,
         "dry_run": False,
+        "dry_run_retry_attacks": 10,
         "run_after_attacks_enabled": True,
         "run_every_n_attacks": 20,
         "gold_capacity": 6000000,
@@ -334,7 +335,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "retry_backoff_attacks": 10,
         "max_wall_search_scrolls": 9,
         "resource_read_attempts": 3,
-        "cost_read_attempts": 3,
         "read_attempt_delay": 0.45,
         "confirmation_read_attempts": 3,
         "confirmation_min_agree": 2,
@@ -356,7 +356,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "remove_button": [446, 730],
             "upgrade_gold_button": [984, 700],
             "upgrade_elixir_button": [1145, 700],
-            "confirm_upgrade_button": [1120, 786],
             "confirm_okay_button": [972, 578],
             "confirm_cancel_button": [622, 578],
         },
@@ -642,6 +641,12 @@ def migrate_dead_legacy_options(config: dict[str, Any]) -> None:
     if isinstance(farm, dict):
         farm.pop("deploy_mode", None)
         farm.pop("attack_edge", None)
+    wall_upgrade = config.get("wall_upgrade", {})
+    if isinstance(wall_upgrade, dict):
+        wall_upgrade.pop("cost_read_attempts", None)
+        coords = wall_upgrade.get("coords", {})
+        if isinstance(coords, dict):
+            coords.pop("confirm_upgrade_button", None)
 
 
 def normalize_config(data: dict[str, Any]) -> dict[str, Any]:

@@ -8,6 +8,8 @@ import { SelectInput, TextInput, Toggle } from "../components/FormControls";
 import { PageHeader } from "../components/PageHeader";
 import { SegmentedControl } from "../components/SegmentedControl";
 import { numberValue, useConfigEditor } from "../hooks/useConfigEditor";
+import { apiErrorMessage } from "../services/http";
+import { renameSlotKind } from "../services/slotsApi";
 
 const troopLabels: Record<string, string> = {
   dragon: "Rồng điện",
@@ -32,12 +34,6 @@ function comboDeployCopy(deploy: any) {
   delete next.spell_groups;
   return next;
 }
-function remapDeployKind(deploy: any, oldKind: string, newKind: string) {
-  const next = clone(deploy ?? {});
-  next.sequence = (next.sequence ?? []).map((step: any) => step?.slot === oldKind ? { ...step, slot: newKind } : step);
-  next.spell_groups = (next.spell_groups ?? []).map((group: any) => ({ ...group, slots: (group.slots ?? []).map((slot: string) => slot === oldKind ? newKind : slot) }));
-  return next;
-}
 function removeDeployKind(deploy: any, kind: string) {
   const next = clone(deploy ?? {});
   next.sequence = (next.sequence ?? []).filter((step: any) => step?.slot !== kind);
@@ -48,7 +44,7 @@ function removeDeployKind(deploy: any, kind: string) {
 type PendingDelete = { type: "combo" | "troop"; value: string } | null;
 
 export function ComboPage() {
-  const { config, loading, saving, error, savedMessage, isDirty, updatePath, save } = useConfigEditor();
+  const { config, loading, saving, error, savedMessage, isDirty, updatePath, save, reload } = useConfigEditor();
   const comboNames = useMemo(() => Object.keys(config?.combos ?? {}), [config]);
   const runningCombo = config?.farm?.combo ?? "";
   const [selectedCombo, setSelectedCombo] = useState("");
@@ -60,6 +56,7 @@ export function ComboPage() {
   const [kindNameDraft, setKindNameDraft] = useState("");
   const [notice, setNotice] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
+  const [renamingKind, setRenamingKind] = useState(false);
 
   useEffect(() => setComboNameDraft(currentCombo), [currentCombo]);
   if (loading) return <LoadingState label="Đang tải danh sách combo..." />;
@@ -134,25 +131,24 @@ export function ComboPage() {
     setNewKindName("");
   }
 
-  function renameTroopKind(oldKind: string) {
+  async function renameTroopKind(oldKind: string) {
     const nextKind = cleanKind(kindNameDraft);
     if (!nextKind || nextKind === oldKind) { setEditingKind(""); return; }
     if (allKinds.includes(nextKind)) { setNotice("Tên lính đã tồn tại."); return; }
-    const maxByKind = clone(appConfig.slot_detection?.count_max_by_kind ?? {});
-    maxByKind[nextKind] = maxByKind[oldKind] ?? 99; delete maxByKind[oldKind];
-    const manualCounts = clone(appConfig.manual_army?.counts ?? {});
-    manualCounts[nextKind] = manualCounts[oldKind] ?? 0; delete manualCounts[oldKind];
-    const coordsSlots = clone(appConfig.coords?.slots ?? {});
-    if (coordsSlots[oldKind]) { coordsSlots[nextKind] = coordsSlots[oldKind]; delete coordsSlots[oldKind]; }
-    const nextCombos = clone(appConfig.combos ?? {});
-    for (const name of Object.keys(nextCombos)) nextCombos[name] = { ...(nextCombos[name] ?? {}), deploy: remapDeployKind(deployFromCombo(nextCombos[name], appConfig.deploy), oldKind, nextKind) };
-    updatePath(["slot_detection", "kinds"], allKinds.map((kind) => kind === oldKind ? nextKind : kind));
-    updatePath(["slot_detection", "count_max_by_kind"], maxByKind);
-    updatePath(["manual_army", "counts"], manualCounts);
-    updatePath(["coords", "slots"], coordsSlots);
-    updatePath(["deploy"], remapDeployKind(appConfig.deploy, oldKind, nextKind));
-    updateCombos(nextCombos);
-    setEditingKind(""); setKindNameDraft("");
+    setRenamingKind(true);
+    setNotice("");
+    try {
+      if (isDirty && !(await save())) return;
+      await renameSlotKind(oldKind, nextKind);
+      await reload();
+      setEditingKind("");
+      setKindNameDraft("");
+      setNotice(`Đã đổi tên ${oldKind} thành ${nextKind} và chuyển toàn bộ template.`);
+    } catch (renameError) {
+      setNotice(apiErrorMessage(renameError));
+    } finally {
+      setRenamingKind(false);
+    }
   }
 
   function deleteTroopKind(kind: string) {
@@ -242,7 +238,7 @@ export function ComboPage() {
                 {troopKinds.map((kind) => editingKind === kind ? (
                   <div key={kind} className="rounded-lg border border-sky-400/30 bg-black/20 p-3">
                     <TextInput label="Tên mới" hint="Tên sẽ được cập nhật trong mọi combo và cấu hình liên quan." value={kindNameDraft} onChange={(event) => setKindNameDraft(event.target.value)} />
-                    <div className="mt-3 grid grid-cols-2 gap-2"><Button variant="success" onClick={() => renameTroopKind(kind)}>Lưu</Button><Button onClick={() => setEditingKind("")}>Hủy</Button></div>
+                    <div className="mt-3 grid grid-cols-2 gap-2"><Button variant="success" loading={renamingKind} onClick={() => renameTroopKind(kind)}>Lưu</Button><Button disabled={renamingKind} onClick={() => setEditingKind("")}>Hủy</Button></div>
                   </div>
                 ) : (
                   <div key={kind} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-2 pl-3">

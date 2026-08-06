@@ -65,6 +65,7 @@ export function WallUpgradePage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <TextInput type="number" min={1} suffix="trận" label="Lỗi tạm thời" value={String(wall.temporary_retry_backoff_attacks ?? 2)} onChange={(event) => updatePath(["wall_upgrade", "temporary_retry_backoff_attacks"], numberValue(event.target.value))} />
               <TextInput type="number" min={1} suffix="trận" label="Lỗi thực" value={String(wall.retry_backoff_attacks ?? 10)} onChange={(event) => updatePath(["wall_upgrade", "retry_backoff_attacks"], numberValue(event.target.value))} />
+              {wall.dry_run ? <TextInput type="number" min={1} suffix="trận" label="Mô phỏng lại sau" value={String(wall.dry_run_retry_attacks ?? 10)} onChange={(event) => updatePath(["wall_upgrade", "dry_run_retry_attacks"], numberValue(event.target.value))} /> : null}
             </div>
           </Card>
 
@@ -73,7 +74,6 @@ export function WallUpgradePage() {
             <div className="mt-5 grid gap-4 border-t border-white/10 pt-5 sm:grid-cols-2">
               <TextInput type="number" min={1} suffix="lần" label="Tối đa cuộn tìm Wall" value={String(wall.max_wall_search_scrolls ?? 9)} onChange={(event) => updatePath(["wall_upgrade", "max_wall_search_scrolls"], numberValue(event.target.value))} />
               <TextInput type="number" min={1} suffix="lần" label="Số lần đọc tài nguyên" value={String(wall.resource_read_attempts ?? 3)} onChange={(event) => updatePath(["wall_upgrade", "resource_read_attempts"], numberValue(event.target.value))} />
-              <TextInput type="number" min={1} suffix="lần" label="Số lần đọc giá" value={String(wall.cost_read_attempts ?? 3)} onChange={(event) => updatePath(["wall_upgrade", "cost_read_attempts"], numberValue(event.target.value))} />
               <TextInput type="number" min={0} step={0.05} suffix="giây" label="Delay mỗi lần đọc" value={String(wall.read_attempt_delay ?? 0.45)} onChange={(event) => updatePath(["wall_upgrade", "read_attempt_delay"], Number(event.target.value || 0))} />
             </div>
           </details>

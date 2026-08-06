@@ -596,6 +596,44 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertEqual(state, BuilderScreen.RESTARTED)
         self.assertEqual(restarted, ["builder-stage1-damage-unknown"])
 
+    def test_stage_two_damage_unknown_watchdog_restarts_stage(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "timing": {
+                "battle_timeout_seconds": 35,
+                "state_confirmations": 1,
+                "screen_poll_seconds": 0,
+                "damage_unknown_restart_seconds": 20,
+                "damage_stall_seconds": 0,
+                "unknown_state_restart_seconds": 0,
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.pause_event = threading.Event()
+        bot.log = lambda _message: None
+        bot._pause_gate = lambda: None
+        bot._sleep = lambda _seconds: None
+        bot._maybe_activate_hero = lambda _png: None
+        bot.adb = type("ADB", (), {"screencap_png": lambda _self: b"battle"})()
+        bot.vision = type(
+            "Vision",
+            (),
+            {
+                "classify": lambda _self, _png: BuilderScreen.BATTLE,
+                "read_damage": lambda _self, _png, stage=2: -1,
+                "battle_frame_difference": lambda _self, _previous, _current: 10.0,
+            },
+        )()
+        restarted: list[str] = []
+        bot._restart_stage_watchdog = lambda reason, _png, _message: restarted.append(reason)
+        clock = iter(range(0, 1000, 10))
+
+        with patch("builder_bot.time.time", side_effect=lambda: next(clock)):
+            state, _png = bot._monitor_stage(2, initial_state=BuilderScreen.BATTLE)
+
+        self.assertEqual(state, BuilderScreen.RESTARTED)
+        self.assertEqual(restarted, ["builder-stage2-damage-unknown"])
+
     def test_unknown_screen_watchdog_restarts_stage(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)
         bot.builder = {
@@ -1228,6 +1266,40 @@ class BuilderBaseTests(unittest.TestCase):
         config["builder_base"]["deploy"]["stage1_zone"] = [[0, 0], [10, 0], [0, 10]]
         config["builder_base"]["deploy"]["stage2_zone"] = [[0, 0], [10, 0], [0, 10]]
         service._validate_start_requirements(config)
+
+    def test_main_start_requires_polygon_for_fixed_attack_view(self) -> None:
+        service = BotService.__new__(BotService)
+        config = normalize_config(
+            {"farm": {"village": "main", "attack_view": "trenbenphai"}}
+        )
+
+        with self.assertRaisesRegex(ValueError, "Trên phải"):
+            service._validate_start_requirements(config)
+
+        config["deploy"]["deploy_zones"]["trenbenphai"] = [[0, 0], [10, 0], [0, 10]]
+        service._validate_start_requirements(config)
+
+    def test_main_random_start_requires_at_least_one_valid_polygon(self) -> None:
+        service = BotService.__new__(BotService)
+        config = normalize_config(
+            {"farm": {"village": "main", "attack_view": "random"}}
+        )
+
+        with self.assertRaisesRegex(ValueError, "ít nhất một vùng"):
+            service._validate_start_requirements(config)
+
+        config["deploy"]["deploy_zones"]["duoibentrai"] = [[0, 0], [10, 0], [0, 10]]
+        service._validate_start_requirements(config)
+
+    def test_main_start_rejects_degenerate_polygon(self) -> None:
+        service = BotService.__new__(BotService)
+        config = normalize_config(
+            {"farm": {"village": "main", "attack_view": "duoibenphai"}}
+        )
+        config["deploy"]["deploy_zones"]["duoibenphai"] = [[0, 0], [5, 5], [10, 10]]
+
+        with self.assertRaisesRegex(ValueError, "Dưới phải"):
+            service._validate_start_requirements(config)
 
     def test_runtime_selects_builder_bot_without_touching_main_bot(self) -> None:
         created: list[str] = []
