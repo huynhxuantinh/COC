@@ -86,6 +86,7 @@ export function SettingsPage() {
         <div className="space-y-5 xl:col-span-2">
           <Card title="Timing thao tác">
             <div className="space-y-5">
+              <Toggle label="Kích hoạt kỹ năng tướng" checked={Boolean(attackTiming.activate_hero_skill ?? true)} onChange={(value) => updatePath(["attack_timing", "activate_hero_skill"], value)} />
               <Toggle label="Dùng timing tùy chỉnh" hint="Tắt để dùng delay riêng trong sequence của combo." checked={customTiming} onChange={(value) => updatePath(["attack_timing", "use_default"], !value)} />
               {customTiming ? (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

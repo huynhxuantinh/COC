@@ -944,22 +944,23 @@ class BuilderBaseBot:
             self._sleep(0.25)
         self.log(f"[BUILDER][WALL] Đã bấm +1 {add_rounds} lần.")
 
-        costs = {
-            "gold": self._read_builder_wall_cost_stable(
-                settings, coords.get("upgrade_gold_button", [980, 700])
-            ),
-            "elixir": self._read_builder_wall_cost_stable(
-                settings, coords.get("upgrade_elixir_button", [1155, 700])
-            ),
-        }
+        costs = self._read_builder_wall_costs(settings, coords)
         payment = self._select_builder_wall_payment(settings, resources, costs)
         if not payment:
-            self.log(
-                f"[BUILDER][WALL] Không đủ ngân sách. Giá vàng/dầu: "
-                f"{costs['gold']:,}/{costs['elixir']:,}."
+            if not any(cost > 0 for cost in costs.values()):
+                self.log("[BUILDER][WALL] Không đọc ổn định được giá nâng tường.")
+                self._close_builder_wall_ui()
+                return {"success": False, "reason": "read_cost_failed"}
+            payment, add_rounds, rollback_reason = self._rollback_builder_wall_selection_to_budget(
+                settings,
+                coords,
+                resources,
+                add_rounds,
             )
-            self._close_builder_wall_ui()
-            return {"success": False, "reason": "budget_unavailable"}
+            if not payment:
+                self._close_builder_wall_ui()
+                return {"success": False, "reason": rollback_reason}
+            self.log(f"[BUILDER][WALL] Giữ lại {add_rounds} tường trong ngân sách.")
         pay_with, cost = payment
         if settings.get("dry_run", False):
             retry = max(1, int(settings.get("dry_run_retry_attacks", 10)))
@@ -1075,6 +1076,50 @@ class BuilderBaseBot:
                 return kind, cost
         return None
 
+    def _read_builder_wall_costs(
+        self,
+        settings: dict[str, Any],
+        coords: dict[str, Any],
+    ) -> dict[str, int]:
+        return {
+            "gold": self._read_builder_wall_cost_stable(
+                settings, coords.get("upgrade_gold_button", [980, 700])
+            ),
+            "elixir": self._read_builder_wall_cost_stable(
+                settings, coords.get("upgrade_elixir_button", [1155, 700])
+            ),
+        }
+
+    def _rollback_builder_wall_selection_to_budget(
+        self,
+        settings: dict[str, Any],
+        coords: dict[str, Any],
+        resources: dict[str, int],
+        selected_walls: int,
+    ) -> tuple[tuple[str, int] | None, int, str]:
+        remaining = max(1, int(selected_walls))
+        remove_button = coords.get("remove_button", [446, 700])
+        while remaining > 1 and not self.stop_event.is_set():
+            self._tap(remove_button, jitter=0)
+            self._sleep(0.25)
+            remaining -= 1
+            costs = self._read_builder_wall_costs(settings, coords)
+            if not any(cost > 0 for cost in costs.values()):
+                self.log("[BUILDER][WALL] Không đọc ổn định giá sau khi giảm số tường.")
+                return None, remaining, "rollback_read_failed"
+            payment = self._select_builder_wall_payment(settings, resources, costs)
+            self.log(
+                f"[BUILDER][WALL] Đã bỏ 1 tường; còn {remaining}, "
+                f"giá vàng/dầu={costs['gold']:,}/{costs['elixir']:,}."
+            )
+            if payment:
+                return payment, remaining, ""
+
+        if self.stop_event.is_set():
+            return None, remaining, "stopped"
+        self.log("[BUILDER][WALL] Một tường vẫn vượt ngân sách.")
+        return None, remaining, "budget_unavailable"
+
     def _find_builder_wall_row(self, settings: dict[str, Any]) -> list[int] | None:
         maximum = max(0, int(settings.get("max_wall_search_scrolls", 9)))
         region = settings.get("search_region", [720, 120, 420, 580])
@@ -1093,7 +1138,7 @@ class BuilderBaseBot:
         return None
 
     def _read_builder_resources_stable(self, settings: dict[str, Any]) -> dict[str, int] | None:
-        attempts = max(1, int(settings.get("resource_read_attempts", 3)))
+        attempts = max(2, int(settings.get("resource_read_attempts", 3)))
         delay = max(0.0, float(settings.get("read_attempt_delay", 0.45)))
         samples: list[dict[str, int]] = []
         for attempt in range(attempts):
@@ -1126,7 +1171,7 @@ class BuilderBaseBot:
         return {"gold": gold, "elixir": elixir}
 
     def _read_builder_wall_cost_stable(self, settings: dict[str, Any], button: list[int]) -> int:
-        attempts = max(1, int(settings.get("cost_read_attempts", 3)))
+        attempts = max(2, int(settings.get("cost_read_attempts", 3)))
         delay = max(0.0, float(settings.get("read_attempt_delay", 0.45)))
         values: list[int] = []
         for attempt in range(attempts):

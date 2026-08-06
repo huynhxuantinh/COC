@@ -132,6 +132,7 @@ export function ComboPage() {
   }
 
   async function renameTroopKind(oldKind: string) {
+    if (oldKind === "hero") { setNotice("Tướng là loại hệ thống, không thể đổi tên."); return; }
     const nextKind = cleanKind(kindNameDraft);
     if (!nextKind || nextKind === oldKind) { setEditingKind(""); return; }
     if (allKinds.includes(nextKind)) { setNotice("Tên lính đã tồn tại."); return; }
@@ -152,6 +153,7 @@ export function ComboPage() {
   }
 
   function deleteTroopKind(kind: string) {
+    if (kind === "hero") { setNotice("Tướng là loại hệ thống, không thể xóa."); return; }
     const maxByKind = clone(appConfig.slot_detection?.count_max_by_kind ?? {});
     const manualCounts = clone(appConfig.manual_army?.counts ?? {});
     const coordsSlots = clone(appConfig.coords?.slots ?? {});
@@ -244,7 +246,7 @@ export function ComboPage() {
                   <div key={kind} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-2 pl-3">
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white">{troopLabels[kind] ?? kind}</span>
                     <Button size="sm" variant="ghost" disabled={kind === "hero"} aria-label={`Sửa ${kind}`} title={kind === "hero" ? "Tướng là loại hệ thống, không thể đổi tên" : undefined} onClick={() => { setEditingKind(kind); setKindNameDraft(kind); }}><Pencil className="h-4 w-4" /></Button>
-                    <Button size="sm" variant="ghost" aria-label={`Xóa ${kind}`} onClick={() => setPendingDelete({ type: "troop", value: kind })}><Trash2 className="h-4 w-4 text-rose-300" /></Button>
+                    <Button size="sm" variant="ghost" disabled={kind === "hero"} aria-label={`Xóa ${kind}`} title={kind === "hero" ? "Tướng là loại hệ thống, không thể xóa" : undefined} onClick={() => setPendingDelete({ type: "troop", value: kind })}><Trash2 className="h-4 w-4 text-rose-300" /></Button>
                   </div>
                 ))}
               </div>

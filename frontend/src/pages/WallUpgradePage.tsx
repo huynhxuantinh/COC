@@ -73,7 +73,7 @@ export function WallUpgradePage() {
             <summary className="cursor-pointer text-sm font-semibold text-white">Nâng cao</summary>
             <div className="mt-5 grid gap-4 border-t border-white/10 pt-5 sm:grid-cols-2">
               <TextInput type="number" min={1} suffix="lần" label="Tối đa cuộn tìm Wall" value={String(wall.max_wall_search_scrolls ?? 9)} onChange={(event) => updatePath(["wall_upgrade", "max_wall_search_scrolls"], numberValue(event.target.value))} />
-              <TextInput type="number" min={1} suffix="lần" label="Số lần đọc tài nguyên" value={String(wall.resource_read_attempts ?? 3)} onChange={(event) => updatePath(["wall_upgrade", "resource_read_attempts"], numberValue(event.target.value))} />
+              <TextInput type="number" min={2} suffix="lần" label="Số lần đọc tài nguyên" value={String(wall.resource_read_attempts ?? 3)} onChange={(event) => updatePath(["wall_upgrade", "resource_read_attempts"], numberValue(event.target.value))} />
               <TextInput type="number" min={0} step={0.05} suffix="giây" label="Delay mỗi lần đọc" value={String(wall.read_attempt_delay ?? 0.45)} onChange={(event) => updatePath(["wall_upgrade", "read_attempt_delay"], Number(event.target.value || 0))} />
             </div>
           </details>

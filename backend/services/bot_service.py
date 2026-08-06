@@ -124,9 +124,15 @@ class BotService:
                 self.adb_ready = False
                 self.status = "Cấu hình đã thay đổi. Quét ADB lại."
                 raise RuntimeError("Cấu hình đã thay đổi trong lúc quét ADB. Hãy quét lại.")
-            self.config_data = scan_config
+            persisted = copy.deepcopy(scan_config)
+            try:
+                save_config(persisted)
+            except OSError as exc:
+                self.adb_ready = False
+                self.status = "Không thể lưu kết quả quét ADB. Hãy quét lại."
+                raise RuntimeError(f"Không thể lưu kết quả quét ADB: {exc}") from exc
+            self.config_data = persisted
             self.config_revision += 1
-            save_config(self.config_data)
             self.adb_ready = True
             self.status = "ADB đã kết nối 1 device. Có thể bắt đầu."
         return self.get_status()
@@ -357,9 +363,9 @@ class BotService:
             self._set_config_path(candidate, path, normalized)
             candidate = normalize_config(candidate)
             self._validate_config(candidate)
+            save_config(candidate)
             self.config_data = candidate
             self.config_revision += 1
-            save_config(self.config_data)
         self._log(f"[COORD] Saved {len(normalized)} point(s) to {target} | global deploy.")
         return self.get_config()
 
@@ -760,6 +766,8 @@ class BotService:
                 raise ValueError("Nâng tường: số trận nghỉ sau lỗi phải >= 1.")
             if int(wall_upgrade.get("dry_run_retry_attacks", 1)) < 1:
                 raise ValueError("Nâng tường: cooldown mô phỏng phải >= 1.")
+            if int(wall_upgrade.get("resource_read_attempts", 0)) < 2:
+                raise ValueError("Nâng tường: số lần đọc tài nguyên phải >= 2.")
             confirmation_attempts = int(wall_upgrade.get("confirmation_read_attempts", 3))
             confirmation_min_agree = int(wall_upgrade.get("confirmation_min_agree", 2))
             if confirmation_attempts < 3:
@@ -853,11 +861,15 @@ class BotService:
                     ("add1_rounds", "số lần bấm +1"),
                     ("dry_run_retry_attacks", "cooldown mô phỏng"),
                     ("retry_backoff_attacks", "cooldown"),
-                    ("resource_read_attempts", "số lần đọc tài nguyên"),
-                    ("cost_read_attempts", "số lần đọc giá"),
                 ):
                     if int(builder_wall.get(key, 0)) < 1:
                         raise ValueError(f"Nâng tường Làng đêm: {label} phải >= 1.")
+                for key, label in (
+                    ("resource_read_attempts", "số lần đọc tài nguyên"),
+                    ("cost_read_attempts", "số lần đọc giá"),
+                ):
+                    if int(builder_wall.get(key, 0)) < 2:
+                        raise ValueError(f"Nâng tường Làng đêm: {label} phải >= 2.")
                 if int(builder_wall.get("max_wall_search_scrolls", 0)) < 0:
                     raise ValueError("Nâng tường Làng đêm: số lần cuộn phải >= 0.")
                 if float(builder_wall.get("read_attempt_delay", 0)) < 0:
@@ -968,6 +980,8 @@ class BotService:
     def _validate_deploys(self, config: dict[str, Any]) -> None:
         resolution = tuple(config.get("game", {}).get("resolution", [1600, 900]))
         known_kinds = set(str(kind) for kind in config.get("slot_detection", {}).get("kinds", []))
+        if "hero" not in known_kinds:
+            raise ValueError("slot_detection.kinds phải luôn có role hệ thống 'hero'.")
         slot_coords = config.get("coords", {}).get("slots", {})
         detection_enabled = bool(config.get("slot_detection", {}).get("enabled", False))
         detector = SlotDetector(config)

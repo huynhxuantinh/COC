@@ -271,6 +271,48 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertTrue(service.adb_ready)
         self.assertEqual(service.status, original_status)
 
+    def test_save_points_keeps_runtime_state_when_disk_write_fails(self) -> None:
+        service = BotService()
+        original_config = service.get_config()
+        original_revision = service.config_revision
+        original_status = service.status
+        service.adb_ready = True
+
+        with patch("backend.services.bot_service.save_config", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                service.save_points(
+                    "zone_trenbenphai",
+                    [[10, 10], [200, 10], [10, 200]],
+                )
+
+        self.assertEqual(service.get_config(), original_config)
+        self.assertEqual(service.config_revision, original_revision)
+        self.assertTrue(service.adb_ready)
+        self.assertEqual(service.status, original_status)
+
+    def test_adb_scan_keeps_config_when_result_cannot_be_persisted(self) -> None:
+        service = BotService()
+        original_config = service.get_config()
+        original_revision = service.config_revision
+        service.adb_ready = True
+        service.status = "ADB đã kết nối."
+
+        def successful_scan(candidate: dict[str, object], _log: object) -> None:
+            candidate["adb"]["path"] = "scanned-adb.exe"  # type: ignore[index]
+            candidate["adb"]["device"] = "scanned-device"  # type: ignore[index]
+
+        with (
+            patch("backend.services.bot_service.scan_adb_connection", side_effect=successful_scan),
+            patch("backend.services.bot_service.save_config", side_effect=OSError("disk full")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Không thể lưu kết quả quét ADB"):
+                service.scan_adb()
+
+        self.assertEqual(service.get_config(), original_config)
+        self.assertEqual(service.config_revision, original_revision)
+        self.assertFalse(service.adb_ready)
+        self.assertEqual(service.status, "Không thể lưu kết quả quét ADB. Hãy quét lại.")
+
     def test_load_config_recovers_corrupt_primary_from_backup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"
@@ -310,6 +352,35 @@ class SafetyRegressionTests(unittest.TestCase):
 
         self.assertNotIn("Valkyrie", normalized["combos"])
         self.assertEqual(normalize_config(normalized), normalized)
+
+    def test_normalize_config_restores_legacy_king_role_to_hero(self) -> None:
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["slot_detection"]["kinds"] = [
+            "king" if kind == "hero" else kind
+            for kind in config["slot_detection"]["kinds"]
+        ]
+        config["manual_army"]["counts"].pop("hero", None)
+        config["manual_army"]["counts"]["king"] = 3
+        config["coords"]["slots"]["king"] = config["coords"]["slots"].pop("hero")
+        for step in config["deploy"]["sequence"]:
+            if step.get("slot") == "hero":
+                step["slot"] = "king"
+        for combo in config["combos"].values():
+            for step in combo["deploy"]["sequence"]:
+                if step.get("slot") == "hero":
+                    step["slot"] = "king"
+
+        normalized = normalize_config(config)
+
+        self.assertIn("hero", normalized["slot_detection"]["kinds"])
+        self.assertNotIn("king", normalized["slot_detection"]["kinds"])
+        self.assertEqual(normalized["manual_army"]["counts"]["hero"], 3)
+        self.assertNotIn("king", normalized["manual_army"]["counts"])
+        self.assertIn("hero", normalized["coords"]["slots"])
+        self.assertNotIn("king", normalized["coords"]["slots"])
+        self.assertNotIn("king", [step["slot"] for step in normalized["deploy"]["sequence"]])
+        for combo in normalized["combos"].values():
+            self.assertNotIn("king", [step["slot"] for step in combo["deploy"]["sequence"]])
 
     def test_start_bot_rolls_back_when_adb_disappears_after_scan(self) -> None:
         service = BotService()
@@ -517,6 +588,75 @@ class SafetyRegressionTests(unittest.TestCase):
 
         self.assertEqual(service.get_config(), original)
 
+    def test_backend_rejects_config_without_reserved_hero_role(self) -> None:
+        service = BotService()
+        config = service.get_config()
+        config["slot_detection"]["kinds"] = [
+            kind for kind in config["slot_detection"]["kinds"] if kind != "hero"
+        ]
+
+        with self.assertRaisesRegex(ValueError, "role hệ thống 'hero'"):
+            service.save_config_data(config)
+
+    def test_reserved_hero_role_uses_one_manual_count_per_detected_slot(self) -> None:
+        bot = self._bare_bot()
+        bot.manual_slot_counts = {"hero": 3}
+        remaining = {"hero": 3}
+
+        counts = [bot._manual_detection_count("hero", remaining) for _ in range(4)]
+
+        self.assertEqual(counts, [1, 1, 1, 0])
+        self.assertEqual(remaining["hero"], 0)
+
+    def test_reserved_hero_role_activates_every_detected_hero(self) -> None:
+        bot = self._bare_bot()
+        bot.config["attack_timing"] = {
+            "use_default": True,
+            "activate_hero_skill": True,
+            "hero_skill_min_ms": 0,
+            "hero_skill_max_ms": 0,
+            "hero_search_delay_seconds": 0,
+        }
+        bot.active_deploy = {
+            "sequence": [{"slot": "hero", "count": "all", "max_taps": 4}],
+        }
+        bot.runtime_slots = {
+            "hero": [
+                {"center": [500, 810]},
+                {"center": [620, 810]},
+                {"center": [740, 810]},
+            ]
+        }
+        taps: list[list[int]] = []
+        bot._active_time = lambda: 1.0
+        bot._pause_gate = lambda: None
+        bot._sleep = lambda _seconds: None
+        bot._optimized_action_pause = lambda: None
+        bot._tap = lambda point: taps.append(list(point))
+
+        bot._activate_post_deploy_slots(0.0)
+
+        self.assertEqual(taps, [[500, 810], [620, 810], [740, 810]])
+
+    def test_reserved_hero_skill_can_be_disabled_independently(self) -> None:
+        bot = self._bare_bot()
+        bot.config["attack_timing"] = {
+            "use_default": False,
+            "activate_hero_skill": False,
+            "hero_skill_min_ms": 0,
+            "hero_skill_max_ms": 0,
+        }
+        bot.active_deploy = {
+            "sequence": [{"slot": "hero", "count": "all", "max_taps": 4}],
+        }
+        bot.runtime_slots = {"hero": [{"center": [500, 810]}]}
+        taps: list[list[int]] = []
+        bot._tap = lambda point: taps.append(list(point))
+
+        bot._activate_post_deploy_slots(0.0)
+
+        self.assertEqual(taps, [])
+
     def test_rename_slot_kind_rolls_back_template_directory_when_save_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = normalize_config({})
@@ -645,6 +785,24 @@ class SafetyRegressionTests(unittest.TestCase):
             with self.subTest(key=key):
                 config = normalize_config({})
                 config["builder_base"]["wall_upgrade"][key] = value
+                with self.assertRaisesRegex(ValueError, message):
+                    service._validate_config(config)
+
+    def test_backend_requires_two_wall_consensus_reads(self) -> None:
+        service = BotService.__new__(BotService)
+        cases = (
+            (("wall_upgrade", "resource_read_attempts"), "Nâng tường: số lần đọc tài nguyên"),
+            (("builder_base", "wall_upgrade", "resource_read_attempts"), "Làng đêm: số lần đọc tài nguyên"),
+            (("builder_base", "wall_upgrade", "cost_read_attempts"), "Làng đêm: số lần đọc giá"),
+        )
+
+        for path, message in cases:
+            with self.subTest(path=path):
+                config = normalize_config({})
+                target = config
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = 1
                 with self.assertRaisesRegex(ValueError, message):
                     service._validate_config(config)
 

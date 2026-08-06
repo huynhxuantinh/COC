@@ -304,6 +304,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "attack_timing": {
         "use_default": False,
+        "activate_hero_skill": True,
         "troop_delay_ms": 80,
         "freeze_random_min_ms": 0,
         "freeze_random_max_ms": 250,
@@ -640,6 +641,43 @@ def migrate_slot_detection_config(config: dict[str, Any]) -> None:
         slot_detection.pop("cluster_padding", None)
 
 
+def migrate_reserved_hero_role(config: dict[str, Any]) -> None:
+    detection = config.get("slot_detection", {})
+    if not isinstance(detection, dict):
+        return
+    kinds = detection.get("kinds", [])
+    if not isinstance(kinds, list) or "hero" in kinds or "king" not in kinds:
+        return
+
+    detection["kinds"] = ["hero" if kind == "king" else kind for kind in kinds]
+    for section, key in (
+        (detection, "count_max_by_kind"),
+        (detection, "count_corrections"),
+        (config.setdefault("manual_army", {}), "counts"),
+        (config.setdefault("coords", {}), "slots"),
+    ):
+        values = section.setdefault(key, {})
+        if isinstance(values, dict) and "king" in values:
+            values["hero"] = values.pop("king")
+
+    def remap_deploy(deploy: Any) -> None:
+        if not isinstance(deploy, dict):
+            return
+        for step in deploy.get("sequence", []):
+            if isinstance(step, dict) and step.get("slot") == "king":
+                step["slot"] = "hero"
+        for group in deploy.get("spell_groups", []):
+            if isinstance(group, dict):
+                group["slots"] = [
+                    "hero" if slot == "king" else slot for slot in group.get("slots", [])
+                ]
+
+    remap_deploy(config.get("deploy"))
+    for combo in config.get("combos", {}).values():
+        if isinstance(combo, dict):
+            remap_deploy(combo.get("deploy", combo))
+
+
 def migrate_dead_legacy_options(config: dict[str, Any]) -> None:
     game = config.get("game", {})
     if isinstance(game, dict):
@@ -668,6 +706,7 @@ def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
             },
         }
     normalize_combo_deploys(merged)
+    migrate_reserved_hero_role(merged)
     migrate_fast_attack_delays(merged)
     migrate_global_deploy_zones(merged)
     migrate_single_adb_device(merged)

@@ -873,7 +873,7 @@ class FarmBot:
         return self._random_points_in_polygon(zone, max(1, int(count)), min_distance_px=min_distance)
 
     def _activate_post_deploy_slots(self, deploy_finished: float) -> None:
-        if not self._custom_attack_timing_enabled():
+        if not bool(self._attack_timing().get("activate_hero_skill", True)):
             return
 
         activations = [
@@ -1442,7 +1442,7 @@ class FarmBot:
     def _read_home_resources_stable(self, settings: dict[str, Any]) -> dict[str, int] | None:
         if not self.vision.available:
             return None
-        attempts = max(1, int(settings.get("resource_read_attempts", 3)))
+        attempts = max(2, int(settings.get("resource_read_attempts", 3)))
         delay = max(0.0, float(settings.get("read_attempt_delay", 0.45)))
         samples: list[dict[str, int]] = []
         for attempt in range(attempts):

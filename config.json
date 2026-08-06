@@ -27,7 +27,7 @@
       "dragon",
       "balloon",
       "valkyrie",
-      "king",
+      "hero",
       "rage",
       "freeze",
       "rong",
@@ -55,12 +55,11 @@
       "dragon": 0,
       "balloon": 8,
       "valkyrie": 25,
-      "hero": 0,
+      "hero": 3,
       "rage": 5,
       "freeze": 1,
       "rong": 14,
-      "spvalkyrie": 10,
-      "king": 3
+      "spvalkyrie": 10
     }
   },
   "game": {
@@ -264,10 +263,6 @@
       ],
       "poison": [
         1064,
-        815
-      ],
-      "king": [
-        676,
         815
       ]
     }
@@ -918,7 +913,7 @@
         "delay": 0.07
       },
       {
-        "slot": "king",
+        "slot": "hero",
         "count": "all",
         "delay": 0.12,
         "max_taps": 5
@@ -1052,6 +1047,7 @@
   },
   "attack_timing": {
     "use_default": true,
+    "activate_hero_skill": true,
     "troop_delay_ms": 30,
     "freeze_random_min_ms": 30,
     "freeze_random_max_ms": 250,
@@ -2153,7 +2149,7 @@
             "delay": 0.07
           },
           {
-            "slot": "king",
+            "slot": "hero",
             "count": "all",
             "delay": 0.12,
             "max_taps": 5
@@ -2492,7 +2488,7 @@
             "delay": 0.03
           },
           {
-            "slot": "king",
+            "slot": "hero",
             "count": "all",
             "max_taps": 5,
             "delay": 0.12
@@ -3073,7 +3069,7 @@
             "delay": 0.05
           },
           {
-            "slot": "king",
+            "slot": "hero",
             "count": "all",
             "max_taps": 10,
             "delay": 0.05
@@ -3648,7 +3644,7 @@
             "delay": 0.04
           },
           {
-            "slot": "king",
+            "slot": "hero",
             "count": "all",
             "delay": 0.02,
             "max_taps": 4

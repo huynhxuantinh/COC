@@ -72,8 +72,8 @@ export function BuilderWallUpgradePage() {
           <details className="rounded-lg border border-white/10 bg-ink-850/90 p-5">
             <summary className="cursor-pointer text-sm font-semibold text-white">Đọc OCR</summary>
             <div className="mt-5 grid gap-4 border-t border-white/10 pt-5 sm:grid-cols-2">
-              <TextInput type="number" min={1} suffix="lần" label="Đọc tài nguyên" value={String(wall.resource_read_attempts ?? 3)} onChange={(event) => update("resource_read_attempts", numberValue(event.target.value))} />
-              <TextInput type="number" min={1} suffix="lần" label="Đọc giá" value={String(wall.cost_read_attempts ?? 3)} onChange={(event) => update("cost_read_attempts", numberValue(event.target.value))} />
+              <TextInput type="number" min={2} suffix="lần" label="Đọc tài nguyên" value={String(wall.resource_read_attempts ?? 3)} onChange={(event) => update("resource_read_attempts", numberValue(event.target.value))} />
+              <TextInput type="number" min={2} suffix="lần" label="Đọc giá" value={String(wall.cost_read_attempts ?? 3)} onChange={(event) => update("cost_read_attempts", numberValue(event.target.value))} />
               <TextInput type="number" min={0} step={0.05} suffix="giây" label="Delay mỗi lần đọc" value={String(wall.read_attempt_delay ?? 0.45)} onChange={(event) => update("read_attempt_delay", Number(event.target.value || 0))} />
             </div>
           </details>

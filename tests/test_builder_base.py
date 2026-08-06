@@ -365,6 +365,44 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertEqual(bot.attacks_since_wall_upgrade, -6)
         self.assertFalse(bot._builder_wall_upgrade_due())
 
+    def test_builder_wall_rolls_back_to_largest_affordable_selection(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "wall_upgrade": {
+                "dry_run": True,
+                "dry_run_retry_attacks": 6,
+                "add1_rounds": 3,
+                "reserve_gold": 0,
+                "reserve_elixir": 0,
+                "coords": {
+                    "remove_button": [40, 40],
+                    "upgrade_gold_button": [50, 50],
+                    "upgrade_elixir_button": [60, 60],
+                },
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.attacks_since_wall_upgrade = 0
+        bot.log = lambda _message: None
+        bot._read_builder_resources_stable = lambda _settings: {
+            "gold": 1_000_000,
+            "elixir": 0,
+        }
+        bot._find_builder_wall_row = lambda _settings: [800, 400]
+        costs = iter((3_000_000, 3_000_000, 2_000_000, 2_000_000, 1_000_000, 1_000_000))
+        bot._read_builder_wall_cost_stable = lambda _settings, _button: next(costs)
+        taps: list[tuple[int, int]] = []
+        bot._tap = lambda point, jitter=0: taps.append(tuple(point))
+        bot._sleep = lambda _seconds: None
+        bot._close_builder_wall_ui = lambda: None
+
+        result = bot._upgrade_builder_walls()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["reason"], "dry_run")
+        self.assertEqual(taps.count((40, 40)), 2)
+        self.assertEqual(bot.attacks_since_wall_upgrade, -6)
+
     def test_builder_cycle_continues_to_match_after_wall_dry_run(self) -> None:
         bot = BuilderBaseBot.__new__(BuilderBaseBot)
         bot.builder = {"coords": {}, "timing": {"after_attack_seconds": 0, "after_find_now_seconds": 0}}
