@@ -32,6 +32,10 @@ class SlotDetection:
 class SlotDetector:
     _template_cache: dict[str, Any] = {}
 
+    @classmethod
+    def clear_template_cache(cls) -> None:
+        cls._template_cache.clear()
+
     def __init__(self, config: dict[str, Any], log=None) -> None:
         self.config = config
         self.log = log or (lambda message: None)
@@ -119,7 +123,7 @@ class SlotDetector:
             raise ValueError("Khong tim thay template.")
 
         path.unlink()
-        self._template_cache.pop(str(path), None)
+        self.clear_template_cache()
         return path
 
     def _load_template(self, path: Path):

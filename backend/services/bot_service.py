@@ -13,6 +13,7 @@ from typing import Any
 from adb_client import ADBClient, ADBError
 from bot_runtime import scan_adb_connection, start_farm_threads
 from config_manager import load_config, normalize_config, save_config
+from polygon_utils import polygon_ready
 from slot_detector import SlotDetector
 from stats_store import STAT_KEYS
 from vision import Vision
@@ -48,9 +49,10 @@ class BotService:
                 raise ValueError("Hãy dừng bot trước khi lưu cấu hình.")
             normalized = normalize_config(config)
             self._validate_config(normalized)
-            self.config_data = copy.deepcopy(normalized)
+            persisted = copy.deepcopy(normalized)
+            save_config(persisted)
+            self.config_data = persisted
             self.config_revision += 1
-            save_config(self.config_data)
             self.adb_ready = False
             self.status = "Đã lưu. Quét ADB lại."
         self._log("[INFO] Đã lưu cài đặt.")
@@ -206,26 +208,14 @@ class BotService:
         missing = [
             label
             for key, label in (("stage1_zone", "Làng 1"), ("stage2_zone", "Làng 2"))
-            if len(deploy.get(key, [])) < 3
+            if not self._polygon_ready(deploy.get(key, []))
         ]
         if missing:
             raise ValueError(f"Chưa thiết lập vùng thả quân: {', '.join(missing)}.")
 
     @staticmethod
     def _polygon_ready(points: Any) -> bool:
-        if not isinstance(points, list) or len(points) < 3:
-            return False
-        try:
-            normalized = [(int(point[0]), int(point[1])) for point in points if len(point) >= 2]
-        except (TypeError, ValueError):
-            return False
-        if len(normalized) < 3 or len(set(normalized)) < 3:
-            return False
-        area_twice = sum(
-            x1 * y2 - x2 * y1
-            for (x1, y1), (x2, y2) in zip(normalized, normalized[1:] + normalized[:1])
-        )
-        return area_twice != 0
+        return polygon_ready(points)
 
     def toggle_pause(self) -> dict[str, Any]:
         with self.lock:
@@ -374,7 +364,11 @@ class BotService:
         return self.get_config()
 
     def slot_templates(self) -> dict[str, Any]:
-        detector = SlotDetector(self.get_config(), self._log)
+        with self.lock:
+            return self._slot_templates_locked()
+
+    def _slot_templates_locked(self) -> dict[str, Any]:
+        detector = SlotDetector(copy.deepcopy(self.config_data), self._log)
         return {"kinds": detector.kinds, "items": detector.template_summary()}
 
     def save_slot_template(
@@ -386,20 +380,32 @@ class BotService:
         size: int = 76,
         crop_region: list[int] | None = None,
     ) -> dict[str, Any]:
-        detector = SlotDetector(self.get_config(), self._log)
-        path = detector.save_template_from_base64(kind, image_base64, x, y, size, crop_region)
+        with self.lock:
+            if self._bot_running_locked():
+                raise ValueError("Hãy dừng bot trước khi lưu template lính.")
+            detector = SlotDetector(copy.deepcopy(self.config_data), self._log)
+            path = detector.save_template_from_base64(kind, image_base64, x, y, size, crop_region)
+            SlotDetector.clear_template_cache()
+            result = self._slot_templates_locked()
         self._log(f"[SLOT] Saved template {kind}: {path}.")
-        return self.slot_templates()
+        return result
 
     def delete_slot_template(self, kind: str, filename: str) -> dict[str, Any]:
-        detector = SlotDetector(self.get_config(), self._log)
-        path = detector.delete_template(kind, filename)
+        with self.lock:
+            if self._bot_running_locked():
+                raise ValueError("Hãy dừng bot trước khi xóa template lính.")
+            detector = SlotDetector(copy.deepcopy(self.config_data), self._log)
+            path = detector.delete_template(kind, filename)
+            SlotDetector.clear_template_cache()
+            result = self._slot_templates_locked()
         self._log(f"[SLOT] Deleted template {kind}: {path.name}.")
-        return self.slot_templates()
+        return result
 
     def rename_slot_kind(self, old_kind: str, new_kind: str) -> dict[str, Any]:
         old_kind = self._normalize_slot_kind(old_kind)
         new_kind = self._normalize_slot_kind(new_kind)
+        if old_kind == "hero" or new_kind == "hero":
+            raise ValueError("'hero' là kind hệ thống dùng cho vai trò tướng và không thể đổi tên.")
         if old_kind == new_kind:
             raise ValueError("Tên lính mới phải khác tên hiện tại.")
 
@@ -441,7 +447,7 @@ class BotService:
             self.config_revision += 1
             self.adb_ready = False
             self.status = "Đã đổi tên lính. Quét ADB lại."
-            SlotDetector._template_cache.clear()
+            SlotDetector.clear_template_cache()
 
         self._log(f"[SLOT] Renamed kind {old_kind} -> {new_kind}.")
         return self.get_config()
@@ -463,6 +469,7 @@ class BotService:
         ]
         for section, key in (
             (detection, "count_max_by_kind"),
+            (detection, "count_corrections"),
             (config.setdefault("manual_army", {}), "counts"),
             (config.setdefault("coords", {}), "slots"),
         ):
@@ -855,10 +862,24 @@ class BotService:
                     raise ValueError("Nâng tường Làng đêm: số lần cuộn phải >= 0.")
                 if float(builder_wall.get("read_attempt_delay", 0)) < 0:
                     raise ValueError("Nâng tường Làng đêm: delay đọc phải >= 0.")
+                confirmation_attempts = int(builder_wall.get("confirmation_read_attempts", 3))
+                confirmation_min_agree = int(builder_wall.get("confirmation_min_agree", 2))
+                if confirmation_attempts < 3:
+                    raise ValueError("Nâng tường Làng đêm: phải đọc hộp xác nhận ít nhất 3 lần.")
+                if confirmation_min_agree < 2 or confirmation_min_agree > confirmation_attempts:
+                    raise ValueError(
+                        "Nâng tường Làng đêm: số mẫu đồng thuận phải từ 2 đến số lần đọc."
+                    )
+                if float(builder_wall.get("confirmation_read_delay", 0)) < 0:
+                    raise ValueError("Nâng tường Làng đêm: delay đọc hộp xác nhận phải >= 0.")
                 if float(builder_wall.get("stable_read_tolerance_percent", 0)) < 0:
                     raise ValueError("Nâng tường Làng đêm: tolerance phần trăm phải >= 0.")
                 if int(builder_wall.get("stable_read_tolerance_absolute", 0)) < 0:
                     raise ValueError("Nâng tường Làng đêm: tolerance tuyệt đối phải >= 0.")
+                if float(builder_wall.get("spend_verify_tolerance_percent", 0)) < 0:
+                    raise ValueError("Nâng tường Làng đêm: tolerance chi tiêu phần trăm phải >= 0.")
+                if int(builder_wall.get("spend_verify_tolerance_absolute", 0)) < 0:
+                    raise ValueError("Nâng tường Làng đêm: tolerance chi tiêu tuyệt đối phải >= 0.")
         self._validate_coords(config)
         self._validate_deploys(config)
 
@@ -889,6 +910,8 @@ class BotService:
             raise ValueError(f"{label}: polygon phải có ít nhất 3 điểm.")
         for index, point in enumerate(points, start=1):
             self._validate_point(point, f"{label} điểm {index}", resolution)
+        if not self._polygon_ready(points):
+            raise ValueError(f"{label}: polygon phải có ít nhất 3 điểm khác nhau và diện tích > 0.")
 
     def _validate_coords(self, config: dict[str, Any]) -> None:
         resolution = tuple(config.get("game", {}).get("resolution", [1600, 900]))

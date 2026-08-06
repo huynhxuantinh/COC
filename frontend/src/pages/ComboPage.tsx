@@ -243,7 +243,7 @@ export function ComboPage() {
                 ) : (
                   <div key={kind} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-2 pl-3">
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white">{troopLabels[kind] ?? kind}</span>
-                    <Button size="sm" variant="ghost" aria-label={`Sửa ${kind}`} onClick={() => { setEditingKind(kind); setKindNameDraft(kind); }}><Pencil className="h-4 w-4" /></Button>
+                    <Button size="sm" variant="ghost" disabled={kind === "hero"} aria-label={`Sửa ${kind}`} title={kind === "hero" ? "Tướng là loại hệ thống, không thể đổi tên" : undefined} onClick={() => { setEditingKind(kind); setKindNameDraft(kind); }}><Pencil className="h-4 w-4" /></Button>
                     <Button size="sm" variant="ghost" aria-label={`Xóa ${kind}`} onClick={() => setPendingDelete({ type: "troop", value: kind })}><Trash2 className="h-4 w-4 text-rose-300" /></Button>
                   </div>
                 ))}

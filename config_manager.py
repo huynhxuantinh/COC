@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -455,8 +457,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "resource_read_attempts": 3,
             "cost_read_attempts": 3,
             "read_attempt_delay": 0.45,
+            "confirmation_read_attempts": 3,
+            "confirmation_min_agree": 2,
+            "confirmation_read_delay": 0.35,
             "stable_read_tolerance_percent": 0.1,
             "stable_read_tolerance_absolute": 1000,
+            "spend_verify_tolerance_percent": 0.1,
+            "spend_verify_tolerance_absolute": 1000,
             "search_region": [720, 120, 420, 580],
             "list_scroll_swipe": [930, 650, 930, 250, 500],
             "resource_regions": {
@@ -650,8 +657,11 @@ def migrate_dead_legacy_options(config: dict[str, Any]) -> None:
 
 
 def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
-    merged = deep_merge(DEFAULT_CONFIG, data)
-    if "combos" not in data:
+    overrides = {key: value for key, value in data.items() if key != "combos"}
+    merged = deep_merge(DEFAULT_CONFIG, overrides)
+    if "combos" in data:
+        merged["combos"] = copy.deepcopy(data["combos"])
+    else:
         merged["combos"] = {
             "Rồng Điện": {
                 "deploy": copy.deepcopy(merged["deploy"]),
@@ -666,18 +676,86 @@ def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _config_backup_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.bak")
+
+
+def _read_config_file(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+    if not isinstance(data, dict):
+        raise ValueError(f"Cấu hình tại {path} phải là một JSON object.")
+    return data
+
+
+def _atomic_write_config(path: Path, config: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as file:
+            temporary_path = Path(file.name)
+            json.dump(config, file, ensure_ascii=False, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     if not path.exists():
+        backup_path = _config_backup_path(path)
+        if backup_path.exists():
+            try:
+                recovered = normalize_config(_read_config_file(backup_path))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                pass
+            else:
+                save_config(recovered, path)
+                return recovered
         save_config(DEFAULT_CONFIG, path)
         return copy.deepcopy(DEFAULT_CONFIG)
 
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        data = _read_config_file(path)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as primary_error:
+        backup_path = _config_backup_path(path)
+        try:
+            data = _read_config_file(backup_path)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            raise ValueError(
+                f"Cấu hình {path} bị hỏng và không có backup hợp lệ tại {backup_path}."
+            ) from primary_error
+        recovered = normalize_config(data)
+        save_config(recovered, path)
+        return recovered
     return normalize_config(data)
 
 
 def save_config(config: dict[str, Any], path: Path = CONFIG_PATH) -> None:
-    path.write_text(
-        json.dumps(config, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    backup_path = _config_backup_path(path)
+    backup_data: dict[str, Any] | None = None
+    if path.exists():
+        try:
+            backup_data = _read_config_file(path)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            if not backup_path.exists():
+                backup_data = config
+    else:
+        backup_data = config
+
+    if backup_data is not None:
+        _atomic_write_config(backup_path, backup_data)
+    _atomic_write_config(path, config)

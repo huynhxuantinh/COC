@@ -4,12 +4,14 @@ import random
 import subprocess
 import threading
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from adb_client import ADBClient, ADBError
 from builder_vision import BuilderBaseVision, BuilderScreen
+from polygon_utils import normalize_polygon
 from stats_store import STAT_KEYS, atomic_write_json, load_total_stats, merge_existing_stats
 
 
@@ -973,15 +975,10 @@ class BuilderBaseBot:
         default_button = [980, 700] if pay_with == "gold" else [1155, 700]
         self._tap(coords.get(button_key, default_button), jitter=0)
         self._sleep(0.8)
-        confirmation_png = self._screencap_png()
-        confirmation = self.vision.read_wall_confirmation(confirmation_png)
-        if (
-            not confirmation.get("is_wall_upgrade")
-            or confirmation.get("currency") != pay_with
-            or int(confirmation.get("cost", -1)) != cost
-        ):
+        confirmation = self._read_builder_wall_confirmation_stable(settings, pay_with, cost)
+        if confirmation is None:
             self.log(
-                "[BUILDER][WALL] Hộp xác nhận không khớp giá/loại tiền, hủy để tránh tiêu nhầm."
+                "[BUILDER][WALL] Hộp xác nhận không đạt đồng thuận giá/loại tiền, hủy."
             )
             self._tap(coords.get("confirm_cancel_button", [622, 580]), jitter=0)
             self._sleep(0.5)
@@ -997,10 +994,70 @@ class BuilderBaseBot:
             return {"success": False, "reason": "upgrade_verify_failed"}
 
         spent = resources[pay_with] - after[pay_with]
+        budget = max(0, resources[pay_with] - int(settings.get(f"reserve_{pay_with}", 0)))
+        spend_tolerance = max(
+            max(0, int(settings.get("spend_verify_tolerance_absolute", 1_000))),
+            int(
+                max(cost, 1)
+                * max(0.0, float(settings.get("spend_verify_tolerance_percent", 0.1)))
+                / 100.0
+            ),
+        )
+        if spent > budget or abs(spent - cost) > spend_tolerance:
+            message = (
+                f"Chi tiêu Builder Wall bất thường: modal={cost:,} | "
+                f"thực tế={spent:,} | ngân sách={budget:,} {pay_with}. Bot đã dừng."
+            )
+            self.log(f"[BUILDER][WALL][CRITICAL] {message}")
+            self._close_builder_wall_ui()
+            self._notify_lifecycle("error", message)
+            self.stop_event.set()
+            return {"success": False, "reason": "unsafe_spend_detected"}
         self.attacks_since_wall_upgrade = 0
         self.log(f"[BUILDER][WALL] Nâng thành công, đã dùng {spent:,} {pay_with}.")
         self._close_builder_wall_ui()
         return {"success": True, "reason": ""}
+
+    def _read_builder_wall_confirmation_stable(
+        self,
+        settings: dict[str, Any],
+        expected_currency: str,
+        expected_cost: int,
+    ) -> dict[str, Any] | None:
+        attempts = max(3, int(settings.get("confirmation_read_attempts", 3)))
+        min_agree = max(2, int(settings.get("confirmation_min_agree", 2)))
+        delay = max(0.0, float(settings.get("confirmation_read_delay", 0.35)))
+        valid: list[tuple[bool, str, int]] = []
+        details: list[str] = []
+        for attempt in range(attempts):
+            self._pause_gate()
+            if self.stop_event.is_set():
+                return None
+            try:
+                sample = self.vision.read_wall_confirmation(self._screencap_png())
+            except ADBError as exc:
+                details.append(f"adb={exc}")
+            else:
+                wall_ok = bool(sample.get("is_wall_upgrade"))
+                currency = str(sample.get("currency", ""))
+                cost = int(sample.get("cost", -1))
+                details.append(f"wall={wall_ok},currency={currency or '?'},cost={cost}")
+                if wall_ok and currency == expected_currency and cost == expected_cost:
+                    valid.append((wall_ok, currency, cost))
+            if attempt < attempts - 1:
+                self._sleep(delay)
+
+        self.log(f"[BUILDER][WALL] Mẫu hộp xác nhận: {' | '.join(details)}.")
+        if not valid or min_agree > attempts:
+            return None
+        candidate, count = Counter(valid).most_common(1)[0]
+        if count < min_agree:
+            return None
+        return {
+            "is_wall_upgrade": candidate[0],
+            "currency": candidate[1],
+            "cost": candidate[2],
+        }
 
     def _select_builder_wall_payment(
         self,
@@ -1276,6 +1333,9 @@ class BuilderBaseBot:
         self._state_failures = 0
 
     def _clustered_points(self, polygon: list[list[int]], count: int) -> list[list[int]]:
+        polygon = self._valid_polygon(polygon)
+        if not polygon:
+            raise ValueError("Builder deploy polygon không hợp lệ hoặc không có diện tích.")
         deploy = self.builder.get("deploy", {})
         candidates = self._random_points_in_polygon(polygon, max(32, int(deploy.get("random_points", 64))))
         anchor = random.choice(candidates)
@@ -1326,10 +1386,7 @@ class BuilderBaseBot:
         return all((point[0] - other[0]) ** 2 + (point[1] - other[1]) ** 2 >= minimum**2 for other in points)
 
     def _valid_polygon(self, points: Any) -> list[list[int]]:
-        if not isinstance(points, list):
-            return []
-        normalized = [[int(point[0]), int(point[1])] for point in points if isinstance(point, list) and len(point) >= 2]
-        return normalized if len(normalized) >= 3 else []
+        return normalize_polygon(points)
 
     def _active_time(self) -> float:
         return time.time() - float(getattr(self, "_paused_seconds_total", 0.0))

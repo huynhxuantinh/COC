@@ -437,6 +437,75 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertEqual(confirmation["currency"], "elixir")
         self.assertEqual(confirmation["cost"], 800000)
 
+    def test_builder_wall_confirmation_requires_consensus(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.stop_event = threading.Event()
+        bot.log = lambda _message: None
+        bot._pause_gate = lambda: None
+        bot._sleep = lambda _seconds: None
+        bot._screencap_png = lambda: b"dialog"
+        bot.vision = Mock()
+        bot.vision.read_wall_confirmation.side_effect = [
+            {"is_wall_upgrade": True, "currency": "gold", "cost": 800000},
+            {"is_wall_upgrade": True, "currency": "gold", "cost": 5000000},
+            {"is_wall_upgrade": True, "currency": "gold", "cost": 1200000},
+        ]
+
+        confirmation = bot._read_builder_wall_confirmation_stable(
+            {"confirmation_read_attempts": 3, "confirmation_min_agree": 2},
+            "gold",
+            800000,
+        )
+
+        self.assertIsNone(confirmation)
+        self.assertEqual(bot.vision.read_wall_confirmation.call_count, 3)
+
+    def test_builder_wall_unsafe_spend_stops_bot(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "wall_upgrade": {
+                "add1_rounds": 1,
+                "reserve_gold": 5000000,
+                "reserve_elixir": 0,
+                "confirmation_read_attempts": 3,
+                "confirmation_min_agree": 2,
+                "spend_verify_tolerance_percent": 0.1,
+                "spend_verify_tolerance_absolute": 1000,
+                "coords": {},
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.attacks_since_wall_upgrade = 0
+        bot.log = lambda _message: None
+        bot._pause_gate = lambda: None
+        bot._read_builder_resources_stable = Mock(
+            side_effect=[
+                {"gold": 6000000, "elixir": 0},
+                {"gold": 1000000, "elixir": 0},
+            ]
+        )
+        bot._find_builder_wall_row = lambda _settings: [800, 400]
+        bot._read_builder_wall_cost_stable = lambda _settings, button: 800000 if button == [980, 700] else -1
+        bot._tap = lambda _point, jitter=0: None
+        bot._sleep = lambda _seconds: None
+        bot._close_builder_wall_ui = lambda: None
+        bot._screencap_png = lambda: b"dialog"
+        bot.vision = Mock()
+        bot.vision.read_wall_confirmation.return_value = {
+            "is_wall_upgrade": True,
+            "currency": "gold",
+            "cost": 800000,
+        }
+        lifecycle: list[tuple[str, str]] = []
+        bot._notify_lifecycle = lambda event, detail="": lifecycle.append((event, detail))
+
+        result = bot._upgrade_builder_walls()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["reason"], "unsafe_spend_detected")
+        self.assertTrue(bot.stop_event.is_set())
+        self.assertEqual(lifecycle[0][0], "error")
+
     def test_result_screen_falls_back_to_green_return_home_button(self) -> None:
         vision = BuilderBaseVision(normalize_config({}))
         image = Image.new("RGB", (1600, 900), "black")
@@ -1266,6 +1335,26 @@ class BuilderBaseTests(unittest.TestCase):
         config["builder_base"]["deploy"]["stage1_zone"] = [[0, 0], [10, 0], [0, 10]]
         config["builder_base"]["deploy"]["stage2_zone"] = [[0, 0], [10, 0], [0, 10]]
         service._validate_start_requirements(config)
+
+    def test_builder_rejects_degenerate_polygons_at_save_start_and_runtime(self) -> None:
+        service = BotService.__new__(BotService)
+        collinear = [[100, 100], [200, 200], [300, 300]]
+        valid = [[100, 100], [300, 100], [100, 300]]
+
+        with self.assertRaisesRegex(ValueError, "diện tích"):
+            service._validate_polygon(collinear, "builder_base.deploy.stage1_zone", (1600, 900))
+
+        config = normalize_config({"farm": {"village": "builder"}})
+        config["builder_base"]["deploy"]["stage1_zone"] = collinear
+        config["builder_base"]["deploy"]["stage2_zone"] = valid
+        with self.assertRaisesRegex(ValueError, "Làng 1"):
+            service._validate_start_requirements(config)
+
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {"deploy": {"random_points": 8}}
+        self.assertEqual(bot._valid_polygon(collinear), [])
+        with self.assertRaisesRegex(ValueError, "polygon"):
+            bot._clustered_points(collinear, 8)
 
     def test_main_start_requires_polygon_for_fixed_attack_view(self) -> None:
         service = BotService.__new__(BotService)

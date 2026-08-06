@@ -77,11 +77,21 @@ export function DashboardPage({ status, refreshStatus }: Props) {
   }
 
   async function handleStartBot() {
-    if (isDirty && !(await save())) throw new Error("Không lưu được cấu hình. Bot chưa được khởi động.");
+    if (isDirty) {
+      if (!(await save())) throw new Error("Không lưu được cấu hình. Bot chưa được khởi động.");
+      return;
+    }
     return startBot();
   }
 
   async function handleScanAdb() {
+    if (isDirty) {
+      const shouldSave = window.confirm(
+        "Cấu hình có thay đổi chưa lưu. Nhấn OK để lưu rồi quét ADB; nhấn Hủy để giữ thay đổi và không quét.",
+      );
+      if (!shouldSave) return;
+      if (!(await save())) throw new Error("Không lưu được cấu hình. Chưa quét ADB.");
+    }
     await scanAdb();
     await reload();
   }

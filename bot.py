@@ -11,6 +11,7 @@ from typing import Any
 
 from adb_client import ADBClient, ADBError
 from builder_vision import BuilderBaseVision, BuilderScreen
+from polygon_utils import normalize_polygon
 from slot_detector import SlotDetector
 from stats_store import STAT_KEYS, atomic_write_json, load_total_stats, merge_existing_stats
 from vision import Vision
@@ -933,6 +934,7 @@ class FarmBot:
         read_battle_loot = bool(surrender.get("when_low_loot", False)) and not bool(
             surrender.get("never_surrender", False)
         )
+        low_loot_confirmations = 0
 
         self.log(f"[BATTLE] Monitor. time={target_time}s, damage={target_damage}%.")
         while not self.stop_event.is_set():
@@ -975,6 +977,11 @@ class FarmBot:
             )
             damage = best_damage
             loot = self.vision.read_loot(png) if read_battle_loot and self.vision.available else {}
+            if read_battle_loot:
+                low_loot_confirmations = self._update_low_loot_confirmations(
+                    loot,
+                    low_loot_confirmations,
+                )
             if damage >= 0 and damage != last_damage:
                 last_damage = damage
                 last_damage_changed_at = now
@@ -985,6 +992,7 @@ class FarmBot:
                 loot,
                 target_time,
                 target_damage,
+                low_loot_confirmations,
             )
             if not surrender["never_surrender"] and surrender_reason:
                 self.log(f"[BATTLE] Surrender condition matched: {surrender_reason}.")
@@ -1619,20 +1627,48 @@ class FarmBot:
         loot: dict[str, int],
         target_time: int,
         target_damage: int,
+        low_loot_confirmations: int = 0,
     ) -> str:
         surrender = self.config["surrender"]
         if surrender["by_time"] and elapsed >= target_time:
             return f"time {elapsed}s >= {target_time}s"
         if surrender["by_destruction"] and damage >= target_damage:
             return f"damage {damage}% >= {target_damage}%"
-        if surrender["when_low_loot"] and loot:
+        if surrender["when_low_loot"] and low_loot_confirmations >= 2:
             total = self._loot_total(loot)
-            if total < int(surrender["total_remaining_less_than"]):
+            if total >= 0 and total < int(surrender["total_remaining_less_than"]):
                 return f"remaining loot {total:,} < {int(surrender['total_remaining_less_than']):,}"
         return ""
 
+    def _update_low_loot_confirmations(self, loot: dict[str, int], current: int) -> int:
+        if not self._battle_loot_is_valid(loot):
+            return 0
+        threshold = int(self.config.get("surrender", {}).get("total_remaining_less_than", 0))
+        total = self._loot_total(loot)
+        if threshold <= 0 or total < 0 or total >= threshold:
+            return 0
+        return min(max(0, int(current)) + 1, 2)
+
+    def _battle_loot_is_valid(self, loot: dict[str, int]) -> bool:
+        gold = int(loot.get("gold", -1))
+        elixir = int(loot.get("elixir", -1))
+        if gold < 0 or elixir < 0:
+            return False
+        farm = self.config.get("farm", {})
+        gold_max = int(farm.get("loot_gold_max", 0))
+        elixir_max = int(farm.get("loot_elixir_max", 0))
+        if gold_max > 0 and gold > gold_max:
+            return False
+        if elixir_max > 0 and elixir > elixir_max:
+            return False
+        return True
+
     def _loot_total(self, loot: dict[str, int]) -> int:
-        return max(loot.get("gold", -1), 0) + max(loot.get("elixir", -1), 0)
+        gold = int(loot.get("gold", -1))
+        elixir = int(loot.get("elixir", -1))
+        if gold < 0 or elixir < 0:
+            return -1
+        return gold + elixir
 
     def _deploy_points(self) -> list[list[int]]:
         deploy = self.active_deploy
@@ -1651,10 +1687,7 @@ class FarmBot:
         return self._valid_polygon(self.config.get("deploy", {}).get("deploy_zones", {}).get(view, []))
 
     def _valid_polygon(self, points: Any) -> list[list[int]]:
-        if not isinstance(points, list):
-            return []
-        normalized = [[int(point[0]), int(point[1])] for point in points if isinstance(point, list) and len(point) >= 2]
-        return normalized if len(normalized) >= 3 else []
+        return normalize_polygon(points)
 
     def _random_points_in_polygon(
         self,

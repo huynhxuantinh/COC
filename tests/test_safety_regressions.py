@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import queue
 import subprocess
@@ -18,7 +19,7 @@ from backend.models.schemas import ConfigPayload, SavePointsPayload
 from backend.routers import bot as bot_router
 from backend.services.bot_service import BotService
 from bot import FarmBot
-from config_manager import normalize_config
+from config_manager import DEFAULT_CONFIG, load_config, normalize_config, save_config
 from slot_detector import SlotDetector
 from stats_store import atomic_write_json
 from vision import Vision
@@ -252,6 +253,64 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertEqual(service.status, "Cấu hình đã thay đổi. Quét ADB lại.")
         save.assert_not_called()
 
+    def test_save_config_data_keeps_runtime_state_when_disk_write_fails(self) -> None:
+        service = BotService()
+        original_config = service.get_config()
+        original_revision = service.config_revision
+        original_status = service.status
+        service.adb_ready = True
+        replacement = copy.deepcopy(original_config)
+        replacement["farm"]["gold_min"] = int(original_config["farm"]["gold_min"]) + 1
+
+        with patch("backend.services.bot_service.save_config", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                service.save_config_data(replacement)
+
+        self.assertEqual(service.get_config(), original_config)
+        self.assertEqual(service.config_revision, original_revision)
+        self.assertTrue(service.adb_ready)
+        self.assertEqual(service.status, original_status)
+
+    def test_load_config_recovers_corrupt_primary_from_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            first = normalize_config({})
+            first["farm"]["gold_min"] = 901_001
+            second = copy.deepcopy(first)
+            second["farm"]["gold_min"] = 902_002
+
+            save_config(first, path)
+            save_config(second, path)
+            path.write_text('{"farm": ', encoding="utf-8")
+
+            recovered = load_config(path)
+
+            self.assertEqual(recovered["farm"]["gold_min"], 901_001)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["farm"]["gold_min"], 901_001)
+            self.assertTrue(path.with_name("config.json.bak").exists())
+
+    def test_load_config_recovers_when_atomic_primary_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            config = normalize_config({})
+            config["farm"]["gold_min"] = 903_003
+            save_config(config, path)
+            path.unlink()
+
+            recovered = load_config(path)
+
+            self.assertEqual(recovered["farm"]["gold_min"], 903_003)
+            self.assertTrue(path.exists())
+
+    def test_normalize_config_replaces_user_managed_combo_collection(self) -> None:
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["combos"].pop("Valkyrie")
+
+        normalized = normalize_config(config)
+
+        self.assertNotIn("Valkyrie", normalized["combos"])
+        self.assertEqual(normalize_config(normalized), normalized)
+
     def test_start_bot_rolls_back_when_adb_disappears_after_scan(self) -> None:
         service = BotService()
         service.config_data = normalize_config({})
@@ -363,12 +422,56 @@ class SafetyRegressionTests(unittest.TestCase):
             Image.new("RGB", (40, 40), "white").save(template_dir / "valid.png")
             self.assertTrue(detector.has_usable_template("custom"))
 
+    def test_slot_template_mutations_are_blocked_while_bot_is_running(self) -> None:
+        service = BotService()
+
+        with (
+            patch.object(service, "_bot_running_locked", return_value=True),
+            patch.object(SlotDetector, "save_template_from_base64") as save_template,
+            patch.object(SlotDetector, "delete_template") as delete_template,
+        ):
+            with self.assertRaisesRegex(ValueError, "dừng bot"):
+                service.save_slot_template("dragon", "unused", 100, 100)
+            with self.assertRaisesRegex(ValueError, "dừng bot"):
+                service.delete_slot_template("dragon", "sample.png")
+
+        save_template.assert_not_called()
+        delete_template.assert_not_called()
+
+    def test_slot_template_mutations_clear_detector_cache(self) -> None:
+        service = BotService()
+
+        SlotDetector._template_cache["stale-save"] = object()
+        with (
+            patch.object(
+                SlotDetector,
+                "save_template_from_base64",
+                return_value=Path("saved.png"),
+            ),
+            patch.object(SlotDetector, "template_summary", return_value=[]),
+        ):
+            service.save_slot_template("dragon", "unused", 100, 100)
+        self.assertEqual(SlotDetector._template_cache, {})
+
+        SlotDetector._template_cache["stale-delete"] = object()
+        with (
+            patch.object(
+                SlotDetector,
+                "delete_template",
+                return_value=Path("deleted.png"),
+            ),
+            patch.object(SlotDetector, "template_summary", return_value=[]),
+        ):
+            service.delete_slot_template("dragon", "deleted.png")
+        self.assertEqual(SlotDetector._template_cache, {})
+
     def test_rename_slot_kind_moves_templates_and_all_config_references(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = normalize_config({})
             config["slot_detection"]["template_dir"] = directory
             config["slot_detection"]["kinds"].append("spvalkyrie")
             config["slot_detection"]["count_max_by_kind"]["spvalkyrie"] = 8
+            config["slot_detection"]["count_corrections"]["spvalkyrie"] = {"7": 6}
             config["manual_army"]["counts"]["spvalkyrie"] = 6
             config["coords"]["slots"]["spvalkyrie"] = [170, 810]
             config["deploy"]["sequence"] = [
@@ -395,6 +498,8 @@ class SafetyRegressionTests(unittest.TestCase):
             self.assertIn("super_valkyrie", updated["slot_detection"]["kinds"])
             self.assertNotIn("spvalkyrie", updated["slot_detection"]["kinds"])
             self.assertEqual(updated["slot_detection"]["count_max_by_kind"]["super_valkyrie"], 8)
+            self.assertEqual(updated["slot_detection"]["count_corrections"]["super_valkyrie"], {"7": 6})
+            self.assertNotIn("spvalkyrie", updated["slot_detection"]["count_corrections"])
             self.assertEqual(updated["manual_army"]["counts"]["super_valkyrie"], 6)
             self.assertEqual(updated["coords"]["slots"]["super_valkyrie"], [170, 810])
             self.assertEqual(updated["deploy"]["sequence"][0]["slot"], "super_valkyrie")
@@ -402,6 +507,15 @@ class SafetyRegressionTests(unittest.TestCase):
                 updated["combos"]["Custom"]["deploy"]["sequence"][0]["slot"],
                 "super_valkyrie",
             )
+
+    def test_rename_slot_kind_rejects_reserved_hero_role(self) -> None:
+        service = BotService()
+        original = service.get_config()
+
+        with self.assertRaisesRegex(ValueError, "hero.*hệ thống"):
+            service.rename_slot_kind("hero", "king")
+
+        self.assertEqual(service.get_config(), original)
 
     def test_rename_slot_kind_rolls_back_template_directory_when_save_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -469,6 +583,29 @@ class SafetyRegressionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"Tổng vàng \+ dầu"):
             service._validate_config(config)
 
+    def test_low_loot_surrender_requires_valid_consecutive_frames(self) -> None:
+        bot = self._bare_bot()
+        bot.config["farm"] = {"loot_gold_max": 5_000_000, "loot_elixir_max": 5_000_000}
+        bot.config["surrender"] = {
+            "by_time": False,
+            "by_destruction": False,
+            "when_low_loot": True,
+            "total_remaining_less_than": 200_000,
+        }
+
+        self.assertEqual(bot._loot_total({"gold": -1, "elixir": 100_000}), -1)
+        self.assertEqual(bot._update_low_loot_confirmations({"gold": -1, "elixir": -1}, 0), 0)
+        self.assertEqual(bot._update_low_loot_confirmations({"gold": 80_000, "elixir": 90_000}, 0), 1)
+        self.assertEqual(bot._update_low_loot_confirmations({"gold": 70_000, "elixir": 80_000}, 1), 2)
+        self.assertEqual(bot._update_low_loot_confirmations({"gold": 300_000, "elixir": 100_000}, 2), 0)
+
+        self.assertEqual(bot._surrender_reason(10, 10, {"gold": 80_000, "elixir": 90_000}, 50, 50, 1), "")
+        self.assertIn(
+            "remaining loot",
+            bot._surrender_reason(10, 10, {"gold": 70_000, "elixir": 80_000}, 50, 50, 2),
+        )
+        self.assertEqual(bot._surrender_reason(10, 10, {"gold": -1, "elixir": 80_000}, 50, 50, 2), "")
+
     def test_backend_rejects_unsafe_home_timing_and_damage_values(self) -> None:
         service = BotService.__new__(BotService)
         cases = (
@@ -493,6 +630,22 @@ class SafetyRegressionTests(unittest.TestCase):
                 config = normalize_config({})
                 config["builder_base"]["timing"][key] = 0
                 with self.assertRaisesRegex(ValueError, key):
+                    service._validate_config(config)
+
+    def test_backend_rejects_unsafe_builder_wall_confirmation_settings(self) -> None:
+        service = BotService.__new__(BotService)
+        cases = (
+            ("confirmation_read_attempts", 2, "ít nhất 3 lần"),
+            ("confirmation_min_agree", 1, "mẫu đồng thuận"),
+            ("confirmation_read_delay", -1, "delay đọc hộp xác nhận"),
+            ("spend_verify_tolerance_percent", -1, "tolerance chi tiêu phần trăm"),
+            ("spend_verify_tolerance_absolute", -1, "tolerance chi tiêu tuyệt đối"),
+        )
+        for key, value, message in cases:
+            with self.subTest(key=key):
+                config = normalize_config({})
+                config["builder_base"]["wall_upgrade"][key] = value
+                with self.assertRaisesRegex(ValueError, message):
                     service._validate_config(config)
 
     def test_config_payload_uses_nested_validation_models(self) -> None:
