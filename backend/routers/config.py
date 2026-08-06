@@ -21,6 +21,8 @@ def update_config(payload: ConfigPayload) -> ConfigPayload:
         return ConfigPayload(config=bot_service.save_config_data(config))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"Không thể lưu cấu hình: {exc}") from exc
 
 
 @router.get("/options", response_model=OptionsPayload)

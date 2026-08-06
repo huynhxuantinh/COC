@@ -1047,6 +1047,7 @@
   },
   "attack_timing": {
     "use_default": true,
+    "activate_hero_skill": true,
     "troop_delay_ms": 30,
     "freeze_random_min_ms": 30,
     "freeze_random_max_ms": 250,

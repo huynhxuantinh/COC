@@ -544,6 +544,48 @@ class BuilderBaseTests(unittest.TestCase):
         self.assertTrue(bot.stop_event.is_set())
         self.assertEqual(lifecycle[0][0], "error")
 
+    def test_builder_wall_stops_when_post_upgrade_resources_cannot_be_verified(self) -> None:
+        bot = BuilderBaseBot.__new__(BuilderBaseBot)
+        bot.builder = {
+            "wall_upgrade": {
+                "add1_rounds": 1,
+                "reserve_gold": 5_000_000,
+                "reserve_elixir": 0,
+                "confirmation_read_attempts": 3,
+                "confirmation_min_agree": 2,
+                "coords": {},
+            }
+        }
+        bot.stop_event = threading.Event()
+        bot.attacks_since_wall_upgrade = 0
+        bot.log = lambda _message: None
+        bot._pause_gate = lambda: None
+        bot._read_builder_resources_stable = Mock(
+            side_effect=[{"gold": 6_000_000, "elixir": 0}, None, None]
+        )
+        bot._find_builder_wall_row = lambda _settings: [800, 400]
+        bot._read_builder_wall_cost_stable = lambda _settings, button: 800_000 if button == [980, 700] else -1
+        bot._tap = lambda _point, jitter=0: None
+        bot._sleep = lambda _seconds: None
+        bot._close_builder_wall_ui = lambda: None
+        bot._screencap_png = lambda: b"dialog"
+        bot.vision = Mock()
+        bot.vision.read_wall_confirmation.return_value = {
+            "is_wall_upgrade": True,
+            "currency": "gold",
+            "cost": 800_000,
+        }
+        lifecycle: list[tuple[str, str]] = []
+        bot._notify_lifecycle = lambda event, detail="": lifecycle.append((event, detail))
+
+        result = bot._upgrade_builder_walls()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["reason"], "upgrade_verify_failed")
+        self.assertEqual(bot._read_builder_resources_stable.call_count, 3)
+        self.assertTrue(bot.stop_event.is_set())
+        self.assertEqual(lifecycle[0][0], "error")
+
     def test_result_screen_falls_back_to_green_return_home_button(self) -> None:
         vision = BuilderBaseVision(normalize_config({}))
         image = Image.new("RGB", (1600, 900), "black")

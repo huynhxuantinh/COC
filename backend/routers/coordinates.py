@@ -52,3 +52,5 @@ def save_points(payload: SavePointsPayload) -> ConfigPayload:
         return ConfigPayload(config=bot_service.save_points(payload.target, payload.points, payload.combo_name))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"Không thể lưu cấu hình: {exc}") from exc

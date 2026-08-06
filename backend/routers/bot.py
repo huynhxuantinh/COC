@@ -30,6 +30,8 @@ def start_bot() -> StatusPayload:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"Không thể lưu cấu hình: {exc}") from exc
 
 
 @router.post("/pause-toggle", response_model=StatusPayload)

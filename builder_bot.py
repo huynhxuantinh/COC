@@ -133,7 +133,8 @@ class BuilderBaseBot:
         if self._builder_wall_upgrade_due():
             result = self._upgrade_builder_walls()
             if not result["success"]:
-                self._backoff_builder_wall_upgrade(result["reason"])
+                if not self.stop_event.is_set():
+                    self._backoff_builder_wall_upgrade(result["reason"])
                 return
             if not result.get("continue_cycle", False):
                 return
@@ -988,11 +989,28 @@ class BuilderBaseBot:
 
         self._tap(coords.get("confirm_okay_button", [973, 580]), jitter=0)
         self._sleep(1.2)
-        after = self._read_builder_resources_stable(settings)
-        if not after or after[pay_with] >= resources[pay_with]:
-            self.log("[BUILDER][WALL] Không xác minh được tài nguyên đã giảm sau khi nâng.")
+        after: dict[str, int] | None = None
+        for verify_attempt in range(2):
+            after = self._read_builder_resources_stable(settings)
+            if after and int(after.get(pay_with, -1)) >= 0:
+                break
+            if verify_attempt == 0:
+                self.log("[BUILDER][WALL] Hậu kiểm tài nguyên lỗi, đang đọc lại.")
+                self._sleep(0.5)
+        if not after or int(after.get(pay_with, -1)) < 0:
+            message = (
+                "Không thể xác minh chi tiêu Builder Wall sau khi đã bấm Okay. "
+                "Bot đã dừng để tránh tiếp tục khi ngân sách không rõ ràng."
+            )
+            self.log(f"[BUILDER][WALL][CRITICAL] {message}")
             self._close_builder_wall_ui()
+            self._notify_lifecycle("error", message)
+            self.stop_event.set()
             return {"success": False, "reason": "upgrade_verify_failed"}
+        if after[pay_with] >= resources[pay_with]:
+            self.log("[BUILDER][WALL] Không thấy tài nguyên giảm sau khi nâng.")
+            self._close_builder_wall_ui()
+            return {"success": False, "reason": "upgrade_not_confirmed"}
 
         spent = resources[pay_with] - after[pay_with]
         budget = max(0, resources[pay_with] - int(settings.get(f"reserve_{pay_with}", 0)))

@@ -8,7 +8,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image
 from fastapi import HTTPException
@@ -17,6 +17,8 @@ from pydantic import ValidationError
 from adb_client import ADBClient, ADBError
 from backend.models.schemas import ConfigPayload, SavePointsPayload
 from backend.routers import bot as bot_router
+from backend.routers import config as config_router
+from backend.routers import coordinates as coordinates_router
 from backend.services.bot_service import BotService
 from bot import FarmBot
 from config_manager import DEFAULT_CONFIG, load_config, normalize_config, save_config
@@ -68,6 +70,7 @@ class SafetyRegressionTests(unittest.TestCase):
         bot.pause_event = threading.Event()
         bot.runtime_slots = {}
         bot.manual_slot_counts = {}
+        bot.deployed_hero_centers = []
         bot.config = {
             "coords": {"slots": {}},
             "attack_timing": {"use_default": True},
@@ -420,6 +423,32 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 503)
         self.assertIn("Không thể khởi động bot", raised.exception.detail)
 
+    def test_config_writing_routes_return_503_for_os_errors(self) -> None:
+        cases = (
+            (
+                config_router.bot_service,
+                "save_config_data",
+                lambda: config_router.update_config(ConfigPayload(config={})),
+            ),
+            (
+                coordinates_router.bot_service,
+                "save_points",
+                lambda: coordinates_router.save_points(
+                    SavePointsPayload(target="zone_trenbenphai", points=[(0, 0), (10, 0), (0, 10)])
+                ),
+            ),
+            (bot_router.bot_service, "start_bot", bot_router.start_bot),
+        )
+
+        for service, method, call_route in cases:
+            with self.subTest(method=method):
+                with patch.object(service, method, side_effect=OSError("disk full")):
+                    with self.assertRaises(HTTPException) as raised:
+                        call_route()
+
+                self.assertEqual(raised.exception.status_code, 503)
+                self.assertIn("Không thể lưu cấu hình", raised.exception.detail)
+
     def test_home_stats_preserve_builder_and_unknown_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             stats_path = Path(directory) / "device.json"
@@ -627,6 +656,7 @@ class SafetyRegressionTests(unittest.TestCase):
                 {"center": [740, 810]},
             ]
         }
+        bot.deployed_hero_centers = [[500, 810], [620, 810], [740, 810]]
         taps: list[list[int]] = []
         bot._active_time = lambda: 1.0
         bot._pause_gate = lambda: None
@@ -637,6 +667,64 @@ class SafetyRegressionTests(unittest.TestCase):
         bot._activate_post_deploy_slots(0.0)
 
         self.assertEqual(taps, [[500, 810], [620, 810], [740, 810]])
+
+    def test_manual_hero_deploy_skips_when_detected_icons_are_insufficient(self) -> None:
+        bot = self._bare_bot()
+        bot.config["manual_army"] = {"enabled": True}
+        bot.manual_slot_counts = {"hero": 3}
+        bot.active_deploy = {
+            "strict_slot_counts": True,
+            "sequence": [{"slot": "hero", "count": "all", "max_taps": 4}],
+        }
+        bot.runtime_slots = {"hero": [{"center": [500, 810], "count": 1}]}
+        bot._deploy_points = lambda: [[100, 100]]
+        bot._pause_gate = lambda: None
+        taps: list[list[int]] = []
+        bot._tap = lambda point: taps.append(list(point))
+
+        result = bot._deploy_troops()
+
+        self.assertFalse(result["deployed"])
+        self.assertEqual(result["reason"], "unknown_counts")
+        self.assertEqual(taps, [])
+        self.assertEqual(bot.deployed_hero_centers, [])
+
+    def test_hero_skill_only_activates_heroes_deployed_by_sequence_limit(self) -> None:
+        bot = self._bare_bot()
+        bot.config["manual_army"] = {"enabled": True}
+        bot.config["attack_timing"] = {
+            "activate_hero_skill": True,
+            "hero_skill_min_ms": 0,
+            "hero_skill_max_ms": 0,
+            "hero_search_delay_seconds": 0,
+        }
+        bot.manual_slot_counts = {"hero": 3}
+        bot.active_deploy = {
+            "strict_slot_counts": True,
+            "slot_check_every": 0,
+            "sequence": [{"slot": "hero", "count": 1, "max_taps": 1, "delay": 0}],
+        }
+        bot.runtime_slots = {
+            "hero": [
+                {"center": [500, 810], "count": 1},
+                {"center": [620, 810], "count": 1},
+                {"center": [740, 810], "count": 1},
+            ]
+        }
+        bot._deploy_points = lambda: [[100, 100]]
+        bot._pause_gate = lambda: None
+        bot._sleep = lambda _seconds: None
+        bot._optimized_action_pause = lambda: None
+        bot._active_time = lambda: 1.0
+        taps: list[list[int]] = []
+        bot._tap = lambda point: taps.append(list(point))
+
+        result = bot._deploy_troops()
+        bot._activate_post_deploy_slots(0.0)
+
+        self.assertTrue(result["deployed"])
+        self.assertEqual(bot.deployed_hero_centers, [[500, 810]])
+        self.assertEqual(taps, [[500, 810], [100, 100], [500, 810]])
 
     def test_reserved_hero_skill_can_be_disabled_independently(self) -> None:
         bot = self._bare_bot()
@@ -1191,6 +1279,44 @@ class SafetyRegressionTests(unittest.TestCase):
         self.assertIn((70, 70), bot.adb.taps)
         self.assertTrue(any("[WALL][CRITICAL]" in message for message in bot.log_messages))
         self.assertEqual(close_calls, [True])
+
+    def test_home_wall_stops_when_post_upgrade_resources_cannot_be_verified(self) -> None:
+        bot = self._bare_bot()
+        bot.config["wall_upgrade"] = {
+            "use_add10": False,
+            "add1_rounds": 1,
+            "dry_run": False,
+            "coords": {
+                "builder_icon": [10, 10],
+                "upgrade_more_button": [20, 20],
+                "add1_button": [30, 30],
+                "add10_button": [31, 31],
+                "upgrade_gold_button": [50, 50],
+                "upgrade_elixir_button": [60, 60],
+                "confirm_okay_button": [70, 70],
+                "confirm_cancel_button": [80, 80],
+            },
+        }
+        bot.adb = _ScreenshotADB(b"confirmation")
+        bot.vision = _WallVision(
+            {"is_wall_upgrade": True, "currency": "gold", "cost": 800_000}
+        )
+        bot._sleep = lambda _seconds: None
+        bot._pause_gate = lambda: 0
+        bot._close_wall_popup = lambda: None
+        bot._wall_upgrade_budget = lambda: ("gold", 1_000_000, "", {"gold": 6_000_000, "elixir": 0})
+        bot._find_wall_row = lambda _settings: [100, 100]
+        bot._read_home_resources_stable = Mock(return_value=None)
+        lifecycle: list[tuple[str, str]] = []
+        bot._notify_lifecycle = lambda event, detail="": lifecycle.append((event, detail))
+
+        result = bot._upgrade_walls()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["reason"], "upgrade_verify_failed")
+        self.assertEqual(bot._read_home_resources_stable.call_count, 2)
+        self.assertTrue(bot.stop_event.is_set())
+        self.assertEqual(lifecycle[0][0], "error")
 
     def test_home_wall_row_uses_safe_horizontal_tap_position(self) -> None:
         bot = self._bare_bot()
